@@ -18,13 +18,13 @@ import urllib.request
 import urllib.parse
 from pathlib import Path
 from functools import lru_cache
-from flask import Flask, jsonify, request, render_template_string, abort
+from flask import Flask, jsonify, request, render_template_string, abort, Response, stream_with_context
 
 app = Flask(__name__)
 
-# ── Config (se rellena en main()) ─────────────────────────────────────────────
-DB_PATH      = None
-LFM_API_KEY  = None
+# ── Config (se rellena en main() o via env vars para gunicorn) ───────────────
+DB_PATH      = os.environ.get("DB_PATH") or None
+LFM_API_KEY  = os.environ.get("LASTFM_API_KEY") or None
 CAA          = "https://coverartarchive.org/release-group"
 
 
@@ -74,6 +74,35 @@ def lfm_get(method: str, params: dict) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
+
+def mb_search_release_group(artist: str, album: str) -> dict:
+    """Search MusicBrainz for a release group. Returns {mbid, title, artist, date}."""
+    q = 'artist:"{}" AND release:"{}"'.format(
+        artist.replace('"', ''), album.replace('"', '')
+    )
+    url = ("https://musicbrainz.org/ws/2/release-group?"
+           + urllib.parse.urlencode({"query": q, "fmt": "json", "limit": "1"}))
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "mustlisten/1.0 (https://github.com/HuanPc/escuchowsky)",
+        "Accept": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=12) as r:
+            data = json.loads(r.read())
+        rgs = data.get("release-groups", [])
+        if rgs:
+            rg = rgs[0]
+            ac = rg.get("artist-credit") or []
+            mb_artist = ac[0].get("name", artist) if ac else artist
+            return {
+                "mbid":   rg.get("id", ""),
+                "title":  rg.get("title", album),
+                "artist": mb_artist,
+                "date":   rg.get("first-release-date", ""),
+            }
+    except Exception:
+        pass
+    return {}
 
 
 # ── DB queries ─────────────────────────────────────────────────────────────────
@@ -156,7 +185,10 @@ def get_collection_albums(slug: str) -> list[dict]:
     for i, r in enumerate(rows):
         d = dict(r)
         d["number"] = d["rank"] or (i + 1)
-        d["cover"] = d.get("cover_url") or (f"/api/cover?mbid={d['mbid']}" if d.get("mbid") else "")
+        raw = d.get("cover_url") or ""
+        if raw.startswith("data:"):
+            raw = ""
+        d["cover"] = raw or (f"/api/cover?mbid={d['mbid']}" if d.get("mbid") else "")
         d["genres"] = genres_map.get(d["id"], [])
         result.append(d)
     return result
@@ -172,9 +204,9 @@ def api_collections():
 @app.route("/api/scrobbles")
 def api_scrobbles():
     """
-    Descarga TODOS los scrobbles del usuario de Last.fm de una vez.
-    Devuelve lista de pares [norm_artist, norm_title] para que el cliente
-    haga el cruce localmente sin volver a llamar al servidor al cambiar de lista.
+    Descarga el historial completo via user.getRecentTracks paginado.
+    Responde en formato SSE (text/event-stream) enviando progreso por página
+    y al final el payload completo con todos los pares [norm_artist, norm_title].
     """
     username = request.args.get("user", "").strip()
     if not username:
@@ -182,60 +214,162 @@ def api_scrobbles():
     if not LFM_API_KEY:
         return jsonify({"error": "Last.fm API key no configurada"}), 500
 
-    t0 = time.time()
+    def generate():
+        # (norm_a, norm_t) -> [orig_a, orig_t, count]
+        heard_counts    = {}
+        page            = 1
+        total_pages     = None
+        last_scrobble_ts     = 0
+        last_scrobble_artist = ""
+        last_scrobble_track  = ""
 
-    # Top albums — paginar SIN límite artificial hasta agotar todas las páginas
-    heard_set = set()
-    page = 1
-    per_page = 200
-    total_pages = 1
+        while True:
+            data = lfm_get("user.getRecentTracks", {
+                "user": username, "limit": 200, "page": page,
+            })
+            rt = data.get("recenttracks", {})
+            if "error" in data and not rt:
+                if page == 1:
+                    msg = data.get("message", "Usuario no encontrado en Last.fm")
+                    yield f"data: {json.dumps({'error': msg})}\n\n"
+                    return
+                else:
+                    break  # last.fm error en página tardía → terminar normalmente
+
+            # Update total_pages on every page — take the max in case LFM
+            # undershoots on the first response.
+            attrs = rt.get("@attr", {})
+            try:
+                tp = max(1, int(attrs.get("totalPages", 1)))
+            except (ValueError, TypeError):
+                tp = 1
+            if total_pages is None or tp > total_pages:
+                total_pages = tp
+
+            tracks = rt.get("track", [])
+            if isinstance(tracks, dict):
+                tracks = [tracks]
+            if not tracks:
+                break
+
+            for t in tracks:
+                # saltar la pista en reproducción actual (no tiene fecha)
+                if isinstance(t.get("@attr"), dict) and t["@attr"].get("nowplaying"):
+                    continue
+                artist = t.get("artist", {})
+                artist = artist.get("#text", "") if isinstance(artist, dict) else str(artist)
+                album  = t.get("album", {})
+                album  = album.get("#text", "") if isinstance(album, dict) else str(album)
+                # capturar el scrobble más reciente (primer track real de página 1)
+                if last_scrobble_ts == 0:
+                    d = t.get("date", {})
+                    try:
+                        last_scrobble_ts = int(d.get("uts", 0)) if isinstance(d, dict) else 0
+                    except (ValueError, TypeError):
+                        last_scrobble_ts = 0
+                    last_scrobble_artist = artist
+                    last_scrobble_track  = t.get("name", "")
+                if artist and album:
+                    key = (_norm(artist), _norm(album))
+                    if key not in heard_counts:
+                        heard_counts[key] = [artist, album, 1]
+                    else:
+                        heard_counts[key][2] += 1
+
+            yield f"data: {json.dumps({'page': page, 'total_pages': total_pages, 'count': len(heard_counts)})}\n\n"
+
+            if page >= total_pages:
+                break
+            page += 1
+
+        heard_pairs = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
+        yield f"data: {json.dumps({'done': True, 'user': username, 'count': len(heard_pairs), 'fetched_at': int(time.time()), 'heard': heard_pairs, 'last_scrobble_ts': last_scrobble_ts, 'last_scrobble_artist': last_scrobble_artist, 'last_scrobble_track': last_scrobble_track})}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+@app.route("/api/scrobbles/since")
+def api_scrobbles_since():
+    """
+    Obtiene sólo pistas nuevas desde `since` (Unix timestamp) via getRecentTracks?from=.
+    Ideal para sincronización incremental de usuarios secundarios.
+    """
+    username = request.args.get("user", "").strip()
+    since    = request.args.get("since", "0").strip()
+    if not username:
+        return jsonify({"error": "Parámetro 'user' requerido"}), 400
+    if not LFM_API_KEY:
+        return jsonify({"error": "Last.fm API key no configurada"}), 500
+    try:
+        since = int(since)
+    except ValueError:
+        since = 0
+
+    # (norm_a, norm_t) -> [orig_a, orig_t, count]
+    new_counts          = {}
+    page                = 1
+    total_pages         = 1
+    last_scrobble_ts    = 0
+    last_scrobble_artist = ""
+    last_scrobble_track  = ""
     while page <= total_pages:
-        data = lfm_get("user.getTopAlbums", {
-            "user": username, "period": "overall",
-            "limit": per_page, "page": page,
-        })
-        if "error" in data and "topalbums" not in data:
+        params = {"user": username, "limit": 200, "page": page}
+        if since:
+            params["from"] = since + 1
+        data = lfm_get("user.getRecentTracks", params)
+        rt = data.get("recenttracks", {})
+        if "error" in data and not rt:
             if page == 1:
-                return jsonify({"error": data.get("message", "Usuario no encontrado en Last.fm")}), 404
+                return jsonify({"error": data.get("message", "Usuario no encontrado")}), 404
             break
-        albums = data.get("topalbums", {}).get("album", [])
-        if not albums:
-            break
-        for a in albums:
-            artist = a.get("artist", {})
-            artist = artist.get("name", "") if isinstance(artist, dict) else str(artist)
-            title  = a.get("name", "")
-            if artist and title:
-                heard_set.add((_norm(artist), _norm(title)))
-        attrs = data.get("topalbums", {}).get("@attr", {})
-        total_pages = int(attrs.get("totalPages", 1))
-        page += 1
-
-    # Recent tracks (últimas ~600 para capturar álbumes escuchados muy recientemente
-    # que aún no aparecen en el top)
-    for rpage in range(1, 4):
-        data = lfm_get("user.getRecentTracks", {
-            "user": username, "limit": 200, "page": rpage,
-        })
-        tracks = data.get("recenttracks", {}).get("track", [])
+        tracks = rt.get("track", [])
+        if isinstance(tracks, dict):
+            tracks = [tracks]
         if not tracks:
             break
+        attrs = rt.get("@attr", {})
+        try:
+            tp = max(1, int(attrs.get("totalPages", 1)))
+        except (ValueError, TypeError):
+            tp = 1
+        if tp > total_pages:
+            total_pages = tp
         for t in tracks:
+            if isinstance(t.get("@attr"), dict) and t["@attr"].get("nowplaying"):
+                continue
             artist = t.get("artist", {})
             artist = artist.get("#text", "") if isinstance(artist, dict) else str(artist)
             album  = t.get("album", {})
             album  = album.get("#text", "") if isinstance(album, dict) else str(album)
+            if last_scrobble_ts == 0:
+                d = t.get("date", {})
+                try:
+                    last_scrobble_ts = int(d.get("uts", 0)) if isinstance(d, dict) else 0
+                except (ValueError, TypeError):
+                    last_scrobble_ts = 0
+                last_scrobble_artist = artist
+                last_scrobble_track  = t.get("name", "")
             if artist and album:
-                heard_set.add((_norm(artist), _norm(album)))
+                key = (_norm(artist), _norm(album))
+                if key not in new_counts:
+                    new_counts[key] = [artist, album, 1]
+                else:
+                    new_counts[key][2] += 1
+        page += 1
 
-    fetch_ms = round((time.time() - t0) * 1000)
+    new_pairs = [[k[0], k[1], v[0], v[1], v[2]] for k, v in new_counts.items()]
     return jsonify({
-        "user":       username,
-        "count":      len(heard_set),
-        "fetch_ms":   fetch_ms,
-        "fetched_at": int(time.time()),
-        # Lista de pares [norm_artist, norm_title]
-        "heard":      [list(p) for p in heard_set],
+        "user":                username,
+        "new_pairs":           new_pairs,
+        "count":               len(new_pairs),
+        "fetched_at":          int(time.time()),
+        "last_scrobble_ts":    last_scrobble_ts,
+        "last_scrobble_artist": last_scrobble_artist,
+        "last_scrobble_track": last_scrobble_track,
     })
 
 
@@ -369,6 +503,27 @@ def api_check_user():
     })
 
 
+@app.route("/api/friends")
+def api_friends():
+    """Devuelve la lista de amigos de un usuario de Last.fm."""
+    username = request.args.get("user", "").strip()
+    if not username:
+        return jsonify({"ok": False, "error": "Usuario vacío"}), 400
+    data = lfm_get("user.getFriends", {"user": username, "recenttracks": 0, "limit": 50})
+    if "error" in data:
+        return jsonify({"ok": False, "error": data.get("message", "No se pudieron obtener amigos")})
+    friends_raw = data.get("friends", {}).get("user", [])
+    if isinstance(friends_raw, dict):
+        friends_raw = [friends_raw]
+    friends = []
+    for f in friends_raw:
+        friends.append({
+            "username": f.get("name", ""),
+            "image":    next((i["#text"] for i in f.get("image", []) if i.get("size") == "medium"), ""),
+        })
+    return jsonify({"ok": True, "friends": friends})
+
+
 @app.route("/api/cover")
 def api_cover():
     """
@@ -390,6 +545,107 @@ def api_cover():
         return resp
     except Exception:
         abort(404)
+
+
+@app.route("/api/enrich_albums")
+def api_enrich_albums():
+    """
+    SSE: busca metadatos en MusicBrainz para una lista de [[artist, album], ...].
+    Devuelve un evento por álbum con {i, artist, album, mbid, cover_url, mb_title, mb_artist, date}.
+    Rate limit de MB: 1 req/seg.
+    """
+    raw = request.args.get("albums", "[]")
+    try:
+        albums = json.loads(raw)
+    except Exception:
+        return jsonify({"error": "albums param inválido"}), 400
+    if not isinstance(albums, list):
+        return jsonify({"error": "albums debe ser un array"}), 400
+    albums = [a for a in albums if isinstance(a, list) and len(a) >= 2][:100]
+
+    def generate():
+        for i, pair in enumerate(albums):
+            artist, album = str(pair[0]), str(pair[1])
+            mb = mb_search_release_group(artist, album)
+            mbid = mb.get("mbid", "")
+            result = {
+                "i":         i,
+                "artist":    artist,
+                "album":     album,
+                "mbid":      mbid,
+                "cover_url": f"/api/cover?mbid={mbid}" if mbid else "",
+                "mb_title":  mb.get("title", album),
+                "mb_artist": mb.get("artist", artist),
+                "date":      mb.get("date", ""),
+            }
+            yield f"data: {json.dumps(result)}\n\n"
+            if i < len(albums) - 1:
+                time.sleep(1.1)  # MusicBrainz rate limit: 1 req/sec
+        yield f"data: {json.dumps({'done': True, 'total': len(albums)})}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+@app.route("/api/album_info")
+def api_album_info():
+    """
+    Obtiene info de un álbum desde Last.fm (album.getInfo + artist.getInfo).
+    Si no se provee mbid, busca en MusicBrainz.
+    """
+    artist = request.args.get("artist", "").strip()
+    album  = request.args.get("album",  "").strip()
+    mbid   = request.args.get("mbid",   "").strip()
+    if not artist and not album:
+        return jsonify({"error": "artist/album requeridos"}), 400
+
+    result = {}
+
+    # Last.fm album.getInfo
+    al_params = {"artist": artist, "album": album, "autocorrect": 1}
+    al_data = lfm_get("album.getInfo", al_params)
+    if "album" in al_data:
+        al = al_data["album"]
+        result["lfm"] = {
+            "listeners": al.get("listeners", ""),
+            "playcount":  al.get("playcount",  ""),
+            "tags":  [t["name"] for t in al.get("tags",  {}).get("tag", [])[:6]],
+            "wiki":  (al.get("wiki", {}).get("summary", "") or "").split("<a ")[0].strip(),
+            "image": next((i["#text"] for i in al.get("image", []) if i.get("size") == "extralarge"), ""),
+        }
+        if not mbid and al.get("mbid"):
+            mbid = al["mbid"]
+
+    # Last.fm artist.getInfo
+    ar_data = lfm_get("artist.getInfo", {"artist": artist, "autocorrect": 1})
+    if "artist" in ar_data:
+        ar = ar_data["artist"]
+        result["artist"] = {
+            "bio":       (ar.get("bio", {}).get("summary", "") or "").split("<a ")[0].strip(),
+            "listeners": ar.get("stats", {}).get("listeners", ""),
+            "image":     next((i["#text"] for i in ar.get("image", []) if i.get("size") == "extralarge"), ""),
+        }
+
+    # MusicBrainz si no tenemos MBID
+    if not mbid:
+        mb = mb_search_release_group(artist, album)
+        if mb.get("mbid"):
+            mbid = mb["mbid"]
+            result.update({
+                "mbid":       mbid,
+                "cover_url":  f"/api/cover?mbid={mbid}",
+                "mb_title":   mb.get("title", album),
+                "mb_artist":  mb.get("artist", artist),
+                "date":       mb.get("date", ""),
+            })
+    else:
+        result["mbid"]      = mbid
+        result["cover_url"] = f"/api/cover?mbid={mbid}"
+
+    return jsonify(result)
 
 
 @app.route("/")
@@ -560,28 +816,112 @@ input::placeholder { color: var(--ink3); }
 #badge-date   { font-family: var(--mono); font-size: 0.68rem; color: var(--ink3); }
 .badge-actions { margin-left: auto; display: flex; gap: 0.5rem; align-items: center; }
 
-/* ── Session controls ──────────────────────────────────────────────── */
-#session-bar {
-  display: none;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.55rem 1rem;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
-  margin-bottom: 1.5rem;
-  flex-wrap: wrap;
+/* ── User modal ────────────────────────────────────────────────────── */
+#user-modal-bg {
+  display: none; position: fixed; inset: 0; z-index: 500;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(3px);
+  align-items: flex-start; justify-content: center;
+  padding: 3.5rem 1rem 2rem;
+  overflow-y: auto;
 }
-#session-bar.visible { display: flex; }
-.session-label {
+#user-modal-bg.open { display: flex; }
+#user-modal {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  width: 100%; max-width: 520px;
+  position: relative;
+  animation: modalIn 0.2s ease;
+}
+.um-section {
+  padding: 1.1rem 1.4rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.um-section:last-child { border-bottom: none; }
+.um-section-title {
   font-family: var(--mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
+  font-size: 0.58rem;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink3);
-  margin-right: 0.25rem;
+  margin-bottom: 0.85rem;
 }
+.um-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.55rem; }
+.um-row input { flex: 1; }
+.um-progress {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink3);
+  padding: 0.3rem 0 0.5rem;
+  min-height: 1.4rem;
+}
+#um-current-user {
+  display: none;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  background: var(--bg3);
+  border-radius: var(--radius);
+  margin-bottom: 0.75rem;
+  border-left: 2px solid var(--accent);
+}
+#um-current-user.visible { display: flex; }
+.um-user-name { font-family: var(--mono); font-size: 0.82rem; color: var(--ink); font-weight: 500; flex: 1; }
+.um-user-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--ink3); }
+.um-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
+.um-sep {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin: 0.6rem 0 0.4rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+.idb-empty { font-size: 0.72rem; color: var(--ink3); padding: 0.3rem 0; }
+.idb-entry {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.35rem 0.4rem; border-radius: 4px; font-size: 0.72rem;
+}
+.idb-entry:hover { background: var(--bg3); }
+.idb-entry-info { flex: 1; min-width: 0; }
+.idb-entry-user { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+.idb-entry-meta { color: var(--ink3); font-size: 0.65rem; }
+/* extra users in modal */
+.eu-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; }
+.eu-dot { width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; }
+.eu-avatar { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex-shrink: 0; background: var(--bg3); }
+.eu-name { flex: 1; font-family: var(--mono); font-size: 0.78rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eu-meta { font-family: var(--mono); font-size: 0.65rem; color: var(--ink3); flex-shrink: 0; }
+.eu-del { background: none; border: none; color: var(--ink3); cursor: pointer; font-size: 0.9rem; padding: 0 2px; flex-shrink: 0; }
+.eu-del:hover { color: var(--red); }
+/* Friends list */
+#friends-list { max-height: 220px; overflow-y: auto; scrollbar-width: thin; }
+.fr-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.28rem 0; }
+.fr-avatar { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex-shrink: 0; background: var(--bg3); }
+.fr-name { flex: 1; font-family: var(--mono); font-size: 0.75rem; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fr-add { font-size: 0.65rem; padding: 0.2rem 0.5rem; flex-shrink: 0; }
+.fr-add:disabled { opacity: .45; cursor: default; }
+/* header badge button */
+#btn-usuario {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0.35rem 0.85rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  border: 1px solid var(--border2);
+  background: var(--bg3);
+  color: var(--ink2);
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+#btn-usuario:hover { border-color: var(--accent); color: var(--accent); }
+#btn-usuario.loaded { border-color: var(--accent); color: var(--accent); }
+
 .btn-sm {
   font-family: var(--mono);
   font-size: 0.68rem;
@@ -696,7 +1036,7 @@ input::placeholder { color: var(--ink3); }
   transition: z-index 0s;
   aspect-ratio: 1;
 }
-.card.heard   { background: var(--heard-tint); }
+.card.heard   { background: var(--heard-tint); box-shadow: inset 0 0 0 2px var(--accent); }
 .card.missing { background: var(--missing-tint); }
 
 .card-cover {
@@ -756,14 +1096,50 @@ input::placeholder { color: var(--ink3); }
   padding: 0.1rem 0.3rem;
   border-radius: 1px;
 }
-.badge-heard {
+/* extra-user dots on cards */
+.extra-dots {
   position: absolute; top: 0.4rem; right: 0.4rem;
-  width: 18px; height: 18px;
-  background: var(--accent);
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-end;
 }
-.badge-heard svg { width: 10px; height: 10px; }
+.extra-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  opacity: 0.22; transition: opacity .12s;
+}
+.extra-dot.heard { opacity: 1; box-shadow: 0 0 4px currentColor; }
+
+/* Recommendations panel */
+#rec-panel { display:none; padding: 1.5rem 1rem; }
+#rec-panel.visible { display:block; }
+.rec-info { color: var(--ink2); font-size: 0.83rem; line-height: 1.65; max-width: 560px; }
+.rec-info h3 { color: var(--ink); font-size: 0.9rem; margin: 0 0 0.5rem; text-transform: uppercase; letter-spacing: .05em; }
+.rec-controls { display:flex; align-items:center; gap: 0.75rem; margin: 1rem 0 0.5rem; flex-wrap:wrap; }
+.rec-controls label { display:flex; align-items:center; gap:0.4rem; font-family:var(--mono); font-size:0.78rem; }
+.rec-controls input[type=number] { width:58px; background:var(--bg3); border:1px solid var(--border); color:var(--ink); padding:4px 6px; border-radius:4px; font-family:var(--mono); font-size:0.78rem; }
+.rec-controls button { background:var(--accent); color:#fff; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-family:var(--mono); font-size:0.78rem; }
+.rec-controls button:disabled { opacity:.45; cursor:not-allowed; }
+#rec-progress { font-family:var(--mono); font-size:0.72rem; color:var(--ink3); min-height:1.2em; }
+/* Rec cards */
+.rc-users { display:flex; align-items:center; gap:3px; margin-top:3px; flex-wrap:wrap; }
+.rc-avatar { width:14px; height:14px; border-radius:50%; object-fit:cover; }
+.rc-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.rc-count { font-family:var(--mono); font-size:0.6rem; color:var(--ink3); margin-left:2px; }
+
+/* floating sidebar button (mobile) */
+#sidebar-fab {
+  display: none;
+  position: fixed; bottom: 1.5rem; left: 1rem; z-index: 300;
+  width: 46px; height: 46px; border-radius: 50%;
+  background: var(--accent); color: #0d0d0d; border: none;
+  font-size: 1.15rem; cursor: pointer;
+  align-items: center; justify-content: center;
+  box-shadow: 0 3px 14px rgba(0,0,0,0.55);
+  transition: background 0.15s;
+}
+#sidebar-fab:hover { background: var(--accent2); }
+#sidebar-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.5); z-index: 199;
+}
 
 /* ── Cover placeholder ─────────────────────────────────────────────── */
 .card-placeholder {
@@ -773,108 +1149,142 @@ input::placeholder { color: var(--ink3); }
 }
 .card-placeholder svg { width: 28px; height: 28px; opacity: 0.2; }
 
-/* ── Modal ─────────────────────────────────────────────────────────── */
-#modal-bg {
-  display: none; position: fixed; inset: 0; z-index: 100;
-  background: rgba(0,0,0,0.75);
-  backdrop-filter: blur(4px);
-  align-items: center; justify-content: center;
-  padding: 2rem;
+/* ── Detail side panel ─────────────────────────────────────────────── */
+#detail-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);
+  z-index: 400;
 }
-#modal-bg.open { display: flex; }
-#modal {
-  background: var(--bg2);
-  border: 1px solid var(--border2);
-  border-radius: 4px;
-  max-width: 540px; width: 100%;
-  max-height: 85vh;
-  overflow-y: auto;
-  position: relative;
-  animation: modalIn 0.2s ease;
+#detail-overlay.open { display: block; }
+#detail-panel {
+  position: fixed; right: 0; top: 0; height: 100vh;
+  width: min(440px, 100vw);
+  background: var(--bg2); border-left: 1px solid var(--border2);
+  transform: translateX(100%);
+  transition: transform 0.25s cubic-bezier(.4,0,.2,1);
+  z-index: 401; overflow-y: auto;
+  display: flex; flex-direction: column;
 }
-@keyframes modalIn { from { opacity:0; transform: scale(0.96) translateY(8px); } }
-.modal-header {
-  display: flex; gap: 1.2rem;
-  padding: 1.5rem;
-  border-bottom: 1px solid var(--border);
-}
-.modal-cover {
-  width: 90px; height: 90px; object-fit: cover;
-  border-radius: 2px; flex-shrink: 0;
-  background: var(--bg3);
-}
-.modal-meta { flex: 1; min-width: 0; }
-.modal-title {
-  font-family: var(--serif);
-  font-size: 1.2rem;
-  font-weight: 700;
-  line-height: 1.2;
-  color: var(--ink);
-}
-.modal-artist {
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  color: var(--accent);
-  margin-top: 0.25rem;
-}
-.modal-year {
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  color: var(--ink3);
-  margin-top: 0.15rem;
-}
-.modal-status {
-  display: inline-flex; align-items: center; gap: 0.35rem;
-  margin-top: 0.5rem;
-  font-family: var(--mono);
-  font-size: 0.65rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-.modal-status.heard   { color: var(--accent); }
-.modal-status.missing { color: var(--ink3); }
-.modal-body { padding: 1.2rem 1.5rem 1.5rem; }
-.modal-desc {
-  font-size: 0.85rem;
-  color: var(--ink2);
-  line-height: 1.65;
-  margin-bottom: 1rem;
-}
-.modal-yt {
-  position: relative;
-  width: 100%;
-  padding-bottom: 56.25%;
-  background: #000;
-  border-radius: 2px;
-  overflow: hidden;
-  margin-bottom: 1rem;
-}
-.modal-yt iframe {
-  position: absolute; inset: 0;
-  width: 100%; height: 100%;
-  border: none;
-}
-.modal-links { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.modal-link {
-  font-family: var(--mono);
-  font-size: 0.65rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 0.3rem 0.7rem;
-  border: 1px solid var(--border2);
-  border-radius: var(--radius);
-  color: var(--ink2);
-  text-decoration: none;
-  transition: all 0.12s;
-}
-.modal-link:hover { border-color: var(--accent); color: var(--accent); }
-.modal-close {
-  position: absolute; top: 0.8rem; right: 0.8rem;
+#detail-panel.open { transform: translateX(0); }
+.dp-close {
+  position: absolute; top: 0.75rem; right: 0.75rem;
   background: none; border: none; color: var(--ink3);
   cursor: pointer; font-size: 1.2rem; line-height: 1;
-  padding: 0.2rem 0.4rem;
+  padding: 0.2rem 0.4rem; z-index: 1;
 }
-.modal-close:hover { color: var(--ink); }
+.dp-close:hover { color: var(--ink); }
+.dp-header {
+  display: flex; gap: 1rem; padding: 1.4rem;
+  border-bottom: 1px solid var(--border);
+  padding-right: 2.5rem; flex-shrink: 0;
+}
+.dp-cover {
+  width: 100px; height: 100px; object-fit: cover;
+  border-radius: 2px; flex-shrink: 0; background: var(--bg3);
+}
+.dp-meta { flex: 1; min-width: 0; }
+.dp-title {
+  font-family: var(--serif); font-size: 1.15rem;
+  font-weight: 700; line-height: 1.25; color: var(--ink);
+}
+.dp-artist {
+  font-family: var(--mono); font-size: 0.78rem;
+  color: var(--accent); margin-top: 0.25rem;
+}
+.dp-year { font-family: var(--mono); font-size: 0.7rem; color: var(--ink3); margin-top: 0.15rem; }
+.dp-status {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  margin-top: 0.5rem; font-family: var(--mono);
+  font-size: 0.65rem; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.dp-status.heard   { color: var(--accent); }
+.dp-status.missing { color: var(--ink3); }
+.dp-body { padding: 1.2rem 1.4rem 2rem; flex: 1; }
+.dp-loading { font-family: var(--mono); font-size: 0.72rem; color: var(--ink3); margin-bottom: 0.8rem; }
+.dp-stats {
+  display: flex; gap: 1.5rem; margin-bottom: 0.9rem;
+  font-family: var(--mono); font-size: 0.7rem; color: var(--ink3);
+}
+.dp-stats span b { color: var(--ink2); }
+.dp-tags { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+.dp-tag {
+  font-family: var(--mono); font-size: 0.6rem; letter-spacing: .06em;
+  text-transform: uppercase; padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border2); border-radius: var(--radius); color: var(--ink3);
+}
+.dp-yt {
+  position: relative; width: 100%; padding-bottom: 56.25%;
+  background: #000; border-radius: 2px; overflow: hidden; margin-bottom: 1rem;
+}
+.dp-yt iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
+.dp-section { margin-bottom: 0.9rem; }
+.dp-section-title {
+  font-family: var(--mono); font-size: 0.58rem; letter-spacing: .15em;
+  text-transform: uppercase; color: var(--ink3); margin-bottom: 0.4rem;
+}
+.dp-text { font-size: 0.83rem; color: var(--ink2); line-height: 1.65; }
+.dp-links { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; }
+.dp-link {
+  font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.08em;
+  text-transform: uppercase; padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border2); border-radius: var(--radius);
+  color: var(--ink2); text-decoration: none; transition: all 0.12s;
+}
+.dp-link:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Descubrir section ─────────────────────────────────────────────── */
+#discover-view { display: none; }
+#discover-view.visible { display: block; }
+.discover-nav {
+  display: flex; align-items: center; gap: 1rem;
+  margin-bottom: 1.2rem; flex-wrap: wrap;
+}
+.discover-nav h2 {
+  font-family: var(--serif); font-size: 1.1rem; font-weight: 700; margin: 0;
+}
+.discover-filters {
+  display: flex; gap: 0.4rem; flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+.filter-pill {
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--ink3);
+  font-family: var(--mono); font-size: 0.68rem; padding: 0.22rem 0.65rem;
+  border-radius: 20px; cursor: pointer; transition: border-color .15s, color .15s;
+}
+.filter-pill:hover { border-color: var(--accent); color: var(--ink); }
+.filter-pill.active { border-color: var(--accent); color: var(--accent); background: var(--bg2); }
+#discover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1.2rem;
+}
+.discover-footer {
+  display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  padding: 0.5rem 0; border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+#discover-progress { font-family: var(--mono); font-size: 0.72rem; color: var(--ink3); flex: 1; }
+#btn-discover-more {
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--ink2);
+  font-family: var(--mono); font-size: 0.72rem; padding: 0.35rem 0.9rem;
+  border-radius: var(--radius); cursor: pointer;
+}
+#btn-discover-more:hover { border-color: var(--accent); color: var(--accent); }
+#btn-discover-more:disabled { opacity: .4; cursor: not-allowed; }
+
+
+/* ── Collapsible um-section ────────────────────────────────────────── */
+.um-section-toggle {
+  background: none; border: none; color: var(--ink3); cursor: pointer;
+  font-size: 0.75rem; margin-left: auto; padding: 0 2px;
+  line-height: 1; transition: transform .2s;
+}
+.um-section-body { /* always shown unless .collapsed */ }
+.um-section.collapsed .um-section-body { display: none; }
+.um-section.collapsed .um-section-toggle { transform: rotate(-90deg); }
+
+@keyframes modalIn { from { opacity:0; transform: scale(0.96) translateY(8px); } }
 
 /* ── Loading / Error ───────────────────────────────────────────────── */
 #loading {
@@ -1112,42 +1522,99 @@ input::placeholder { color: var(--ink3); }
 
 /* ── Responsive ────────────────────────────────────────────────────── */
 @media (max-width: 800px) {
-  .app-shell { flex-direction: column; }
-  #sidebar { width: 100%; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
-  .sb-scroll { max-height: 260px; }
+  #sidebar {
+    position: fixed; top: 52px; left: 0; bottom: 0;
+    width: 280px; z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    border-right: 1px solid var(--border2);
+  }
+  #sidebar.mobile-open { transform: translateX(0); }
+  #sidebar-overlay.visible { display: block; }
+  #sidebar-fab { display: flex; }
   #grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+}
+@media (min-width: 801px) {
+  #sidebar-fab { display: none !important; }
+  #sidebar-overlay { display: none !important; }
 }
 </style>
 </head>
 <body>
 
 <!-- ── Header ─────────────────────────────────────────────────────────── -->
-<header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1.2rem;flex-shrink:0;position:relative;z-index:10;">
+<header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:relative;z-index:10;">
   <div class="logo" style="font-size:1.3rem">must<em>listen</em></div>
-  <div style="flex:1;display:flex;align-items:center;gap:0.6rem;">
-    <input id="inp-user" type="text" placeholder="Usuario Last.fm" autocomplete="off" spellcheck="false"
-      style="width:180px;padding:0.4rem 0.7rem;font-size:0.8rem;">
-    <button class="btn" id="btn-go" style="padding:0.4rem 1rem;font-size:0.72rem;">Cargar</button>
-    <button class="btn-sm" id="btn-save-session" style="display:none">↓ Sesión</button>
-    <button class="btn-sm" id="btn-sync-session" style="display:none">↻ Sync</button>
-    <button class="btn-sm" id="btn-import">↑ Importar</button>
-  </div>
-  <div id="badge-inline" style="display:none;align-items:center;gap:0.5rem;">
-    <img id="badge-avatar" src="" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;background:var(--bg3);">
-    <span id="badge-name" style="font-family:var(--mono);font-size:0.75rem;color:var(--ink);"></span>
+  <div style="flex:1"></div>
+  <div id="badge-inline" style="display:none;align-items:center;gap:0.45rem;cursor:pointer;" onclick="openUserModal()">
+    <img id="badge-avatar" src="" alt="" style="width:26px;height:26px;border-radius:50%;object-fit:cover;background:var(--bg3);">
+    <span id="badge-name" style="font-family:var(--mono);font-size:0.75rem;color:var(--accent);"></span>
     <span id="badge-plays" style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3);"></span>
   </div>
+  <button id="btn-usuario" onclick="openUserModal()">USUARIO</button>
 </header>
 
-<input type="file" id="inp-session" accept=".json" style="display:none">
+<input type="file" id="inp-session"       accept=".json" style="display:none">
+<input type="file" id="inp-extra-json"    accept=".json" style="display:none">
 
-<!-- Session bar -->
-<div id="session-bar" style="display:none;align-items:center;gap:0.6rem;padding:0.4rem 1.2rem;background:var(--bg2);border-bottom:1px solid var(--border);flex-wrap:wrap;">
-  <span class="session-label">Sesión guardada:</span>
-  <span id="session-info" style="font-family:var(--mono);font-size:0.72rem;color:var(--ink2);"></span>
-  <button class="btn-sm primary" id="btn-load-session">Cargar</button>
-  <button class="btn-sm" id="btn-discard-session">✕</button>
+<!-- ── User modal ──────────────────────────────────────────────────────── -->
+<div id="user-modal-bg">
+  <div id="user-modal">
+    <button class="modal-close" onclick="closeUserModal()">✕</button>
+
+    <!-- Usuario principal -->
+    <div class="um-section">
+      <div class="um-section-title">Usuario principal</div>
+      <div id="um-current-user">
+        <img id="um-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover;background:var(--bg3);flex-shrink:0">
+        <div style="flex:1;min-width:0">
+          <div class="um-user-name" id="um-username"></div>
+          <div class="um-user-meta" id="um-usermeta"></div>
+        </div>
+        <button class="btn-sm" id="btn-sync-session">↻ Sync</button>
+      </div>
+      <div class="um-row">
+        <input id="inp-user" type="text" placeholder="Usuario Last.fm" autocomplete="off" spellcheck="false">
+        <button class="btn" id="btn-go" style="padding:0.4rem 1rem;font-size:0.72rem;">Last.fm</button>
+      </div>
+      <div class="um-progress" id="um-progress"></div>
+      <div class="um-actions">
+        <button class="btn-sm" id="btn-import">↑ Importar JSON</button>
+        <button class="btn-sm" id="btn-save-session" style="display:none">↓ Guardar JSON</button>
+      </div>
+      <div class="um-sep">Sesiones guardadas en este navegador</div>
+      <div id="idb-list"><span class="idb-empty">Sin sesiones guardadas</span></div>
+    </div>
+
+    <!-- Usuarios adicionales (colapsable) -->
+    <div class="um-section collapsed" id="um-sec-extra">
+      <div class="um-section-title" style="display:flex;align-items:center;cursor:pointer" onclick="toggleUmExtra()">
+        Usuarios secundarios
+        <button class="um-section-toggle" tabindex="-1">▾</button>
+      </div>
+      <div class="um-section-body">
+        <div id="extra-users-list"></div>
+        <div class="um-row" style="margin-top:0.5rem">
+          <input id="inp-extra-user" type="text" placeholder="usuario last.fm" autocomplete="off" spellcheck="false">
+          <button class="btn-sm" id="btn-extra-lfm">Last.fm</button>
+          <button class="btn-sm" id="btn-extra-json">↑ JSON</button>
+        </div>
+        <div class="um-progress" id="um-extra-progress"></div>
+        <div class="um-sep" style="display:flex;align-items:center;justify-content:space-between">
+          Amigos del usuario principal
+          <button class="btn-sm" id="btn-load-friends" style="font-size:0.65rem">Cargar</button>
+        </div>
+        <div id="friends-list"></div>
+        <div id="idb-extra-sep" class="um-sep" style="display:none">Desde sesiones guardadas en este navegador</div>
+        <div id="idb-extra-list"></div>
+      </div>
+    </div>
+  </div>
 </div>
+
+<!-- Mobile sidebar overlay + FAB -->
+<div id="sidebar-overlay" onclick="closeSidebar()"></div>
+<button id="sidebar-fab" onclick="toggleSidebar()">☰</button>
 
 <!-- ── App shell ───────────────────────────────────────────────────────── -->
 <div class="app-shell">
@@ -1193,7 +1660,17 @@ input::placeholder { color: var(--ink3); }
         </div>
       </div>
 
-    </div>
+      <!-- Descubrir (visible when secondary users loaded) -->
+      <div class="sb-panel open" id="panel-discover" style="display:none">
+        <div class="sb-panel-hdr" onclick="togglePanel('panel-discover')">
+          <span class="sb-panel-title">Descubrir</span>
+          <span class="sb-panel-arrow">▶</span>
+        </div>
+        <div class="sb-panel-body" id="discover-users-list"></div>
+      </div>
+
+    </div><!-- .sb-scroll -->
+
   </aside>
 
   <!-- ── Main ──────────────────────────────────────────────────────────── -->
@@ -1242,6 +1719,7 @@ input::placeholder { color: var(--ink3); }
         <button class="filter-btn active" data-filter="all">Todos</button>
         <button class="filter-btn" data-filter="missing">Pendientes</button>
         <button class="filter-btn" data-filter="heard">Escuchados</button>
+        <button class="filter-btn" data-filter="recomendar" id="btn-filter-rec" style="display:none">Recomendados</button>
         <div class="filter-sep"></div>
         <label for="sort-select" style="margin:0">
           <select id="sort-select">
@@ -1253,33 +1731,57 @@ input::placeholder { color: var(--ink3); }
         </label>
       </div>
 
-      <!-- Grid -->
+      <!-- Grid (collection view) -->
       <div id="grid"></div>
       <div id="empty"><p>No hay álbumes para mostrar</p></div>
+
+      <!-- Discover view -->
+      <div id="discover-view">
+        <div class="discover-nav">
+          <button class="btn-sm" onclick="leaveDiscoverMode()">← Colecciones</button>
+          <h2>Descubrir</h2>
+          <span id="discover-count" style="font-family:var(--mono);font-size:0.72rem;color:var(--ink3)"></span>
+        </div>
+        <div class="discover-filters" id="discover-decade-pills"></div>
+        <div id="discover-grid"></div>
+        <div class="discover-footer" id="discover-footer" style="display:none">
+          <span id="discover-progress"></span>
+        </div>
+      </div>
 
     </div><!-- .main-inner -->
   </div><!-- #main -->
 
 </div><!-- .app-shell -->
 
-<!-- Modal -->
-<div id="modal-bg">
-  <div id="modal">
-    <button class="modal-close" id="modal-close">✕</button>
-    <div class="modal-header">
-      <img class="modal-cover" id="m-cover" src="" alt="">
-      <div class="modal-meta">
-        <div class="modal-title"  id="m-title"></div>
-        <div class="modal-artist" id="m-artist"></div>
-        <div class="modal-year"   id="m-year"></div>
-        <div class="modal-status" id="m-status"></div>
-      </div>
+<!-- Detail side panel -->
+<div id="detail-overlay"></div>
+<div id="detail-panel">
+  <button class="dp-close" onclick="closeDetailPanel()">✕</button>
+  <div class="dp-header">
+    <img class="dp-cover" id="dp-cover" src="" alt="">
+    <div class="dp-meta">
+      <div class="dp-title"  id="dp-title"></div>
+      <div class="dp-artist" id="dp-artist"></div>
+      <div class="dp-year"   id="dp-year"></div>
+      <div class="dp-status" id="dp-status"></div>
+      <div id="dp-extra-status" style="display:none;flex-wrap:wrap;gap:5px;margin-top:5px"></div>
     </div>
-    <div class="modal-body">
-      <div class="modal-yt" id="m-yt" style="display:none"></div>
-      <div class="modal-desc" id="m-desc"></div>
-      <div class="modal-links" id="m-links"></div>
+  </div>
+  <div class="dp-body">
+    <div class="dp-loading" id="dp-loading" style="display:none">Consultando Last.fm…</div>
+    <div class="dp-stats"   id="dp-stats"   style="display:none"></div>
+    <div class="dp-tags"    id="dp-tags"></div>
+    <div class="dp-yt"      id="dp-yt"      style="display:none"></div>
+    <div class="dp-section" id="dp-album-wiki" style="display:none">
+      <div class="dp-section-title">Álbum</div>
+      <div class="dp-text" id="dp-wiki-text"></div>
     </div>
+    <div class="dp-section" id="dp-artist-bio" style="display:none">
+      <div class="dp-section-title" id="dp-artist-bio-title"></div>
+      <div class="dp-text" id="dp-bio-text"></div>
+    </div>
+    <div class="dp-links" id="dp-links"></div>
   </div>
 </div>
 
@@ -1294,7 +1796,19 @@ let activeSort     = 'rank';
 let activeGenres   = new Set();
 let activeDecades  = new Set();
 let loadedUser     = null;
-let pendingSession = null;
+
+// extra users for cross-reference / recommendation
+const USER_COLORS = ['#6a9fb5','#78b56c','#b56c6c','#9b6cb5','#b59b6c','#6cb5b5','#b56ca0','#7ab5a0'];
+let extraUsers = [];  // [{user, pairs:[[na,nt,oa,ot,count],...], color, count, fetched_at}]
+
+// discover state
+let discoverMode       = false;
+let discoverCandidates = [];  // all candidates sorted by play count
+let discoverAlbums     = [];  // enriched albums (cumulative)
+let discoverOffset     = 0;   // how many have been sent for enrichment
+let discoverSearching  = false;
+let discoverEs         = null;
+let discoverDecadeFilter = new Set();
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const inpUser    = document.getElementById('inp-user');
@@ -1306,7 +1820,6 @@ const errMsg     = document.getElementById('error-msg');
 const statsBar   = document.getElementById('stats-bar');
 const filtersEl  = document.getElementById('filters');
 const emptyEl    = document.getElementById('empty');
-const sessionBar = document.getElementById('session-bar');
 const inpSession = document.getElementById('inp-session');
 
 // ── Sidebar panel toggle ───────────────────────────────────────────────────
@@ -1314,14 +1827,442 @@ function togglePanel(id) {
   document.getElementById(id).classList.toggle('open');
 }
 
+// ── Mobile sidebar ─────────────────────────────────────────────────────────
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('sidebar-overlay');
+  const isOpen = sb.classList.toggle('mobile-open');
+  ov.classList.toggle('visible', isOpen);
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('mobile-open');
+  document.getElementById('sidebar-overlay').classList.remove('visible');
+}
+
+// ── User modal open/close ──────────────────────────────────────────────────
+function openUserModal() {
+  document.getElementById('user-modal-bg').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  renderIdbList();
+  buildExtraUsersList();
+  renderIdbExtraList();
+}
+function closeUserModal() {
+  document.getElementById('user-modal-bg').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.getElementById('user-modal-bg').addEventListener('click', e => {
+  if (e.target === document.getElementById('user-modal-bg')) closeUserModal();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('user-modal-bg').classList.contains('open')) closeUserModal();
+  }
+});
+
+// ── Extra users (recommendation) ──────────────────────────────────────────
+function saveExtraUsersLS() {
+  localStorage.setItem('ml_extra_users', JSON.stringify(
+    extraUsers.map(u => ({ user: u.user, pairs: u.pairs, color: u.color, count: u.count, fetched_at: u.fetched_at, image: u.image || '' }))
+  ));
+}
+
+function loadExtraUsersLS() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('ml_extra_users') || '[]');
+    for (const u of saved) {
+      if (u.user && u.pairs) extraUsers.push({ ...u, image: u.image || '' });
+    }
+  } catch(e) {}
+}
+
+function buildExtraUsersList() {
+  const list = document.getElementById('extra-users-list');
+  if (!extraUsers.length) { list.innerHTML = ''; }
+  else {
+    list.innerHTML = extraUsers.map((u, i) => {
+      const avatar = u.image
+        ? `<img class="eu-avatar" src="${escH(u.image)}" alt="">`
+        : `<div class="eu-dot" style="background:${u.color}"></div>`;
+      return `<div class="eu-row">
+        ${avatar}
+        <span class="eu-name">${escH(u.user)}</span>
+        <span class="eu-meta">${u.count.toLocaleString()} álb.</span>
+        <button class="btn-sm" onclick="syncExtraUser(${i})" title="Sincronizar">↻</button>
+        <button class="btn-sm" onclick="saveExtraUserJSON(${i})" title="Guardar JSON">↓ JSON</button>
+        <button class="eu-del" onclick="removeExtraUser(${i})" title="Eliminar">✕</button>
+      </div>`;
+    }).join('');
+  }
+
+  const canRec   = extraUsers.length > 0 && heardCache;
+  const hasExtra = extraUsers.length > 0;
+  document.getElementById('btn-filter-rec').style.display = canRec ? '' : 'none';
+
+  // Update sidebar Descubrir panel (visible with any secondary user, even without primary scrobbles)
+  const discPanel = document.getElementById('panel-discover');
+  const discList  = document.getElementById('discover-users-list');
+  discPanel.style.display = hasExtra ? '' : 'none';
+  if (hasExtra) {
+    discList.innerHTML = extraUsers.map((u, i) => {
+      const avatar = u.image
+        ? `<img style="width:16px;height:16px;border-radius:50%;object-fit:cover;flex-shrink:0" src="${escH(u.image)}" alt="">`
+        : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block;flex-shrink:0"></span>`;
+      return `
+        <div class="sb-coll-item" id="disc-user-row-${i}" onclick="selectDiscoverUser(${i})">
+          ${avatar}
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escH(u.user)}</span>
+          <span class="sb-coll-count">${u.count.toLocaleString()}</span>
+        </div>
+        <div class="disc-user-form" id="disc-user-form-${i}" style="display:none">
+          <div style="display:flex;align-items:center;gap:0.4rem;padding:0.4rem 0.9rem 0.4rem 1.6rem">
+            <input type="number" id="disc-limit-${i}" min="5" max="100" value="20"
+              style="width:52px;background:var(--bg3);border:1px solid var(--border);color:var(--ink);padding:3px 5px;border-radius:4px;font-family:var(--mono);font-size:0.72rem">
+            <span style="font-family:var(--mono);font-size:0.68rem;color:var(--ink3)">álbumes</span>
+          </div>
+          <div style="padding:0 0.9rem 0.5rem 1.6rem">
+            <button class="btn-sm primary" style="width:100%" onclick="enterDiscoverMode(${i})">Buscar recomendaciones</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+}
+
+function selectDiscoverUser(i) {
+  // Toggle the inline form; close all others
+  const form = document.getElementById(`disc-user-form-${i}`);
+  const isOpen = form.style.display !== 'none';
+  // Close all forms
+  extraUsers.forEach((_, j) => {
+    const f = document.getElementById(`disc-user-form-${j}`);
+    const r = document.getElementById(`disc-user-row-${j}`);
+    if (f) f.style.display = 'none';
+    if (r) r.classList.remove('active');
+  });
+  if (!isOpen) {
+    form.style.display = '';
+    document.getElementById(`disc-user-row-${i}`).classList.add('active');
+  }
+}
+
+function saveExtraUserJSON(idx) {
+  const u = extraUsers[idx];
+  if (!u) return;
+  const blob = new Blob([JSON.stringify({ version:1, user: u.user, count: u.count, fetched_at: u.fetched_at, heard: u.pairs }, null, 0)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `mustlisten_${u.user}_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+
+async function addExtraUser() {
+  const inp = document.getElementById('inp-extra-user');
+  const prog = document.getElementById('um-extra-progress');
+  const user = inp.value.trim();
+  if (!user) return;
+  if (extraUsers.some(u => u.user.toLowerCase() === user.toLowerCase())) {
+    inp.value = ''; return;
+  }
+  const btn = document.getElementById('btn-extra-lfm');
+  btn.disabled = true; inp.disabled = true;
+  prog.textContent = 'Conectando con Last.fm...';
+  try {
+    const [userInfo, lfmResult] = await Promise.all([
+      fetch(`/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
+      fetchScrobblesSSE(user, msg => {
+        prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+      }),
+    ]);
+    const heard     = lfmResult.heard;
+    const color     = USER_COLORS[extraUsers.length % USER_COLORS.length];
+    const image     = userInfo?.ok ? (userInfo.image || '') : '';
+    const realUser  = userInfo?.ok ? userInfo.username : user;
+    const fetched_at = Math.floor(Date.now()/1000);
+    const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
+    const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
+    const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
+    extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    saveExtraUsersLS();
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    inp.value = '';
+    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes`;
+    if (allAlbums.length) applyCollection();
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false; inp.disabled = false;
+  }
+}
+
+async function syncExtraUser(idx) {
+  const u = extraUsers[idx];
+  if (!u) return;
+  const prog = document.getElementById('um-extra-progress');
+  prog.textContent = `Sincronizando ${u.user}...`;
+  try {
+    const url = `/api/scrobbles/since?user=${encodeURIComponent(u.user)}&since=${u.fetched_at || 0}`;
+    const r = await fetch(url);
+    if (!r.ok) { const t = await r.text(); throw new Error(`Error ${r.status}: ${t.slice(0, 120)}`); }
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    // merge: add only pairs not already present
+    const existing = new Set(u.pairs.map(p => p[0] + '|' + p[1]));
+    const added = data.new_pairs.filter(p => !existing.has(p[0] + '|' + p[1]));
+    extraUsers[idx].pairs      = [...u.pairs, ...added];
+    extraUsers[idx].count      = extraUsers[idx].pairs.length;
+    extraUsers[idx].fetched_at = data.fetched_at;
+    // Update last scrobble info if sync returned newer data
+    if (data.last_scrobble_ts && data.last_scrobble_ts > (extraUsers[idx].last_scrobble_ts || 0)) {
+      extraUsers[idx].last_scrobble_ts     = data.last_scrobble_ts;
+      extraUsers[idx].last_scrobble_artist = data.last_scrobble_artist || '';
+      extraUsers[idx].last_scrobble_track  = data.last_scrobble_track  || '';
+    }
+    saveExtraUsersLS();
+    await idbSave({ user: extraUsers[idx].user, count: extraUsers[idx].count, fetched_at: extraUsers[idx].fetched_at, heard: extraUsers[idx].pairs, last_scrobble_ts: extraUsers[idx].last_scrobble_ts || 0, last_scrobble_artist: extraUsers[idx].last_scrobble_artist || '', last_scrobble_track: extraUsers[idx].last_scrobble_track || '' });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    prog.textContent = `✓ ${u.user}: +${added.length} nuevos (total ${extraUsers[idx].count.toLocaleString()})`;
+    if (allAlbums.length) applyCollection();
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  }
+}
+
+document.getElementById('btn-extra-lfm').addEventListener('click', addExtraUser);
+document.getElementById('inp-extra-user').addEventListener('keydown', e => { if (e.key === 'Enter') addExtraUser(); });
+
+// ── Friends loader ─────────────────────────────────────────────────────────
+document.getElementById('btn-load-friends').addEventListener('click', loadFriends);
+
+async function loadFriends() {
+  const listEl = document.getElementById('friends-list');
+  const btn    = document.getElementById('btn-load-friends');
+  const user   = heardCache?.user || document.getElementById('inp-user').value.trim();
+  if (!user) {
+    listEl.innerHTML = '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Carga primero el usuario principal.</div>';
+    return;
+  }
+  btn.disabled = true;
+  listEl.innerHTML = '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Cargando amigos…</div>';
+  try {
+    const data = await fetch(`/api/friends?user=${encodeURIComponent(user)}`).then(r => r.json());
+    if (!data.ok || !data.friends.length) {
+      listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">${escH(data.error || 'Este usuario no tiene amigos en Last.fm.')}</div>`;
+      return;
+    }
+    renderFriendsList(data.friends);
+  } catch(e) {
+    listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Error: ${escH(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderFriendsList(friends) {
+  const listEl = document.getElementById('friends-list');
+  const alreadyAdded = new Set(extraUsers.map(u => u.user.toLowerCase()));
+  listEl.innerHTML = friends.map(f => {
+    const added = alreadyAdded.has(f.username.toLowerCase());
+    const avatar = f.image
+      ? `<img class="fr-avatar" src="${escH(f.image)}" alt="" onerror="this.style.display='none'">`
+      : `<span class="fr-avatar" style="background:var(--bg3);display:inline-block"></span>`;
+    return `<div class="fr-row" id="fr-row-${escH(f.username.toLowerCase().replace(/[^a-z0-9]/g,''))}">
+      ${avatar}
+      <span class="fr-name">${escH(f.username)}</span>
+      <button class="btn-sm fr-add" ${added ? 'disabled' : ''} onclick="addExtraUserByName('${escH(f.username)}', this)">
+        ${added ? '✓' : 'Añadir'}
+      </button>
+    </div>`;
+  }).join('');
+}
+
+async function addExtraUserByName(username, btn) {
+  if (!username) return;
+  if (extraUsers.some(u => u.user.toLowerCase() === username.toLowerCase())) return;
+  const prog = document.getElementById('um-extra-progress');
+  btn.disabled = true;
+  btn.textContent = '…';
+  prog.textContent = `Cargando ${username}…`;
+  try {
+    const [userInfo, lfmResult] = await Promise.all([
+      fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null),
+      fetchScrobblesSSE(username, msg => {
+        prog.textContent = `${username}: página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+      }),
+    ]);
+    const heard      = lfmResult.heard;
+    const color      = USER_COLORS[extraUsers.length % USER_COLORS.length];
+    const image      = userInfo?.ok ? (userInfo.image || '') : '';
+    const realUser   = userInfo?.ok ? userInfo.username : username;
+    const fetched_at = Math.floor(Date.now()/1000);
+    const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
+    const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
+    const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
+    extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    saveExtraUsersLS();
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    btn.textContent = '✓';
+    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes`;
+    // Refresh friends list so the newly added user shows as already added
+    const frList = document.getElementById('friends-list');
+    if (frList?.children.length) {
+      frList.querySelectorAll('.fr-add').forEach(b => {
+        const row = b.closest('.fr-row');
+        const name = row?.querySelector('.fr-name')?.textContent?.trim() || '';
+        if (extraUsers.some(eu => eu.user.toLowerCase() === name.toLowerCase())) {
+          b.disabled = true;
+          b.textContent = '✓';
+        }
+      });
+    }
+    if (allAlbums.length) applyCollection();
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = 'Añadir';
+    prog.textContent = 'Error: ' + e.message;
+  }
+}
+
+// import extra user from JSON file
+document.getElementById('btn-extra-json').addEventListener('click', () => {
+  document.getElementById('inp-extra-json').click();
+});
+document.getElementById('inp-extra-json').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const prog = document.getElementById('um-extra-progress');
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data.heard || !data.user) throw new Error('Formato inválido');
+    if (extraUsers.some(u => u.user.toLowerCase() === data.user.toLowerCase())) {
+      prog.textContent = `${data.user} ya está en la lista.`; return;
+    }
+    const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
+    const ft = data.fetched_at || 0;
+    extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: ft, image: '' });
+    saveExtraUsersLS();
+    await idbSave({ user: data.user, count: data.heard.length, fetched_at: ft, heard: data.heard });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
+    if (allAlbums.length) applyCollection();
+  } catch(err) {
+    prog.textContent = 'Error: ' + err.message;
+  }
+  e.target.value = '';
+});
+
+function removeExtraUser(idx) {
+  extraUsers.splice(idx, 1);
+  saveExtraUsersLS();
+  buildExtraUsersList();
+  renderIdbExtraList();
+  if (allAlbums.length) applyCollection();
+}
+
+async function renderIdbExtraList() {
+  const sessions = await idbList();
+  const listEl   = document.getElementById('idb-extra-list');
+  const sepEl    = document.getElementById('idb-extra-sep');
+  if (!listEl) return;
+  const primaryUser = heardCache?.user?.toLowerCase();
+  const visible = sessions.filter(s => s.user !== primaryUser);
+  if (!visible.length) { listEl.innerHTML = ''; if (sepEl) sepEl.style.display = 'none'; return; }
+  if (sepEl) sepEl.style.display = '';
+  listEl.innerHTML = visible
+    .sort((a, b) => b.fetched_at - a.fetched_at)
+    .map(s => {
+      const already = extraUsers.some(u => u.user.toLowerCase() === s.user.toLowerCase());
+      const _ts = s.last_scrobble_ts || s.fetched_at;
+      const _lbl = s.last_scrobble_artist ? ` · ${s.last_scrobble_artist} — ${s.last_scrobble_track||''}` : '';
+      return `<div class="idb-entry">
+        <div class="idb-entry-info">
+          <div class="idb-entry-user">${escH(s.user)}</div>
+          <div class="idb-entry-meta">${s.count.toLocaleString()} álb. · ${new Date(_ts*1000).toLocaleDateString()}${escH(_lbl)}</div>
+        </div>
+        ${already
+          ? `<span style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3)">añadido</span>`
+          : `<button class="btn-sm primary" onclick="idbAddAsExtra('${escH(s.user)}')">Añadir</button>`}
+      </div>`;
+    }).join('');
+}
+
+async function idbAddAsExtra(username) {
+  const data = await idbLoad(username);
+  if (!data) return;
+  if (extraUsers.some(u => u.user.toLowerCase() === username.toLowerCase())) return;
+  const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
+  // try to get avatar
+  const userInfo = await fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null);
+  const image = userInfo?.ok ? (userInfo.image || '') : '';
+  extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: data.fetched_at || 0, image });
+  saveExtraUsersLS();
+  buildExtraUsersList();
+  renderIdbExtraList();
+  document.getElementById('um-extra-progress').textContent = `✓ ${data.user} añadido`;
+  if (allAlbums.length) applyCollection();
+}
+
+// ── Helper: consume /api/scrobbles SSE stream ─────────────────────────────
+async function fetchScrobblesSSE(user, onProgress) {
+  const response = await fetch(`/api/scrobbles?user=${encodeURIComponent(user)}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const reader   = response.body.getReader();
+  const decoder  = new TextDecoder();
+  let buffer = '';
+  let result = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop();
+    for (const part of parts) {
+      if (!part.startsWith('data: ')) continue;
+      const msg = JSON.parse(part.slice(6));
+      if (msg.error) throw new Error(msg.error);
+      if (msg.done) result = msg;
+      else onProgress(msg);
+    }
+  }
+  if (!result) throw new Error('No se recibió respuesta del servidor');
+  return result; // {heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, ...}
+}
+
 // ── Init: load collections into sidebar ───────────────────────────────────
 (async () => {
+  loadExtraUsersLS();
+  // Purge extra users from localStorage that are no longer in IDB
+  // (handles manual IDB deletion, browser storage clear, etc.)
+  if (extraUsers.length) {
+    try {
+      const sessions = await idbList();
+      const inIdb = new Set(sessions.map(s => s.user.toLowerCase()));
+      const valid = extraUsers.filter(u => inIdb.has(u.user.toLowerCase()));
+      if (valid.length !== extraUsers.length) {
+        extraUsers.length = 0;
+        valid.forEach(u => extraUsers.push(u));
+        saveExtraUsersLS();
+      }
+    } catch(e) {}
+  }
   try {
     const cols = await fetch('/api/collections').then(r => r.json());
     renderCollsSidebar(cols);
   } catch(e) {
     document.getElementById('colls-body').innerHTML = '<div class="sb-empty">Error cargando</div>';
   }
+  // pre-populate idb lists (so they're ready when modal opens)
+  await renderIdbList();
+  await renderIdbExtraList();
+  buildExtraUsersList();
 })();
 
 function renderCollsSidebar(cols) {
@@ -1430,149 +2371,127 @@ async function selectCollection(slug) {
   });
   activeGenres.clear();
   activeDecades.clear();
+  closeSidebar();
 
-  if (heardCache) {
-    await loadAndRender(slug);
-  }
+  await loadAndRender(slug);
 }
 
-// ── User validation (debounced) ────────────────────────────────────────────
-let userTimer = null;
-inpUser.addEventListener('input', () => {
-  clearTimeout(userTimer);
-  if (heardCache && inpUser.value.trim().toLowerCase() !== loadedUser) {
-    heardCache = null; loadedUser = null;
-    hideUserBadge();
-  }
-  userTimer = setTimeout(() => validateUser(inpUser.value.trim()), 700);
-});
-
-async function validateUser(u) {
-  if (!u || u.length < 2) return;
-  const data = await fetch(`/api/check_user?user=${encodeURIComponent(u)}`).then(r=>r.json()).catch(()=>null);
-  if (!data || !data.ok) return;
-  showUserBadge(data.username, data.image,
-    Number(data.playcount).toLocaleString() + ' scrobbles', null);
+// ── User badge (header) ────────────────────────────────────────────────────
+function showUserBadge(username, img, albumCount, lastTs, lastArtist, lastTrack) {
+  const setAvatar = (el, src) => { el.src = src || ''; el.style.display = src ? '' : 'none'; };
+  setAvatar(document.getElementById('badge-avatar'), img);
+  setAvatar(document.getElementById('um-avatar'),    img);
+  const countStr = typeof albumCount === 'number' ? albumCount.toLocaleString() + ' álb.' : albumCount;
+  const dateStr  = lastTs ? new Date(lastTs * 1000).toLocaleDateString() : '';
+  const lastStr  = (lastArtist && lastTrack) ? `${lastArtist} — ${lastTrack}` : '';
+  const metaStr  = [countStr, dateStr].filter(Boolean).join(' · ');
+  document.getElementById('badge-name').textContent  = username;
+  document.getElementById('badge-plays').textContent = metaStr;
+  document.getElementById('badge-inline').style.display = 'flex';
+  const btnU = document.getElementById('btn-usuario');
+  btnU.textContent = username;
+  btnU.classList.add('loaded');
+  document.getElementById('um-username').textContent = username;
+  document.getElementById('um-usermeta').textContent = lastStr
+    ? `${countStr} · ${dateStr}${lastStr ? ' · ' + lastStr : ''}`
+    : metaStr;
+  document.getElementById('um-current-user').classList.add('visible');
+  document.getElementById('btn-save-session').style.display  = '';
+  document.getElementById('btn-sync-session').textContent    = '↻ Sync';
+}
+function hideUserBadge() {
+  document.getElementById('badge-inline').style.display = 'none';
+  const btnU = document.getElementById('btn-usuario');
+  btnU.textContent = 'USUARIO'; btnU.classList.remove('loaded');
+  document.getElementById('um-current-user').classList.remove('visible');
+  document.getElementById('btn-save-session').style.display = 'none';
 }
 
-function showUserBadge(username, img, plays, fetchedAt) {
-  const bd = document.getElementById('badge-inline');
-  document.getElementById('badge-avatar').src       = img || '';
-  document.getElementById('badge-name').textContent = username;
-  document.getElementById('badge-plays').textContent = plays
-    + (fetchedAt ? ' · ' + new Date(fetchedAt*1000).toLocaleDateString() : '');
-  bd.style.display = 'flex';
-}
-function hideUserBadge() { document.getElementById('badge-inline').style.display = 'none'; }
-
-// ── Session: guardar ───────────────────────────────────────────────────────
+// ── Session: guardar JSON ─────────────────────────────────────────────────
 document.getElementById('btn-save-session').addEventListener('click', () => {
   if (!heardCache) return;
   const blob = new Blob([JSON.stringify({
-    version:    1,
-    user:       heardCache.user,
-    count:      heardCache.count,
-    fetched_at: heardCache.fetched_at,
-    heard:      heardCache.pairs,
+    version: 1, user: heardCache.user, count: heardCache.count,
+    fetched_at: heardCache.fetched_at, heard: heardCache.pairs,
   }, null, 0)], { type: 'application/json' });
   const a = document.createElement('a');
-  a.href     = URL.createObjectURL(blob);
+  a.href = URL.createObjectURL(blob);
   a.download = `mustlisten_${heardCache.user}_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 });
 
-// ── Session: cargar fichero ────────────────────────────────────────────────
+// ── Session: importar JSON ────────────────────────────────────────────────
 document.getElementById('btn-import').addEventListener('click', () => inpSession.click());
-
 inpSession.addEventListener('change', async e => {
   const file = e.target.files[0];
   if (!file) return;
+  const prog = document.getElementById('um-progress');
   try {
     const data = JSON.parse(await file.text());
     if (!data.heard || !data.user) throw new Error('Formato inválido');
-    pendingSession = data;
-    document.getElementById('session-info').textContent =
-      `${data.user} · ${data.heard.length.toLocaleString()} álbumes · ${new Date(data.fetched_at * 1000).toLocaleDateString()}`;
-    sessionBar.classList.add('visible');
-    inpUser.value = data.user;
+    loadHeardCache(data);
+    prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
+    if (activeSlug) { closeUserModal(); await loadAndRender(activeSlug); }
   } catch(err) {
-    showError('Fichero de sesión no válido: ' + err.message);
+    prog.textContent = 'Error: ' + err.message;
   }
   e.target.value = '';
-});
-
-document.getElementById('btn-load-session').addEventListener('click', async () => {
-  if (!pendingSession) return;
-  loadHeardCache(pendingSession);
-  sessionBar.classList.remove('visible');
-  pendingSession = null;
-  // Si hay colección seleccionada, aplicar directamente
-  if (inpColl.value) {
-    await ensureCollection(inpColl.value);
-    applyCollection();
-  }
-});
-
-document.getElementById('btn-discard-session').addEventListener('click', () => {
-  pendingSession = null;
-  sessionBar.classList.remove('visible');
 });
 
 // ── Session: sync incremental ──────────────────────────────────────────────
 document.getElementById('btn-sync-session').addEventListener('click', async () => {
   if (!heardCache) return;
   const btn = document.getElementById('btn-sync-session');
+  const prog = document.getElementById('um-progress');
   btn.disabled = true;
-  btn.textContent = '↻ Sincronizando...';
+  btn.textContent = '↻ ...';
+  prog.textContent = 'Sincronizando con Last.fm...';
   try {
     const knownCount = heardCache.count || 0;
     const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${knownCount}`;
     const data = await fetch(url).then(r => r.json());
-    if (data.error) { showError(data.error); return; }
-
+    if (data.error) { prog.textContent = 'Error: ' + data.error; return; }
     if (data.new_count === 0) {
-      btn.textContent = '✓ Al día';
-      btn.disabled = false;
-      return;
+      prog.textContent = '✓ Al día'; btn.textContent = '↻ Sync'; return;
     }
-
-    // El servidor devuelve el set completo actualizado
     if (data.full_replace) {
       const prev = heardCache.count;
-      heardCache.pairs      = data.heard;
-      heardCache.count      = data.heard.length;
-      heardCache.fetched_at = data.fetched_at;
+      heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
       const added = heardCache.count - prev;
-      document.getElementById('badge-plays').textContent =
-        heardCache.count.toLocaleString() + ' álbumes' + (added > 0 ? ` (+${added} nuevos)` : '');
-      document.getElementById('badge-date').textContent =
-        '· actualizado ' + new Date(data.fetched_at * 1000).toLocaleDateString();
-      if (inpColl.value && collCache[inpColl.value]) applyCollection();
-      btn.textContent = added > 0 ? `✓ +${added} nuevos` : '✓ Al día';
+      showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+      if (activeSlug && collCache[activeSlug]) applyCollection();
+      prog.textContent = added > 0 ? `✓ +${added} álbumes nuevos` : '✓ Al día';
     }
   } catch(e) {
-    showError('Error sincronizando: ' + e.message);
-    btn.textContent = '↻ Sincronizar';
+    prog.textContent = 'Error: ' + e.message;
   } finally {
-    btn.disabled = false;
+    btn.disabled = false; btn.textContent = '↻ Sync';
   }
 });
 
 function loadHeardCache(data) {
   heardCache = {
-    user:       data.user,
-    pairs:      data.heard,
-    count:      data.heard.length,
-    fetched_at: data.fetched_at || 0,
+    user:                data.user,
+    pairs:               data.heard,
+    count:               data.heard.length,
+    fetched_at:          data.fetched_at          || 0,
+    last_scrobble_ts:    data.last_scrobble_ts    || 0,
+    last_scrobble_artist: data.last_scrobble_artist || '',
+    last_scrobble_track: data.last_scrobble_track  || '',
   };
-  loadedUser = data.user.toLowerCase();
+  loadedUser    = data.user.toLowerCase();
   inpUser.value = data.user;
-  showUserBadge(data.user, '', data.heard.length.toLocaleString() + ' álbumes en sesión',
-    data.fetched_at);
-  document.getElementById('btn-save-session').style.display = '';
-  document.getElementById('btn-sync-session').style.display = '';
-  document.getElementById('btn-sync-session').textContent   = '↻ Sincronizar';
+  showUserBadge(data.user, '', data.heard.length, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+  idbSave({
+    user:                heardCache.user,
+    count:               heardCache.count,
+    fetched_at:          heardCache.fetched_at,
+    heard:               heardCache.pairs,
+    last_scrobble_ts:    heardCache.last_scrobble_ts,
+    last_scrobble_artist: heardCache.last_scrobble_artist,
+    last_scrobble_track: heardCache.last_scrobble_track,
+  }).then(() => { renderIdbList(); renderIdbExtraList(); }).catch(() => {});
 }
 
 // ── Fuzzy match (= check_heard Python) ────────────────────────────────────
@@ -1598,20 +2517,27 @@ async function doLoadUser() {
   const user = inpUser.value.trim();
   if (!user) return;
   hideError();
+  const prog = document.getElementById('um-progress');
   btnGo.disabled = true;
   try {
-    if (!heardCache || loadedUser !== user.toLowerCase()) {
-      showLoading('Descargando scrobbles de Last.fm...');
-      hideResults();
-      const sData = await fetch(`/api/scrobbles?user=${encodeURIComponent(user)}`).then(r => r.json());
-      if (sData.error) { showError(sData.error); return; }
-      loadHeardCache(sData);
-    }
-    if (activeSlug) await loadAndRender(activeSlug);
+    prog.textContent = 'Conectando con Last.fm...';
+    hideResults();
+    const result = await fetchScrobblesSSE(user, msg => {
+      prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes únicos`;
+    });
+    loadHeardCache({
+      user, heard: result.heard,
+      fetched_at:          Math.floor(Date.now()/1000),
+      last_scrobble_ts:    result.last_scrobble_ts    || 0,
+      last_scrobble_artist: result.last_scrobble_artist || '',
+      last_scrobble_track: result.last_scrobble_track  || '',
+    });
+    prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados`;
+    if (activeSlug) { closeUserModal(); await loadAndRender(activeSlug); }
+    else closeUserModal();
   } catch(e) {
-    showError('Error de red: ' + e.message);
+    prog.textContent = 'Error: ' + e.message;
   } finally {
-    hideLoading();
     btnGo.disabled = false;
   }
 }
@@ -1636,9 +2562,13 @@ async function loadAndRender(slug) {
 function applyCollection(slug) {
   slug = slug || activeSlug;
   const raw = collCache[slug];
-  if (!raw || !heardCache) return;
+  if (!raw) return;
 
-  allAlbums = raw.map(a => ({ ...a, heard: checkHeard(heardCache.pairs, a.artist, a.title) }));
+  allAlbums = raw.map(a => ({
+    ...a,
+    heard:      heardCache ? checkHeard(heardCache.pairs, a.artist, a.title) : false,
+    extraHeard: extraUsers.map(u => checkHeard(u.pairs, a.artist, a.title)),
+  }));
 
   const heardN   = allAlbums.filter(a => a.heard).length;
   const missingN = allAlbums.length - heardN;
@@ -1652,6 +2582,7 @@ function applyCollection(slug) {
 
   statsBar.classList.add('visible');
   filtersEl.classList.add('visible');
+  buildExtraUsersList(); // updates btn-filter-rec + sb-discover-entry
 
   buildGenrePills();
   buildDecadePills();
@@ -1706,8 +2637,9 @@ function toggleDecade(d) {
 // ── Grid ───────────────────────────────────────────────────────────────────
 function renderGrid() {
   let f = [...allAlbums];
-  if (activeFilter === 'missing') f = f.filter(a => !a.heard);
-  if (activeFilter === 'heard')   f = f.filter(a =>  a.heard);
+  if (activeFilter === 'missing')    f = f.filter(a => !a.heard);
+  if (activeFilter === 'heard')      f = f.filter(a =>  a.heard);
+  if (activeFilter === 'recomendar') f = f.filter(a => !a.heard && a.extraHeard && a.extraHeard.some(Boolean));
   if (activeGenres.size)  f = f.filter(a => (a.genres||[]).some(g => activeGenres.has(g)));
   if (activeDecades.size) f = f.filter(a => a.year && activeDecades.has(Math.floor(a.year/10)*10));
   if (activeSort === 'year_asc')  f.sort((a,b) => (a.year||0)-(b.year||0));
@@ -1718,19 +2650,8 @@ function renderGrid() {
   if (!f.length) { grid.innerHTML = ''; emptyEl.classList.add('visible'); return; }
   emptyEl.classList.remove('visible');
   grid.innerHTML = f.map(a => cardHTML(a)).join('');
-
-  const obs = new IntersectionObserver(entries => {
-    entries.forEach(e => {
-      if (!e.isIntersecting) return;
-      const img = e.target.querySelector('img[data-src]');
-      if (img) { img.src = img.dataset.src; img.removeAttribute('data-src'); }
-      obs.unobserve(e.target);
-    });
-  }, { rootMargin: '300px' });
-
   grid.querySelectorAll('.card').forEach(c => {
-    obs.observe(c);
-    c.addEventListener('click', () => openModal(parseInt(c.dataset.idx)));
+    c.addEventListener('click', () => openDetailPanel({ type:'collection', idx: parseInt(c.dataset.idx) }));
   });
 }
 
@@ -1738,7 +2659,7 @@ function cardHTML(a) {
   const cls  = a.heard ? 'heard' : 'missing';
   const idx  = allAlbums.indexOf(a);
   const imgEl = a.cover
-    ? `<img class="card-cover" data-src="${escH(a.cover)}" src="" alt="${escH(a.title)}"
+    ? `<img class="card-cover" src="${escH(a.cover)}" loading="lazy" alt="${escH(a.title)}"
           onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
     : '';
   const ph = `<div class="card-placeholder" ${a.cover ? 'style="display:none"' : ''}>
@@ -1746,19 +2667,218 @@ function cardHTML(a) {
       <rect x="3" y="3" width="18" height="18" rx="2"/>
       <circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
     </svg></div>`;
-  const tick = a.heard
-    ? `<div class="badge-heard"><svg viewBox="0 0 12 9" fill="none" stroke="#0d0d0d" stroke-width="2"><path d="M1 4l3.5 3.5L11 1"/></svg></div>`
+  const dots = (a.extraHeard && a.extraHeard.length)
+    ? `<div class="extra-dots">${a.extraHeard.map((h, i) =>
+        `<div class="extra-dot${h ? ' heard' : ''}" style="color:${extraUsers[i]?.color||'#fff'};background:${extraUsers[i]?.color||'#fff'}"></div>`
+      ).join('')}</div>`
     : '';
   return `<div class="card ${cls}" data-idx="${idx}">
     ${imgEl}${ph}
     <div class="card-overlay"></div>
-    <div class="card-n">${a.n}</div>${tick}
+    <div class="card-n">${a.n}</div>${dots}
     <div class="card-info">
       <div class="card-title">${escH(a.title)}</div>
       <div class="card-artist">${escH(a.artist)}</div>
       ${a.year ? `<div class="card-year">${a.year}</div>` : ''}
     </div>
   </div>`;
+}
+
+// ── Collapsible secondary users section ──────────────────────────────────
+function toggleUmExtra() {
+  document.getElementById('um-sec-extra').classList.toggle('collapsed');
+}
+
+// ── Discover mode ─────────────────────────────────────────────────────────
+function discoverCardHTML(a, i) {
+  const cover = a.cover_url
+    ? `<img class="card-cover" src="${escH(a.cover_url)}" loading="lazy" alt=""
+          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+    : '';
+  const ph = `<div class="card-placeholder" ${a.cover_url ? 'style="display:none"' : ''}>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+    </svg></div>`;
+  const userBadges = (a.users || []).map(u =>
+    u.image
+      ? `<img class="rc-avatar" src="${escH(u.image)}" title="${escH(u.user)}: ${u.count} plays" alt="">`
+      : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`
+  ).join('');
+  return `<div class="card rec-card" data-disc="${i}" style="cursor:pointer">
+    ${cover}${ph}
+    <div class="card-overlay"></div>
+    <div class="card-info">
+      <div class="card-title">${escH(a.mb_title || a.orig_t)}</div>
+      <div class="card-artist">${escH(a.mb_artist || a.orig_a)}</div>
+      ${a.date ? `<div class="card-year">${escH(a.date.slice(0,4))}</div>` : ''}
+      <div class="rc-users">${userBadges}<span class="rc-count">${a.total} plays</span></div>
+    </div>
+  </div>`;
+}
+
+function renderDiscoverGrid() {
+  const dg = document.getElementById('discover-grid');
+  let filtered = discoverAlbums;
+  if (discoverDecadeFilter.size) {
+    filtered = filtered.filter(a => {
+      const yr = parseInt((a.date || '').slice(0,4));
+      if (!yr) return false;
+      return discoverDecadeFilter.has(Math.floor(yr / 10) * 10);
+    });
+  }
+  dg.innerHTML = filtered.map((a, i) => discoverCardHTML(a, discoverAlbums.indexOf(a))).join('');
+  dg.querySelectorAll('.card[data-disc]').forEach(c => {
+    c.addEventListener('click', () => openDetailPanel({ type: 'discover', idx: parseInt(c.dataset.disc) }));
+  });
+  // Update count label
+  document.getElementById('discover-count').textContent =
+    `${filtered.length} álbumes${discoverCandidates.length > discoverAlbums.length ? ` de ${discoverCandidates.length} candidatos` : ''}`;
+  // Decade pills
+  const decades = new Set();
+  discoverAlbums.forEach(a => {
+    const yr = parseInt((a.date || '').slice(0,4));
+    if (yr) decades.add(Math.floor(yr / 10) * 10);
+  });
+  const pillsEl = document.getElementById('discover-decade-pills');
+  pillsEl.innerHTML = [...decades].sort().map(d =>
+    `<button class="filter-pill${discoverDecadeFilter.has(d) ? ' active' : ''}" data-decade="${d}">${d}s</button>`
+  ).join('');
+  pillsEl.querySelectorAll('.filter-pill').forEach(b => {
+    b.addEventListener('click', () => {
+      const d = parseInt(b.dataset.decade);
+      if (discoverDecadeFilter.has(d)) discoverDecadeFilter.delete(d);
+      else discoverDecadeFilter.add(d);
+      renderDiscoverGrid();
+    });
+  });
+}
+
+function enterDiscoverMode(userIdx) {
+  if (!extraUsers.length) return;
+  const u = extraUsers[userIdx];
+  if (!u) return;
+  const limit = Math.min(100, Math.max(1,
+    parseInt(document.getElementById(`disc-limit-${userIdx}`)?.value || '20')
+  ));
+  discoverMode = true;
+  // Reset state for new search
+  discoverCandidates = [];
+  discoverAlbums     = [];
+  discoverOffset     = 0;
+  discoverDecadeFilter.clear();
+  if (discoverEs) { discoverEs.close(); discoverEs = null; }
+
+  // Primary set: empty if no scrobbles loaded yet (all secondary scrobbles become candidates)
+  const primarySet = heardCache
+    ? new Set(heardCache.pairs.map(p => p[0] + '|' + p[1]))
+    : new Set();
+  const cmap = {};
+  for (const p of u.pairs) {
+    const key = p[0] + '|' + p[1];
+    if (primarySet.has(key)) continue;
+    if (!cmap[key]) {
+      cmap[key] = {
+        norm_a: p[0], norm_t: p[1],
+        orig_a: p[2] || p[0], orig_t: p[3] || p[1],
+        total: 0, users: [],
+      };
+    }
+    const count = p[4] || 1;
+    cmap[key].total += count;
+    cmap[key].users.push({ user: u.user, count, color: u.color, image: u.image || '' });
+  }
+  discoverCandidates = Object.values(cmap).sort((a, b) => b.total - a.total);
+
+  // Apply limit (top N by play count)
+  discoverCandidates = discoverCandidates.slice(0, limit);
+
+  // Show discover view, hide collection view
+  document.getElementById('discover-view').classList.add('visible');
+  document.getElementById('grid').style.display = 'none';
+  document.getElementById('empty').style.display = 'none';
+  statsBar.classList.remove('visible');
+  filtersEl.classList.remove('visible');
+  closeSidebar();
+
+  renderDiscoverGrid();
+  document.getElementById('discover-footer').style.display =
+    discoverCandidates.length > 0 ? '' : 'none';
+  document.getElementById('discover-progress').textContent =
+    discoverCandidates.length
+      ? `Buscando top ${discoverCandidates.length} álbumes de ${escH(u.user)}…`
+      : 'Sin candidatos para este usuario';
+
+  // Load all at once (user chose the limit already)
+  if (discoverCandidates.length) loadMoreDiscover();
+}
+
+function leaveDiscoverMode() {
+  discoverMode = false;
+  if (discoverEs) { discoverEs.close(); discoverEs = null; }
+  document.getElementById('discover-view').classList.remove('visible');
+  document.getElementById('grid').style.display = '';
+  if (activeSlug) {
+    statsBar.classList.add('visible');
+    filtersEl.classList.add('visible');
+  }
+}
+
+function loadMoreDiscover() {
+  if (discoverSearching) return;
+  // Load all remaining candidates (limit was chosen at entry)
+  const batch = discoverCandidates.slice(discoverOffset);
+  if (!batch.length) {
+    document.getElementById('discover-progress').textContent = '✓ No hay más candidatos';
+    return;
+  }
+
+  discoverSearching = true;
+  const prog = document.getElementById('discover-progress');
+  prog.textContent = `Consultando MusicBrainz… (0 / ${batch.length})`;
+  document.getElementById('discover-footer').style.display = '';
+
+  // Append placeholders immediately
+  const startIdx = discoverAlbums.length;
+  batch.forEach(c => discoverAlbums.push({
+    ...c, mbid: '', cover_url: '', mb_title: c.orig_t, mb_artist: c.orig_a, date: ''
+  }));
+  renderDiscoverGrid();
+
+  if (discoverEs) { discoverEs.close(); discoverEs = null; }
+  const albumsParam = encodeURIComponent(JSON.stringify(batch.map(c => [c.orig_a, c.orig_t])));
+  discoverEs = new EventSource(`/api/enrich_albums?albums=${albumsParam}`);
+
+  discoverEs.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.done) {
+      discoverEs.close(); discoverEs = null;
+      discoverOffset += batch.length;
+      discoverSearching = false;
+      prog.textContent = `✓ ${discoverAlbums.length} álbumes encontrados`;
+      renderDiscoverGrid();
+      return;
+    }
+    if (typeof msg.i === 'number' && discoverAlbums[startIdx + msg.i]) {
+      Object.assign(discoverAlbums[startIdx + msg.i], {
+        mbid:      msg.mbid,
+        cover_url: msg.cover_url,
+        mb_title:  msg.mb_title || discoverAlbums[startIdx + msg.i].orig_t,
+        mb_artist: msg.mb_artist || discoverAlbums[startIdx + msg.i].orig_a,
+        date:      msg.date,
+      });
+      renderDiscoverGrid();
+    }
+    prog.textContent = `Consultando MusicBrainz… (${msg.i + 1} / ${batch.length})`;
+  };
+
+  discoverEs.onerror = () => {
+    discoverEs.close(); discoverEs = null;
+    discoverOffset += batch.length;
+    discoverSearching = false;
+    prog.textContent = `✓ ${discoverAlbums.length} álbumes encontrados`;
+    renderDiscoverGrid();
+  };
 }
 
 document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -1774,60 +2894,183 @@ document.getElementById('sort-select').addEventListener('change', e => {
 });
 
 // ── Modal ──────────────────────────────────────────────────────────────────
-function openModal(idx) {
-  const a = allAlbums[idx];
-  if (!a) return;
-
-  document.getElementById('m-cover').src             = a.cover || '';
-  document.getElementById('m-title').textContent      = a.title;
-  document.getElementById('m-artist').textContent     = a.artist;
-  document.getElementById('m-year').textContent       = a.year || '';
-  document.getElementById('m-desc').textContent       = a.desc_lfm_album || a.desc_mb_album || a.desc_lfm_artist || '';
-
-  const st = document.getElementById('m-status');
-  if (a.heard) {
-    st.className = 'modal-status heard';
-    st.innerHTML = `<svg width="10" height="10" viewBox="0 0 12 9" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4l3.5 3.5L11 1"/></svg> Escuchado`;
+// ── Detail side panel ──────────────────────────────────────────────────────
+function openDetailPanel(ref) {
+  // ref: {type:'collection', idx} | {type:'discover', idx}
+  let title, artist, year, cover, mbid, yt_id, heard, extraHeard, descCached;
+  if (ref.type === 'collection') {
+    const a = allAlbums[ref.idx];
+    if (!a) return;
+    title = a.title; artist = a.artist; year = a.year; cover = a.cover;
+    mbid = a.mbid; yt_id = a.yt_id; heard = a.heard; extraHeard = a.extraHeard;
+    descCached = a.desc_lfm_album || a.desc_mb_album || a.desc_lfm_artist || '';
   } else {
-    st.className = 'modal-status missing';
-    st.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg> Pendiente`;
+    const a = discoverAlbums[ref.idx];
+    if (!a) return;
+    title = a.mb_title || a.orig_t; artist = a.mb_artist || a.orig_a;
+    year = a.date ? a.date.slice(0,4) : ''; cover = a.cover_url;
+    mbid = a.mbid; yt_id = ''; heard = false; extraHeard = null;
+    descCached = '';
   }
 
-  // YouTube embed
-  const ytDiv = document.getElementById('m-yt');
-  if (a.yt_id) {
+  // Reset panel
+  const panel = document.getElementById('detail-panel');
+  document.getElementById('dp-loading').style.display = 'none';
+  document.getElementById('dp-stats').style.display   = 'none';
+  document.getElementById('dp-tags').innerHTML        = '';
+  document.getElementById('dp-yt').style.display      = 'none';
+  document.getElementById('dp-yt').innerHTML          = '';
+  document.getElementById('dp-album-wiki').style.display  = 'none';
+  document.getElementById('dp-artist-bio').style.display  = 'none';
+  document.getElementById('dp-links').innerHTML       = '';
+
+  // Cover
+  const dpCover = document.getElementById('dp-cover');
+  if (cover) { dpCover.src = cover; dpCover.style.display = ''; }
+  else        { dpCover.src = ''; dpCover.style.display = 'none'; }
+
+  document.getElementById('dp-title').textContent  = title  || '';
+  document.getElementById('dp-artist').textContent = artist || '';
+  document.getElementById('dp-year').textContent   = year   || '';
+
+  // Status (only for collection albums)
+  const st = document.getElementById('dp-status');
+  if (ref.type === 'collection') {
+    if (heard) {
+      st.className = 'dp-status heard';
+      st.innerHTML = `<svg width="10" height="10" viewBox="0 0 12 9" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4l3.5 3.5L11 1"/></svg> Escuchado`;
+    } else {
+      st.className = 'dp-status missing';
+      st.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg> Pendiente`;
+    }
+    st.style.display = '';
+  } else {
+    st.style.display = 'none';
+  }
+
+  // Extra users status
+  const extraSt = document.getElementById('dp-extra-status');
+  if (ref.type === 'collection' && extraUsers.length && extraHeard) {
+    extraSt.innerHTML = extraUsers.map((u, i) => {
+      const h = extraHeard[i];
+      const icon = u.image
+        ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover;opacity:${h?1:.3}">`
+        : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block;opacity:${h?1:.25}"></span>`;
+      return `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${h?u.color:'var(--ink3)'}">
+        ${icon} ${escH(u.user)}: ${h ? '✓' : '—'}</span>`;
+    }).join('');
+    extraSt.style.display = 'flex';
+  } else if (ref.type === 'discover') {
+    const a = discoverAlbums[ref.idx];
+    if (a?.users?.length) {
+      extraSt.innerHTML = a.users.map(u =>
+        `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
+          ${u.image ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover">` : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block"></span>`}
+          ${escH(u.user)}: ${u.count} plays</span>`
+      ).join('');
+      extraSt.style.display = 'flex';
+    } else { extraSt.innerHTML = ''; extraSt.style.display = 'none'; }
+  } else { extraSt.innerHTML = ''; extraSt.style.display = 'none'; }
+
+  // YouTube
+  if (yt_id) {
+    const ytDiv = document.getElementById('dp-yt');
     ytDiv.style.display = '';
-    ytDiv.innerHTML = `<iframe src="https://www.youtube.com/embed/${escH(a.yt_id)}?rel=0"
+    ytDiv.innerHTML = `<iframe src="https://www.youtube.com/embed/${escH(yt_id)}?rel=0"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
       allowfullscreen></iframe>`;
-  } else {
-    ytDiv.style.display = 'none';
-    ytDiv.innerHTML = '';
+  }
+
+  // Cached description
+  if (descCached) {
+    document.getElementById('dp-wiki-text').textContent = descCached;
+    document.getElementById('dp-album-wiki').style.display = '';
   }
 
   // Links
   const links = [];
-  if (a.mbid)  links.push(`<a class="modal-link" href="https://musicbrainz.org/release-group/${a.mbid}" target="_blank">MusicBrainz</a>`);
-  if (a.yt_id) links.push(`<a class="modal-link" href="https://youtube.com/watch?v=${escH(a.yt_id)}" target="_blank">YouTube ↗</a>`);
-  document.getElementById('m-links').innerHTML = links.join('');
+  if (mbid)  links.push(`<a class="dp-link" href="https://musicbrainz.org/release-group/${mbid}" target="_blank">MusicBrainz</a>`);
+  if (yt_id) links.push(`<a class="dp-link" href="https://youtube.com/watch?v=${escH(yt_id)}" target="_blank">YouTube ↗</a>`);
+  document.getElementById('dp-links').innerHTML = links.join('');
 
-  document.getElementById('modal-bg').classList.add('open');
+  // Open
+  document.getElementById('detail-overlay').classList.add('open');
+  panel.classList.add('open');
   document.body.style.overflow = 'hidden';
+
+  // Fetch LFM + MB info asynchronously
+  fetchAlbumInfo(artist || '', title || '', mbid || '');
 }
 
-document.getElementById('modal-close').addEventListener('click', closeModal);
-document.getElementById('modal-bg').addEventListener('click', e => {
-  if (e.target === document.getElementById('modal-bg')) closeModal();
-});
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
-
-function closeModal() {
-  // Parar YouTube al cerrar
-  const ytDiv = document.getElementById('m-yt');
-  ytDiv.innerHTML = '';
-  ytDiv.style.display = 'none';
-  document.getElementById('modal-bg').classList.remove('open');
+function closeDetailPanel() {
+  document.getElementById('dp-yt').innerHTML = '';
+  document.getElementById('dp-yt').style.display = 'none';
+  document.getElementById('detail-overlay').classList.remove('open');
+  document.getElementById('detail-panel').classList.remove('open');
   document.body.style.overflow = '';
+}
+
+document.getElementById('detail-overlay').addEventListener('click', closeDetailPanel);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('detail-panel').classList.contains('open'))
+    closeDetailPanel();
+});
+
+async function fetchAlbumInfo(artist, album, mbid) {
+  const loading = document.getElementById('dp-loading');
+  loading.style.display = '';
+  try {
+    const p = new URLSearchParams({ artist, album });
+    if (mbid) p.set('mbid', mbid);
+    const data = await fetch(`/api/album_info?${p}`).then(r => r.json());
+    if (data.error) { loading.style.display = 'none'; return; }
+
+    // Better cover if we now have MBID
+    if (data.cover_url) {
+      const dpCover = document.getElementById('dp-cover');
+      if (!dpCover.src || dpCover.src.endsWith('undefined')) {
+        dpCover.src = data.cover_url; dpCover.style.display = '';
+      }
+    }
+
+    // Stats
+    if (data.lfm?.listeners || data.lfm?.playcount) {
+      const s = document.getElementById('dp-stats');
+      s.innerHTML = `<span><b>${parseInt(data.lfm.listeners||0).toLocaleString()}</b> oyentes</span>`
+                  + `<span><b>${parseInt(data.lfm.playcount||0).toLocaleString()}</b> plays globales</span>`;
+      s.style.display = 'flex';
+    }
+
+    // Tags
+    if (data.lfm?.tags?.length) {
+      document.getElementById('dp-tags').innerHTML =
+        data.lfm.tags.map(t => `<span class="dp-tag">${escH(t)}</span>`).join('');
+    }
+
+    // Album wiki
+    if (data.lfm?.wiki) {
+      document.getElementById('dp-wiki-text').textContent = data.lfm.wiki;
+      document.getElementById('dp-album-wiki').style.display = '';
+    }
+
+    // Artist bio
+    if (data.artist?.bio) {
+      document.getElementById('dp-artist-bio-title').textContent = artist;
+      document.getElementById('dp-bio-text').textContent = data.artist.bio;
+      document.getElementById('dp-artist-bio').style.display = '';
+    }
+
+    // Update links if we got a new MBID
+    if (data.mbid) {
+      const existing = document.getElementById('dp-links').innerHTML;
+      if (!existing.includes('musicbrainz')) {
+        document.getElementById('dp-links').innerHTML =
+          `<a class="dp-link" href="https://musicbrainz.org/release-group/${data.mbid}" target="_blank">MusicBrainz</a>`
+          + existing;
+      }
+    }
+  } catch(e) {}
+  loading.style.display = 'none';
 }
 
 // ── UI helpers ─────────────────────────────────────────────────────────────
@@ -1844,6 +3087,123 @@ function hideResults()    {
 }
 function escH(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── IndexedDB ─────────────────────────────────────────────────────────────
+const IDB_NAME  = 'mustlisten';
+const IDB_STORE = 'sessions';
+
+function openIDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE, { keyPath: 'user' });
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+async function idbSave(data) {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put({ ...data, user: data.user.toLowerCase() });
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+async function idbLoad(username) {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(username.toLowerCase());
+    req.onsuccess = e => resolve(e.target.result || null);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+async function idbList() {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).getAll();
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+async function idbDelete(username) {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(username.toLowerCase());
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+// ── IndexedDB list (inside user modal) ───────────────────────────────────
+async function renderIdbList() {
+  const sessions = await idbList();
+  const listEl   = document.getElementById('idb-list');
+  if (!sessions.length) {
+    listEl.innerHTML = '<span class="idb-empty">Sin sesiones guardadas</span>';
+    return;
+  }
+  listEl.innerHTML = sessions
+    .sort((a, b) => b.fetched_at - a.fetched_at)
+    .map(s => {
+      const _ts  = s.last_scrobble_ts || s.fetched_at;
+      const _lbl = s.last_scrobble_artist ? ` · ${s.last_scrobble_artist} — ${s.last_scrobble_track||''}` : '';
+      return `
+      <div class="idb-entry">
+        <div class="idb-entry-info">
+          <div class="idb-entry-user">${escH(s.user)}</div>
+          <div class="idb-entry-meta">${s.count.toLocaleString()} álb. · ${new Date(_ts*1000).toLocaleDateString()}${escH(_lbl)}</div>
+        </div>
+        <button class="btn-sm primary" onclick="idbLoadSession('${escH(s.user)}')">Cargar</button>
+        <button class="btn-sm" onclick="idbDownloadSession('${escH(s.user)}')">↓ JSON</button>
+        <button class="btn-sm" onclick="idbDeleteSession('${escH(s.user)}')">✕</button>
+      </div>`;
+    }).join('');
+}
+
+async function idbLoadSession(username) {
+  const data = await idbLoad(username);
+  if (!data) return;
+  loadHeardCache(data);
+  document.getElementById('um-progress').textContent = `✓ ${data.user} cargado desde BD`;
+  if (activeSlug) { closeUserModal(); await loadAndRender(activeSlug); }
+  else closeUserModal();
+}
+
+async function idbDeleteSession(username) {
+  await idbDelete(username);
+  const lc = username.toLowerCase();
+  // Evict from active heardCache
+  if (heardCache?.user?.toLowerCase() === lc) {
+    heardCache = null;
+    loadedUser = null;
+    inpUser.value = '';
+    hideUserBadge();
+    hideResults();
+  }
+  // Evict from extraUsers + localStorage
+  const idx = extraUsers.findIndex(u => u.user.toLowerCase() === lc);
+  if (idx !== -1) {
+    extraUsers.splice(idx, 1);
+    saveExtraUsersLS();
+    buildExtraUsersList();
+    if (allAlbums.length) applyCollection();
+  }
+  await renderIdbList();
+  await renderIdbExtraList();
+}
+
+function idbDownloadSession(username) {
+  idbLoad(username).then(data => {
+    if (!data) return;
+    const blob = new Blob([JSON.stringify({ version:1, user: data.user, count: data.count, fetched_at: data.fetched_at, heard: data.heard }, null, 0)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `mustlisten_${data.user}_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
 }
 </script>
 </body>
