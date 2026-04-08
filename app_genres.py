@@ -2217,37 +2217,6 @@ function buildExtraUsersList() {
     _updateDiscoverIndicator();
   }
 
-  // Remove old discover-users-list update (replaced by new compact panel)
-  const discList = document.getElementById('discover-users-list');
-  if (discList) discList.innerHTML = '';
-
-  // Update sidebar Descubrir panel (visible with any secondary user, even without primary scrobbles)
-  const discPanel = document.getElementById('panel-discover');
-  const discList  = document.getElementById('discover-users-list');
-  discPanel.style.display = hasExtra ? '' : 'none';
-  if (hasExtra) {
-    discList.innerHTML = extraUsers.map((u, i) => {
-      const avatar = u.image
-        ? `<img style="width:16px;height:16px;border-radius:50%;object-fit:cover;flex-shrink:0" src="${escH(u.image)}" alt="">`
-        : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block;flex-shrink:0"></span>`;
-      return `
-        <div class="sb-coll-item" id="disc-user-row-${i}" onclick="selectDiscoverUser(${i})">
-          ${avatar}
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escH(u.user)}</span>
-          <span class="sb-coll-count">${u.count.toLocaleString()}</span>
-        </div>
-        <div class="disc-user-form" id="disc-user-form-${i}" style="display:none">
-          <div style="display:flex;align-items:center;gap:0.4rem;padding:0.4rem 0.9rem 0.4rem 1.6rem">
-            <input type="number" id="disc-limit-${i}" min="5" max="100" value="20"
-              style="width:52px;background:var(--bg3);border:1px solid var(--border);color:var(--ink);padding:3px 5px;border-radius:4px;font-family:var(--mono);font-size:0.72rem">
-            <span style="font-family:var(--mono);font-size:0.68rem;color:var(--ink3)">álbumes</span>
-          </div>
-          <div style="padding:0 0.9rem 0.5rem 1.6rem">
-            <button class="btn-sm primary" style="width:100%" onclick="enterDiscoverMode(${i})">Buscar recomendaciones</button>
-          </div>
-        </div>`;
-    }).join('');
-  }
 }
 
 function selectDiscoverUser(i) { setActiveDiscoverUser(i); }
