@@ -196,9 +196,26 @@ def get_collection_albums(slug: str) -> list[dict]:
 
 # ── API endpoints ──────────────────────────────────────────────────────────────
 
+def _load_ignore_slugs() -> set:
+    """Reads .collections_ignore — one slug per line, # for comments."""
+    p = Path(__file__).parent / ".collections_ignore"
+    if not p.exists():
+        return set()
+    slugs = set()
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            slugs.add(line)
+    return slugs
+
+
 @app.route("/api/collections")
 def api_collections():
-    return jsonify(get_all_collections())
+    all_colls = get_all_collections()
+    ignore = _load_ignore_slugs()
+    if ignore:
+        all_colls = [c for c in all_colls if c["slug"] not in ignore]
+    return jsonify(all_colls)
 
 
 @app.route("/api/scrobbles")
@@ -645,7 +662,9 @@ def api_album_info():
         result["mbid"]      = mbid
         result["cover_url"] = f"/api/cover?mbid={mbid}"
 
-    return jsonify(result)
+    resp = jsonify(result)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
 
 
 @app.route("/")
@@ -1810,6 +1829,12 @@ let discoverSearching  = false;
 let discoverEs         = null;
 let discoverDecadeFilter = new Set();
 
+// collection load cancellation
+let _loadController = null;
+
+// album info cache (artist|||title → data)
+const albumInfoCache = new Map();
+
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const inpUser    = document.getElementById('inp-user');
 const btnGo      = document.getElementById('btn-go');
@@ -2543,19 +2568,31 @@ async function doLoadUser() {
 }
 
 async function loadAndRender(slug) {
+  // Abort any previous collection load and cancel in-flight image requests
+  if (_loadController) _loadController.abort();
+  _loadController = new AbortController();
+  const signal = _loadController.signal;
+
+  // Clear grid immediately to free browser connections used by old cover images
+  grid.innerHTML = '';
+
   hideError();
   showLoading('Cargando colección...');
   try {
     if (!collCache[slug]) {
-      const cData = await fetch(`/api/collection?slug=${encodeURIComponent(slug)}`).then(r => r.json());
+      const r = await fetch(`/api/collection?slug=${encodeURIComponent(slug)}`, { signal });
+      const cData = await r.json();
       if (cData.error) throw new Error(cData.error);
       collCache[slug] = cData.albums;
     }
-    applyCollection(slug);
+    if (!signal.aborted) {
+      applyCollection(slug);
+      hideLoading();
+    }
   } catch(e) {
-    showError('Error: ' + e.message);
-  } finally {
+    if (e.name === 'AbortError') return;
     hideLoading();
+    showError('Error: ' + e.message);
   }
 }
 
@@ -2990,7 +3027,12 @@ function openDetailPanel(ref) {
   // Links
   const links = [];
   if (mbid)  links.push(`<a class="dp-link" href="https://musicbrainz.org/release-group/${mbid}" target="_blank">MusicBrainz</a>`);
-  if (yt_id) links.push(`<a class="dp-link" href="https://youtube.com/watch?v=${escH(yt_id)}" target="_blank">YouTube ↗</a>`);
+  if (yt_id) {
+    links.push(`<a class="dp-link" href="https://youtube.com/watch?v=${escH(yt_id)}" target="_blank">YouTube ↗</a>`);
+  } else if (artist && title) {
+    const ytQ = encodeURIComponent(`${artist} ${title}`);
+    links.push(`<a class="dp-link" href="https://www.youtube.com/results?search_query=${ytQ}" target="_blank">Buscar YouTube ↗</a>`);
+  }
   document.getElementById('dp-links').innerHTML = links.join('');
 
   // Open
@@ -3016,59 +3058,70 @@ document.addEventListener('keydown', e => {
     closeDetailPanel();
 });
 
+function _applyAlbumInfoToPanel(data, artist) {
+  // Better cover if we now have MBID
+  if (data.cover_url) {
+    const dpCover = document.getElementById('dp-cover');
+    if (!dpCover.src || dpCover.src.endsWith('undefined') || !dpCover.src.includes('/api/cover')) {
+      dpCover.src = data.cover_url; dpCover.style.display = '';
+    }
+  }
+
+  // Stats
+  if (data.lfm?.listeners || data.lfm?.playcount) {
+    const s = document.getElementById('dp-stats');
+    s.innerHTML = `<span><b>${parseInt(data.lfm.listeners||0).toLocaleString()}</b> oyentes</span>`
+                + `<span><b>${parseInt(data.lfm.playcount||0).toLocaleString()}</b> plays globales</span>`;
+    s.style.display = 'flex';
+  }
+
+  // Tags
+  if (data.lfm?.tags?.length) {
+    document.getElementById('dp-tags').innerHTML =
+      data.lfm.tags.map(t => `<span class="dp-tag">${escH(t)}</span>`).join('');
+  }
+
+  // Album wiki
+  if (data.lfm?.wiki) {
+    document.getElementById('dp-wiki-text').textContent = data.lfm.wiki;
+    document.getElementById('dp-album-wiki').style.display = '';
+  }
+
+  // Artist bio
+  if (data.artist?.bio) {
+    document.getElementById('dp-artist-bio-title').textContent = artist;
+    document.getElementById('dp-bio-text').textContent = data.artist.bio;
+    document.getElementById('dp-artist-bio').style.display = '';
+  }
+
+  // Update links if we got a new MBID
+  if (data.mbid) {
+    const existing = document.getElementById('dp-links').innerHTML;
+    if (!existing.includes('musicbrainz')) {
+      document.getElementById('dp-links').innerHTML =
+        `<a class="dp-link" href="https://musicbrainz.org/release-group/${data.mbid}" target="_blank">MusicBrainz</a>`
+        + existing;
+    }
+  }
+}
+
 async function fetchAlbumInfo(artist, album, mbid) {
   const loading = document.getElementById('dp-loading');
   loading.style.display = '';
+  const cacheKey = `${artist}|||${album}`;
   try {
+    // Use in-memory cache to avoid repeated server calls for same album
+    if (albumInfoCache.has(cacheKey)) {
+      _applyAlbumInfoToPanel(albumInfoCache.get(cacheKey), artist);
+      loading.style.display = 'none';
+      return;
+    }
     const p = new URLSearchParams({ artist, album });
     if (mbid) p.set('mbid', mbid);
     const data = await fetch(`/api/album_info?${p}`).then(r => r.json());
     if (data.error) { loading.style.display = 'none'; return; }
-
-    // Better cover if we now have MBID
-    if (data.cover_url) {
-      const dpCover = document.getElementById('dp-cover');
-      if (!dpCover.src || dpCover.src.endsWith('undefined')) {
-        dpCover.src = data.cover_url; dpCover.style.display = '';
-      }
-    }
-
-    // Stats
-    if (data.lfm?.listeners || data.lfm?.playcount) {
-      const s = document.getElementById('dp-stats');
-      s.innerHTML = `<span><b>${parseInt(data.lfm.listeners||0).toLocaleString()}</b> oyentes</span>`
-                  + `<span><b>${parseInt(data.lfm.playcount||0).toLocaleString()}</b> plays globales</span>`;
-      s.style.display = 'flex';
-    }
-
-    // Tags
-    if (data.lfm?.tags?.length) {
-      document.getElementById('dp-tags').innerHTML =
-        data.lfm.tags.map(t => `<span class="dp-tag">${escH(t)}</span>`).join('');
-    }
-
-    // Album wiki
-    if (data.lfm?.wiki) {
-      document.getElementById('dp-wiki-text').textContent = data.lfm.wiki;
-      document.getElementById('dp-album-wiki').style.display = '';
-    }
-
-    // Artist bio
-    if (data.artist?.bio) {
-      document.getElementById('dp-artist-bio-title').textContent = artist;
-      document.getElementById('dp-bio-text').textContent = data.artist.bio;
-      document.getElementById('dp-artist-bio').style.display = '';
-    }
-
-    // Update links if we got a new MBID
-    if (data.mbid) {
-      const existing = document.getElementById('dp-links').innerHTML;
-      if (!existing.includes('musicbrainz')) {
-        document.getElementById('dp-links').innerHTML =
-          `<a class="dp-link" href="https://musicbrainz.org/release-group/${data.mbid}" target="_blank">MusicBrainz</a>`
-          + existing;
-      }
-    }
+    albumInfoCache.set(cacheKey, data);
+    _applyAlbumInfoToPanel(data, artist);
   } catch(e) {}
   loading.style.display = 'none';
 }
