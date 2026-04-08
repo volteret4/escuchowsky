@@ -27,6 +27,10 @@ DB_PATH      = os.environ.get("DB_PATH") or None
 LFM_API_KEY  = os.environ.get("LASTFM_API_KEY") or None
 CAA          = "https://coverartarchive.org/release-group"
 
+# CDNs que bloquean peticiones desde navegadores externos (ORB/CORS)
+# Se descartan para evitar imágenes rotas; se usa CAA por MBID como fallback
+_BLOCKED_COVER_DOMAINS = ("snmc.io", "albumoftheyear.org", "aoty.org")
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -187,7 +191,7 @@ def get_collection_albums(slug: str) -> list[dict]:
         d = dict(r)
         d["number"] = d["rank"] or (i + 1)
         raw = d.get("cover_url") or ""
-        if raw.startswith("data:"):
+        if raw.startswith("data:") or any(dom in raw for dom in _BLOCKED_COVER_DOMAINS):
             raw = ""
         d["cover"] = raw or (f"{CAA}/{d['mbid']}/front-500" if d.get("mbid") else "")
         d["genres"] = genres_map.get(d["id"], [])
