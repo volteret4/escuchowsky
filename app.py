@@ -683,11 +683,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>mustlisten</title>
 <!-- Umami Analytics -->
-<script>
-    defer
-    src="https://cloud.umami.is/script.js"
-    data-website-id="5d84fd6c-0760-4a0c-a2d0-ffabb82179f5"
-</script>
+<script defer src="https://cloud.umami.is/script.js" data-website-id="c8ed5b67-0cf6-4b14-b498-a324fd4371ad"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
