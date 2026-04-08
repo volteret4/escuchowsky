@@ -7,6 +7,7 @@ services:
     restart: unless-stopped
     environment:
       - LASTFM_API_KEY=${LASTFM_API_KEY}
+      - DB_PATH=/app/db/must_hear_rym_new.db
     volumes:
       - ./db:/app/db
     networks:

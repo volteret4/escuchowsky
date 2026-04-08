@@ -117,6 +117,7 @@ def _collection_group(slug: str, name: str) -> str:
         ("pitchfork",        "Pitchfork"),
         ("rym_",             "Rate Your Music"),
         ("rate_your_music",  "Rate Your Music"),
+        ("sputnik_",         "Sputnikmusic"),
         ("sputnikmusic",     "Sputnikmusic"),
         ("resident_advisor", "Resident Advisor"),
         ("rolling_stone",    "Rolling Stone"),
@@ -1526,6 +1527,61 @@ input::placeholder { color: var(--ink3); }
   font-style: italic;
 }
 
+/* ── About button in sidebar ─────────────────────────────────────────── */
+.sb-about-btn {
+  display: block;
+  width: calc(100% - 2rem);
+  margin: 1.25rem 1rem 1rem;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  color: var(--ink3);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: center;
+  transition: color 0.15s, border-color 0.15s;
+}
+.sb-about-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── About modal ─────────────────────────────────────────────────────── */
+#about-overlay {
+  display: none;
+  position: fixed; inset: 0; z-index: 600;
+  background: rgba(0,0,0,0.7);
+  align-items: center;
+  justify-content: center;
+}
+#about-overlay.open { display: flex; }
+#about-modal {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  padding: 2rem;
+  max-width: 560px;
+  width: calc(100% - 2rem);
+  max-height: 80vh;
+  overflow-y: auto;
+  position: relative;
+}
+#about-modal h2 { font-family: var(--serif); font-size: 1.4rem; margin-bottom: 1rem; color: var(--ink); }
+#about-modal h3 {
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--accent); margin: 1.2rem 0 0.4rem;
+}
+#about-modal p, #about-modal li { font-size: 0.85rem; color: var(--ink2); line-height: 1.6; }
+#about-modal ul { padding-left: 1.2rem; margin-top: 0.25rem; }
+#about-modal li { margin-bottom: 0.25rem; }
+.about-close {
+  position: absolute; top: 1rem; right: 1rem;
+  background: none; border: none; color: var(--ink3);
+  font-size: 1.2rem; cursor: pointer; line-height: 1;
+}
+.about-close:hover { color: var(--ink); }
+
 /* ── Main content area ─────────────────────────────────────────────── */
 #main {
   flex: 1;
@@ -1631,6 +1687,48 @@ input::placeholder { color: var(--ink3); }
   </div>
 </div>
 
+<!-- About modal -->
+<div id="about-overlay" onclick="if(event.target===this)closeAboutModal()">
+  <div id="about-modal">
+    <button class="about-close" onclick="closeAboutModal()">✕</button>
+    <h2>mustlisten</h2>
+    <p>Cruza tu historial de <b>Last.fm</b> con listas de álbumes imprescindibles para saber qué te falta escuchar.</p>
+
+    <h3>Primeros pasos</h3>
+    <ul>
+      <li>Introduce tu usuario de Last.fm y pulsa <b>Go</b> para descargar tus scrobbles.</li>
+      <li>Selecciona una <b>colección</b> en el panel izquierdo para ver qué álbumes has escuchado (dorado) y cuáles te faltan.</li>
+      <li>Usa los filtros de la barra superior para ver solo los escuchados, los pendientes o los recomendados.</li>
+    </ul>
+
+    <h3>Filtros y ordenación</h3>
+    <ul>
+      <li>Filtra por <b>género</b> o por <b>década</b> en el panel lateral.</li>
+      <li>Ordena por posición en la lista, año o artista.</li>
+    </ul>
+
+    <h3>Panel de detalles</h3>
+    <ul>
+      <li>Haz clic en cualquier portada para ver estadísticas de Last.fm, tags, descripción del álbum y bio del artista.</li>
+      <li>Enlace directo a MusicBrainz y YouTube (o búsqueda si no hay ID guardado).</li>
+    </ul>
+
+    <h3>Usuarios secundarios</h3>
+    <ul>
+      <li>Añade amigos desde el botón <b>Usuario</b> → sección <i>Usuarios secundarios</i>.</li>
+      <li>Los puntos de colores en las portadas indican si ese usuario ha escuchado el álbum.</li>
+      <li>Usa el panel <b>Descubrir</b> para ver qué álbumes recomienda un usuario secundario que tú aún no has escuchado.</li>
+      <li>Puedes cargar la lista de amigos de tu usuario principal para añadirlos rápidamente.</li>
+    </ul>
+
+    <h3>Sesiones</h3>
+    <ul>
+      <li>Los scrobbles se guardan en <b>IndexedDB</b> del navegador: la próxima vez no hace falta re-descargar.</li>
+      <li>Exporta / importa sesiones como JSON o sincroniza incrementalmente con el botón <b>↻ Sync</b>.</li>
+    </ul>
+  </div>
+</div>
+
 <!-- Mobile sidebar overlay + FAB -->
 <div id="sidebar-overlay" onclick="closeSidebar()"></div>
 <button id="sidebar-fab" onclick="toggleSidebar()">☰</button>
@@ -1687,6 +1785,9 @@ input::placeholder { color: var(--ink3); }
         </div>
         <div class="sb-panel-body" id="discover-users-list"></div>
       </div>
+
+      <!-- About -->
+      <button class="sb-about-btn" onclick="openAboutModal()">about</button>
 
     </div><!-- .sb-scroll -->
 
@@ -1863,6 +1964,20 @@ function closeSidebar() {
   document.getElementById('sidebar').classList.remove('mobile-open');
   document.getElementById('sidebar-overlay').classList.remove('visible');
 }
+
+// ── About modal ───────────────────────────────────────────────────────────
+function openAboutModal() {
+  document.getElementById('about-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeAboutModal() {
+  document.getElementById('about-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('about-overlay').classList.contains('open'))
+    closeAboutModal();
+});
 
 // ── User modal open/close ──────────────────────────────────────────────────
 function openUserModal() {
