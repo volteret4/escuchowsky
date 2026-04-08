@@ -189,7 +189,7 @@ def get_collection_albums(slug: str) -> list[dict]:
         raw = d.get("cover_url") or ""
         if raw.startswith("data:"):
             raw = ""
-        d["cover"] = raw or (f"/api/cover?mbid={d['mbid']}" if d.get("mbid") else "")
+        d["cover"] = raw or (f"{CAA}/{d['mbid']}/front-500" if d.get("mbid") else "")
         d["genres"] = genres_map.get(d["id"], [])
         result.append(d)
     return result
@@ -545,8 +545,9 @@ def api_friends():
 @app.route("/api/cover")
 def api_cover():
     """
-    Proxy para portadas de CoverArtArchive (CAA devuelve redirects que los
-    navegadores no siguen en cross-origin). Sigue el redirect y devuelve la imagen.
+    Proxy legacy para portadas de CoverArtArchive.
+    La app ya usa URLs directas de CAA en <img>; este endpoint se mantiene
+    por compatibilidad con sesiones guardadas que aún tengan /api/cover URLs.
     """
     mbid = request.args.get("mbid", "").strip()
     if not mbid or not re.match(r'^[a-f0-9-]{36}$', mbid):
@@ -591,7 +592,7 @@ def api_enrich_albums():
                 "artist":    artist,
                 "album":     album,
                 "mbid":      mbid,
-                "cover_url": f"/api/cover?mbid={mbid}" if mbid else "",
+                "cover_url": f"{CAA}/{mbid}/front-500" if mbid else "",
                 "mb_title":  mb.get("title", album),
                 "mb_artist": mb.get("artist", artist),
                 "date":      mb.get("date", ""),
@@ -654,14 +655,14 @@ def api_album_info():
             mbid = mb["mbid"]
             result.update({
                 "mbid":       mbid,
-                "cover_url":  f"/api/cover?mbid={mbid}",
+                "cover_url":  f"{CAA}/{mbid}/front-500",
                 "mb_title":   mb.get("title", album),
                 "mb_artist":  mb.get("artist", artist),
                 "date":       mb.get("date", ""),
             })
     else:
         result["mbid"]      = mbid
-        result["cover_url"] = f"/api/cover?mbid={mbid}"
+        result["cover_url"] = f"{CAA}/{mbid}/front-500"
 
     resp = jsonify(result)
     resp.headers["Cache-Control"] = "public, max-age=3600"
@@ -3177,7 +3178,7 @@ function _applyAlbumInfoToPanel(data, artist) {
   // Better cover if we now have MBID
   if (data.cover_url) {
     const dpCover = document.getElementById('dp-cover');
-    if (!dpCover.src || dpCover.src.endsWith('undefined') || !dpCover.src.includes('/api/cover')) {
+    if (!dpCover.src || dpCover.src.endsWith('undefined') || dpCover.src.includes('undefined')) {
       dpCover.src = data.cover_url; dpCover.style.display = '';
     }
   }
