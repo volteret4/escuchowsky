@@ -1549,6 +1549,46 @@ input::placeholder { color: var(--ink3); }
   font-style: italic;
 }
 
+/* ── Discover compact controls ───────────────────────────────────────────── */
+.disc-controls {
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0.5rem 0.9rem 0.4rem;
+}
+.disc-controls input[type=number] {
+  width: 46px; background: var(--bg3); border: 1px solid var(--border);
+  color: var(--ink); padding: 3px 4px; border-radius: 3px;
+  font-family: var(--mono); font-size: 0.7rem; text-align: center;
+}
+.disc-controls select {
+  flex: 1; background: var(--bg3); border: 1px solid var(--border);
+  color: var(--ink); padding: 3px 4px; border-radius: 3px;
+  font-family: var(--mono); font-size: 0.7rem;
+}
+#disc-play-btn {
+  width: 26px; height: 22px; background: var(--accent); color: var(--bg);
+  border: none; border-radius: 3px; cursor: pointer; font-size: 0.6rem;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+#disc-play-btn:hover { background: var(--accent2); }
+#disc-user-indicator {
+  padding: 0 0.9rem 0.5rem;
+  font-family: var(--mono); font-size: 0.62rem; color: var(--ink3);
+  display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap;
+}
+#disc-user-indicator .disc-ind-user {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 6px 1px 3px; border-radius: 10px;
+  border: 1px solid var(--border2); cursor: pointer;
+}
+#disc-user-indicator .disc-ind-user.active { border-color: var(--accent); color: var(--accent); }
+
+/* ── Per-user filter buttons ─────────────────────────────────────────────── */
+#filter-extra-users { display: contents; }
+.filter-btn-user img, .filter-btn-user .fbu-dot {
+  width: 12px; height: 12px; border-radius: 50%; object-fit: cover;
+  vertical-align: middle; margin-right: 2px;
+}
+
 /* ── Secondary users bar (above chart grid) ─────────────────────────────── */
 #secondary-bar {
   display: flex;
@@ -1597,6 +1637,26 @@ input::placeholder { color: var(--ink3); }
 .card-genre.depth-1 { color: var(--accent); }
 .card-genre.depth-2 { color: rgba(255,255,255,0.5); }
 .card-genre.depth-3 { color: rgba(255,255,255,0.3); }
+
+/* ── Discover artist card ────────────────────────────────────────────── */
+.disc-artist-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface2);
+  min-height: 140px;
+}
+.disc-artist-icon {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 0.5rem;
+}
+.disc-artist-icon svg { width: 28px; height: 28px; stroke: var(--ink3); }
+.disc-artist-card .card-info { position: static; padding: 0; background: none; text-align: center; }
+.disc-artist-card .card-title { font-size: 0.72rem; }
 
 /* ── About button in sidebar ─────────────────────────────────────────── */
 .sb-about-btn {
@@ -1811,6 +1871,25 @@ input::placeholder { color: var(--ink3); }
   <aside id="sidebar">
     <div class="sb-scroll">
 
+      <!-- Descubrir (visible when secondary users loaded) -->
+      <div class="sb-panel open" id="panel-discover" style="display:none">
+        <div class="sb-panel-hdr" onclick="togglePanel('panel-discover')">
+          <span class="sb-panel-title">Descubrir</span>
+          <span class="sb-panel-arrow">▶</span>
+        </div>
+        <div class="sb-panel-body">
+          <div class="disc-controls">
+            <input type="number" id="disc-limit-global" min="5" max="100" value="20">
+            <select id="disc-mode-select">
+              <option value="albums">Álbumes</option>
+              <option value="artists">Artistas</option>
+            </select>
+            <button id="disc-play-btn" onclick="triggerDiscover()" title="Descubrir">▶</button>
+          </div>
+          <div id="disc-user-indicator"></div>
+        </div>
+      </div>
+
       <!-- Géneros (árbol de RYM charts) -->
       <div class="sb-panel open" id="panel-colls">
         <div class="sb-panel-hdr" onclick="togglePanel('panel-colls')">
@@ -1833,15 +1912,6 @@ input::placeholder { color: var(--ink3); }
             <div class="sb-empty">Selecciona una colección</div>
           </div>
         </div>
-      </div>
-
-      <!-- Descubrir (visible when secondary users loaded) -->
-      <div class="sb-panel open" id="panel-discover" style="display:none">
-        <div class="sb-panel-hdr" onclick="togglePanel('panel-discover')">
-          <span class="sb-panel-title">Descubrir</span>
-          <span class="sb-panel-arrow">▶</span>
-        </div>
-        <div class="sb-panel-body" id="discover-users-list"></div>
       </div>
 
       <!-- About -->
@@ -1902,7 +1972,7 @@ input::placeholder { color: var(--ink3); }
         <button class="filter-btn active" data-filter="all">Todos</button>
         <button class="filter-btn" data-filter="missing">Pendientes</button>
         <button class="filter-btn" data-filter="heard">Escuchados</button>
-        <button class="filter-btn" data-filter="recomendar" id="btn-filter-rec" style="display:none">Recomendados</button>
+        <div id="filter-extra-users"></div>
         <div class="filter-sep"></div>
         <label for="sort-select" style="margin:0">
           <select id="sort-select">
@@ -1998,6 +2068,9 @@ let _loadController = null;
 
 // cover enrichment SSE (for albums without cover in collection)
 let _enrichEs = null;
+
+// active secondary user index for discover
+let activeDiscoverUserIdx = 0;
 
 // album info cache (artist|||title → data)
 const albumInfoCache = new Map();
@@ -2101,11 +2174,25 @@ function buildExtraUsersList() {
     }).join('');
   }
 
-  const canRec   = extraUsers.length > 0 && heardCache;
   const hasExtra = extraUsers.length > 0;
-  document.getElementById('btn-filter-rec').style.display = canRec ? '' : 'none';
 
-  // Update secondary-bar above the chart grid
+  // ── Per-user filter buttons in the filters bar ───────────────────────────
+  const extraFiltersEl = document.getElementById('filter-extra-users');
+  if (hasExtra) {
+    extraFiltersEl.innerHTML = extraUsers.map((u, i) => {
+      const av = u.image
+        ? `<img src="${escH(u.image)}" alt="">`
+        : `<span class="fbu-dot" style="background:${u.color}"></span>`;
+      return `<button class="filter-btn filter-btn-user" data-filter="extra_${i}" onclick="setExtraFilter(${i})">
+        ${av}${escH(u.user)}
+      </button>`;
+    }).join('');
+  } else {
+    extraFiltersEl.innerHTML = '';
+    if (activeFilter.startsWith('extra_')) { activeFilter = 'all'; renderGrid(); }
+  }
+
+  // ── Secondary-bar above the chart grid ───────────────────────────────────
   const sbar = document.getElementById('secondary-bar');
   const sbarUsers = document.getElementById('secondary-bar-users');
   sbar.style.display = hasExtra ? '' : 'none';
@@ -2114,12 +2201,25 @@ function buildExtraUsersList() {
       const avatar = u.image
         ? `<img src="${escH(u.image)}" alt="">`
         : `<span class="sbar-dot" style="background:${u.color}"></span>`;
-      return `<span class="sbar-user" onclick="selectDiscoverUser(${i})" title="${escH(u.user)} — clic para recomendar">
+      return `<span class="sbar-user${i===activeDiscoverUserIdx?' active':''}" onclick="setActiveDiscoverUser(${i})"
+          title="${escH(u.user)} — clic para seleccionar en Descubrir">
         ${avatar} ${escH(u.user)}
         <span style="color:var(--ink3)">${u.count.toLocaleString()}</span>
       </span>`;
     }).join('');
   }
+
+  // ── Sidebar Descubrir panel ───────────────────────────────────────────────
+  const discPanel = document.getElementById('panel-discover');
+  discPanel.style.display = hasExtra ? '' : 'none';
+  if (hasExtra) {
+    if (activeDiscoverUserIdx >= extraUsers.length) activeDiscoverUserIdx = 0;
+    _updateDiscoverIndicator();
+  }
+
+  // Remove old discover-users-list update (replaced by new compact panel)
+  const discList = document.getElementById('discover-users-list');
+  if (discList) discList.innerHTML = '';
 
   // Update sidebar Descubrir panel (visible with any secondary user, even without primary scrobbles)
   const discPanel = document.getElementById('panel-discover');
@@ -2150,21 +2250,46 @@ function buildExtraUsersList() {
   }
 }
 
-function selectDiscoverUser(i) {
-  // Toggle the inline form; close all others
-  const form = document.getElementById(`disc-user-form-${i}`);
-  const isOpen = form.style.display !== 'none';
-  // Close all forms
-  extraUsers.forEach((_, j) => {
-    const f = document.getElementById(`disc-user-form-${j}`);
-    const r = document.getElementById(`disc-user-row-${j}`);
-    if (f) f.style.display = 'none';
-    if (r) r.classList.remove('active');
-  });
-  if (!isOpen) {
-    form.style.display = '';
-    document.getElementById(`disc-user-row-${i}`).classList.add('active');
-  }
+function selectDiscoverUser(i) { setActiveDiscoverUser(i); }
+
+function setExtraFilter(i) {
+  document.querySelectorAll('#filters .filter-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`#filters .filter-btn[data-filter="extra_${i}"]`)?.classList.add('active');
+  activeFilter = `extra_${i}`;
+  renderGrid();
+}
+
+function setActiveDiscoverUser(i) {
+  activeDiscoverUserIdx = i;
+  // Highlight in secondary-bar
+  document.querySelectorAll('.sbar-user').forEach((el, j) =>
+    el.classList.toggle('active', j === i));
+  _updateDiscoverIndicator();
+}
+
+function _updateDiscoverIndicator() {
+  const el = document.getElementById('disc-user-indicator');
+  if (!el) return;
+  const u = extraUsers[activeDiscoverUserIdx];
+  if (!u) { el.innerHTML = ''; return; }
+  const av = u.image
+    ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover">`
+    : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block"></span>`;
+  el.innerHTML = extraUsers.map((uu, i) =>
+    `<span class="disc-ind-user${i===activeDiscoverUserIdx?' active':''}" onclick="setActiveDiscoverUser(${i})">
+      ${uu.image ? `<img src="${escH(uu.image)}" style="width:12px;height:12px;border-radius:50%;object-fit:cover">` : `<span style="width:7px;height:7px;border-radius:50%;background:${uu.color};display:inline-block"></span>`}
+      ${escH(uu.user)}
+    </span>`
+  ).join('');
+}
+
+function triggerDiscover() {
+  if (!extraUsers.length) return;
+  const mode = document.getElementById('disc-mode-select')?.value || 'albums';
+  const limit = Math.min(100, Math.max(1,
+    parseInt(document.getElementById('disc-limit-global')?.value || '20')
+  ));
+  enterDiscoverMode(activeDiscoverUserIdx, limit, mode);
 }
 
 function saveExtraUserJSON(idx) {
@@ -2488,38 +2613,8 @@ async function fetchScrobblesSSE(user, onProgress) {
 })();
 
 function renderCollsSidebar(cols) {
-  const groups = {};
-  for (const c of cols) {
-    const g = c.group || 'Otros';
-    if (!groups[g]) groups[g] = [];
-    groups[g].push(c);
-  }
-  const order = Object.keys(groups).sort((a,b) => a.localeCompare(b));
-  let html = '';
-  for (const g of order) {
-    const gid = 'grp-' + g.replace(/[^a-z0-9]/gi,'_');
-    const isRym = (g === 'Rate Your Music');
-    html += `<div class="sb-grp" id="${gid}">
-      <div class="sb-grp-hdr" onclick="toggleGrp('${gid}')">
-        <span class="sb-grp-name">${escH(g)}</span>
-        <span class="sb-grp-arrow">▶</span>
-      </div>
-      <div class="sb-grp-body">`;
-
-    if (isRym) {
-      html += buildRymTree(groups[g]);
-    } else {
-      for (const c of groups[g]) {
-        const lbl = c.name.replace(/^(AOTY Must Hear|Scaruffi|Bandcamp:|Kerrang!|Pitchfork) ?/,'').trim() || c.name;
-        html += `<div class="sb-coll-item" data-slug="${escH(c.slug)}" onclick="selectCollection('${escH(c.slug)}')">
-          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escH(lbl)}</span>
-          ${c.total_albums ? `<span class="sb-coll-count">${c.total_albums}</span>` : ''}
-        </div>`;
-      }
-    }
-    html += `</div></div>`;
-  }
-  document.getElementById('colls-body').innerHTML = html;
+  // All collections are rym_chart_all_time_* — render the genre tree directly
+  document.getElementById('colls-body').innerHTML = buildRymTree(cols);
 }
 
 function buildRymTree(cols) {
@@ -2911,6 +3006,10 @@ function renderGrid() {
   if (activeFilter === 'missing')    f = f.filter(a => !a.heard);
   if (activeFilter === 'heard')      f = f.filter(a =>  a.heard);
   if (activeFilter === 'recomendar') f = f.filter(a => !a.heard && a.extraHeard && a.extraHeard.some(Boolean));
+  if (activeFilter.startsWith('extra_')) {
+    const ui = parseInt(activeFilter.split('_')[1]);
+    f = f.filter(a => a.extraHeard?.[ui]);
+  }
   if (activeGenres.size)  f = f.filter(a => (a.genres||[]).some(g => activeGenres.has(g.name || g)));
   if (activeDecades.size) f = f.filter(a => a.year && activeDecades.has(Math.floor(a.year/10)*10));
   if (activeSort === 'year_asc')  f.sort((a,b) => (a.year||0)-(b.year||0));
@@ -2967,6 +3066,25 @@ function toggleUmExtra() {
 
 // ── Discover mode ─────────────────────────────────────────────────────────
 function discoverCardHTML(a, i) {
+  if (a.type === 'artist') {
+    const userBadges = (a.users || []).map(u =>
+      u.image
+        ? `<img class="rc-avatar" src="${escH(u.image)}" title="${escH(u.user)}: ${u.count} plays" alt="">`
+        : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`
+    ).join('');
+    return `<div class="card rec-card disc-artist-card" data-disc="${i}" style="cursor:pointer">
+      <div class="disc-artist-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+        </svg>
+      </div>
+      <div class="card-info">
+        <div class="card-title">${escH(a.orig_a)}</div>
+        <div class="card-artist" style="opacity:0.6">${a.album_count} álbum${a.album_count !== 1 ? 'es' : ''}</div>
+        <div class="rc-users">${userBadges}<span class="rc-count">${a.total} plays</span></div>
+      </div>
+    </div>`;
+  }
   const cover = a.cover_url
     ? `<img class="card-cover" src="${escH(a.cover_url)}" loading="lazy" alt=""
           onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
@@ -3005,7 +3123,15 @@ function renderDiscoverGrid() {
   }
   dg.innerHTML = filtered.map((a, i) => discoverCardHTML(a, discoverAlbums.indexOf(a))).join('');
   dg.querySelectorAll('.card[data-disc]').forEach(c => {
-    c.addEventListener('click', () => openDetailPanel({ type: 'discover', idx: parseInt(c.dataset.disc) }));
+    c.addEventListener('click', () => {
+      const idx = parseInt(c.dataset.disc);
+      const entry = discoverAlbums[idx];
+      if (entry && entry.type === 'artist') {
+        openDetailPanel({ type: 'discover_artist', idx });
+      } else {
+        openDetailPanel({ type: 'discover', idx });
+      }
+    });
   });
   // Update count label
   document.getElementById('discover-count').textContent =
@@ -3030,44 +3156,58 @@ function renderDiscoverGrid() {
   });
 }
 
-function enterDiscoverMode(userIdx) {
+function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
   if (!extraUsers.length) return;
   const u = extraUsers[userIdx];
   if (!u) return;
-  const limit = Math.min(100, Math.max(1,
-    parseInt(document.getElementById(`disc-limit-${userIdx}`)?.value || '20')
-  ));
+  limit = Math.min(100, Math.max(1, limit));
   discoverMode = true;
-  // Reset state for new search
   discoverCandidates = [];
   discoverAlbums     = [];
   discoverOffset     = 0;
   discoverDecadeFilter.clear();
   if (discoverEs) { discoverEs.close(); discoverEs = null; }
 
-  // Primary set: empty if no scrobbles loaded yet (all secondary scrobbles become candidates)
-  const primarySet = heardCache
-    ? new Set(heardCache.pairs.map(p => p[0] + '|' + p[1]))
-    : new Set();
-  const cmap = {};
-  for (const p of u.pairs) {
-    const key = p[0] + '|' + p[1];
-    if (primarySet.has(key)) continue;
-    if (!cmap[key]) {
-      cmap[key] = {
+  const primaryPairs = heardCache ? new Set(heardCache.pairs.map(p => p[0] + '|' + p[1])) : new Set();
+
+  if (mode === 'artists') {
+    // ── Artists mode: group by artist, exclude artists with any heard album ──
+    const primaryArtists = heardCache ? new Set(heardCache.pairs.map(p => p[0])) : new Set();
+    const amap = {};
+    for (const p of u.pairs) {
+      const normA = p[0];
+      if (primaryArtists.has(normA)) continue;
+      const origA = p[2] || p[0];
+      if (!amap[normA]) amap[normA] = { orig_a: origA, orig_t: '', total: 0, album_count: 0, users: [], type: 'artist' };
+      const count = p[4] || 1;
+      amap[normA].total += count;
+      amap[normA].album_count++;
+      if (!amap[normA].users.length)
+        amap[normA].users.push({ user: u.user, count: 0, color: u.color, image: u.image || '' });
+      amap[normA].users[0].count += count;
+    }
+    discoverCandidates = Object.values(amap).sort((a, b) => b.total - a.total).slice(0, limit);
+    // For artists, populate discoverAlbums directly (no enrichment needed)
+    discoverAlbums = discoverCandidates.map(c => ({
+      ...c, mb_artist: c.orig_a, mb_title: '', cover_url: '', date: '', mbid: '',
+    }));
+  } else {
+    // ── Albums mode (default) ────────────────────────────────────────────────
+    const cmap = {};
+    for (const p of u.pairs) {
+      const key = p[0] + '|' + p[1];
+      if (primaryPairs.has(key)) continue;
+      if (!cmap[key]) cmap[key] = {
         norm_a: p[0], norm_t: p[1],
         orig_a: p[2] || p[0], orig_t: p[3] || p[1],
         total: 0, users: [],
       };
+      const count = p[4] || 1;
+      cmap[key].total += count;
+      cmap[key].users.push({ user: u.user, count, color: u.color, image: u.image || '' });
     }
-    const count = p[4] || 1;
-    cmap[key].total += count;
-    cmap[key].users.push({ user: u.user, count, color: u.color, image: u.image || '' });
+    discoverCandidates = Object.values(cmap).sort((a, b) => b.total - a.total).slice(0, limit);
   }
-  discoverCandidates = Object.values(cmap).sort((a, b) => b.total - a.total);
-
-  // Apply limit (top N by play count)
-  discoverCandidates = discoverCandidates.slice(0, limit);
 
   // Show discover view, hide collection view
   document.getElementById('discover-view').classList.add('visible');
@@ -3082,11 +3222,16 @@ function enterDiscoverMode(userIdx) {
     discoverCandidates.length > 0 ? '' : 'none';
   document.getElementById('discover-progress').textContent =
     discoverCandidates.length
-      ? `Buscando top ${discoverCandidates.length} álbumes de ${escH(u.user)}…`
+      ? `${mode === 'artists' ? discoverCandidates.length + ' artistas' : 'Buscando top ' + discoverCandidates.length + ' álbumes'} de ${escH(u.user)}…`
       : 'Sin candidatos para este usuario';
 
-  // Load all at once (user chose the limit already)
-  if (discoverCandidates.length) loadMoreDiscover();
+  // Albums mode: enrich via MusicBrainz SSE; artists mode: already populated
+  if (mode === 'albums' && discoverCandidates.length) loadMoreDiscover();
+  else if (mode === 'artists') {
+    document.getElementById('discover-progress').textContent =
+      `${discoverAlbums.length} artistas de ${escH(u.user)}`;
+    renderDiscoverGrid();
+  }
 }
 
 function leaveDiscoverMode() {
@@ -3172,7 +3317,7 @@ document.getElementById('sort-select').addEventListener('change', e => {
 // ── Modal ──────────────────────────────────────────────────────────────────
 // ── Detail side panel ──────────────────────────────────────────────────────
 function openDetailPanel(ref) {
-  // ref: {type:'collection', idx} | {type:'discover', idx}
+  // ref: {type:'collection', idx} | {type:'discover', idx} | {type:'discover_artist', idx}
   let title, artist, year, cover, mbid, yt_id, heard, extraHeard, descCached;
   if (ref.type === 'collection') {
     const a = allAlbums[ref.idx];
@@ -3180,6 +3325,12 @@ function openDetailPanel(ref) {
     title = a.title; artist = a.artist; year = a.year; cover = a.cover;
     mbid = a.mbid; yt_id = a.yt_id; heard = a.heard; extraHeard = a.extraHeard;
     descCached = a.desc_lfm_album || a.desc_mb_album || a.desc_lfm_artist || '';
+  } else if (ref.type === 'discover_artist') {
+    const a = discoverAlbums[ref.idx];
+    if (!a) return;
+    title = a.orig_a; artist = a.orig_a;
+    year = ''; cover = ''; mbid = ''; yt_id = ''; heard = false; extraHeard = null;
+    descCached = '';
   } else {
     const a = discoverAlbums[ref.idx];
     if (!a) return;
@@ -3236,14 +3387,17 @@ function openDetailPanel(ref) {
         ${icon} ${escH(u.user)}: ${h ? '✓' : '—'}</span>`;
     }).join('');
     extraSt.style.display = 'flex';
-  } else if (ref.type === 'discover') {
+  } else if (ref.type === 'discover' || ref.type === 'discover_artist') {
     const a = discoverAlbums[ref.idx];
     if (a?.users?.length) {
-      extraSt.innerHTML = a.users.map(u =>
-        `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
-          ${u.image ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover">` : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block"></span>`}
-          ${escH(u.user)}: ${u.count} plays</span>`
-      ).join('');
+      const extraLabel = ref.type === 'discover_artist'
+        ? a.users.map(u => `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
+            ${u.image ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover">` : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block"></span>`}
+            ${escH(u.user)}: ${a.total} plays · ${a.album_count} álbum${a.album_count!==1?'es':''}</span>`)
+        : a.users.map(u => `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
+            ${u.image ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover">` : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block"></span>`}
+            ${escH(u.user)}: ${u.count} plays</span>`);
+      extraSt.innerHTML = extraLabel.join('');
       extraSt.style.display = 'flex';
     } else { extraSt.innerHTML = ''; extraSt.style.display = 'none'; }
   } else { extraSt.innerHTML = ''; extraSt.style.display = 'none'; }
