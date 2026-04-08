@@ -158,6 +158,33 @@ def get_all_collections() -> list[dict]:
     return result
 
 
+def _get_album_chart_genres(conn, album_ids: list) -> dict:
+    """Para cada álbum devuelve los charts RYM en los que aparece, con depth."""
+    if not album_ids:
+        return {}
+    placeholders = ",".join("?" * len(album_ids))
+    rows = conn.execute(f"""
+        SELECT ca.album_id, c.name, c.slug
+        FROM collection_albums ca
+        JOIN collections c ON c.id = ca.collection_id
+        WHERE c.slug LIKE 'rym_chart_all_time_%'
+        AND ca.album_id IN ({placeholders})
+    """, album_ids).fetchall()
+    result: dict = {}
+    for r in rows:
+        tp = _rym_tree_path(r["name"])   # e.g. ['Dance'] or ['Dance','Electronica']
+        depth = len(tp) if tp else 1
+        label = tp[-1] if tp else r["name"]
+        result.setdefault(r["album_id"], []).append({
+            "name":  label,
+            "slug":  r["slug"],
+            "depth": depth,
+        })
+    for v in result.values():
+        v.sort(key=lambda x: x["depth"])
+    return result
+
+
 def get_collection_albums(slug: str) -> list[dict]:
     conn = get_db()
     rows = conn.execute("""
@@ -173,18 +200,8 @@ def get_collection_albums(slug: str) -> list[dict]:
         WHERE c.slug = ?
         ORDER BY ca.rank ASC NULLS LAST, al.year ASC
     """, (slug,)).fetchall()
-    # Genres per album
     album_ids = [r["id"] for r in rows]
-    genres_map: dict[int, list[str]] = {}
-    if album_ids:
-        placeholders = ",".join("?" * len(album_ids))
-        genre_rows = conn.execute(f"""
-            SELECT ag.album_id, g.name
-            FROM album_genres ag JOIN genres g ON g.id = ag.genre_id
-            WHERE ag.album_id IN ({placeholders})
-        """, album_ids).fetchall()
-        for gr in genre_rows:
-            genres_map.setdefault(gr[0], []).append(gr[1])
+    genres_map = _get_album_chart_genres(conn, album_ids)
     conn.close()
     result = []
     for i, r in enumerate(rows):
@@ -217,10 +234,8 @@ def _load_ignore_slugs() -> set:
 @app.route("/api/collections")
 def api_collections():
     all_colls = get_all_collections()
-    ignore = _load_ignore_slugs()
-    if ignore:
-        all_colls = [c for c in all_colls if c["slug"] not in ignore]
-    return jsonify(all_colls)
+    rym = [c for c in all_colls if c["slug"].startswith("rym_chart_all_time_")]
+    return jsonify(rym)
 
 
 @app.route("/api/scrobbles")
@@ -1534,6 +1549,55 @@ input::placeholder { color: var(--ink3); }
   font-style: italic;
 }
 
+/* ── Secondary users bar (above chart grid) ─────────────────────────────── */
+#secondary-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0 0.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+#secondary-bar-users {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.sbar-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem 0.2rem 0.3rem;
+  border: 1px solid var(--border2);
+  border-radius: 20px;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--ink2);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.sbar-user:hover { border-color: var(--accent); }
+.sbar-user img, .sbar-user .sbar-dot {
+  width: 16px; height: 16px; border-radius: 50%; object-fit: cover;
+}
+.sbar-user .sbar-dot { display: inline-block; }
+
+/* ── Genre chips on album cards ──────────────────────────────────────────── */
+.card-genres {
+  display: flex; gap: 2px; flex-wrap: wrap; margin-top: 2px;
+  overflow: hidden; max-height: 1.4rem;
+}
+.card-genre {
+  font-family: var(--mono); font-size: 0.48rem; padding: 0.08rem 0.3rem;
+  border-radius: 2px; background: rgba(0,0,0,0.45); white-space: nowrap;
+  line-height: 1.4;
+}
+.card-genre.depth-1 { color: var(--accent); }
+.card-genre.depth-2 { color: rgba(255,255,255,0.5); }
+.card-genre.depth-3 { color: rgba(255,255,255,0.3); }
+
 /* ── About button in sidebar ─────────────────────────────────────────── */
 .sb-about-btn {
   display: block;
@@ -1747,27 +1811,14 @@ input::placeholder { color: var(--ink3); }
   <aside id="sidebar">
     <div class="sb-scroll">
 
-      <!-- Colecciones -->
+      <!-- Géneros (árbol de RYM charts) -->
       <div class="sb-panel open" id="panel-colls">
         <div class="sb-panel-hdr" onclick="togglePanel('panel-colls')">
-          <span class="sb-panel-title">Colecciones</span>
+          <span class="sb-panel-title">Géneros</span>
           <span class="sb-panel-arrow">▶</span>
         </div>
         <div class="sb-panel-body" id="colls-body">
           <div class="sb-empty">Cargando…</div>
-        </div>
-      </div>
-
-      <!-- Géneros -->
-      <div class="sb-panel open" id="panel-genres">
-        <div class="sb-panel-hdr" onclick="togglePanel('panel-genres')">
-          <span class="sb-panel-title">Géneros</span>
-          <span class="sb-panel-arrow">▶</span>
-        </div>
-        <div class="sb-panel-body">
-          <div class="sb-pills" id="genre-pills">
-            <div class="sb-empty">Selecciona una colección</div>
-          </div>
         </div>
       </div>
 
@@ -1814,6 +1865,11 @@ input::placeholder { color: var(--ink3); }
       </div>
 
       <!-- Stats -->
+      <!-- Usuarios secundarios (encima del chart) -->
+      <div id="secondary-bar" style="display:none">
+        <div id="secondary-bar-users"></div>
+      </div>
+
       <div id="stats-bar">
         <div class="stat">
           <div class="stat-val" id="s-total">—</div>
@@ -2048,6 +2104,22 @@ function buildExtraUsersList() {
   const canRec   = extraUsers.length > 0 && heardCache;
   const hasExtra = extraUsers.length > 0;
   document.getElementById('btn-filter-rec').style.display = canRec ? '' : 'none';
+
+  // Update secondary-bar above the chart grid
+  const sbar = document.getElementById('secondary-bar');
+  const sbarUsers = document.getElementById('secondary-bar-users');
+  sbar.style.display = hasExtra ? '' : 'none';
+  if (hasExtra) {
+    sbarUsers.innerHTML = extraUsers.map((u, i) => {
+      const avatar = u.image
+        ? `<img src="${escH(u.image)}" alt="">`
+        : `<span class="sbar-dot" style="background:${u.color}"></span>`;
+      return `<span class="sbar-user" onclick="selectDiscoverUser(${i})" title="${escH(u.user)} — clic para recomendar">
+        ${avatar} ${escH(u.user)}
+        <span style="color:var(--ink3)">${u.count.toLocaleString()}</span>
+      </span>`;
+    }).join('');
+  }
 
   // Update sidebar Descubrir panel (visible with any secondary user, even without primary scrobbles)
   const discPanel = document.getElementById('panel-discover');
@@ -2803,25 +2875,11 @@ function applyCollection(slug) {
 }
 
 // ── Genre pills ────────────────────────────────────────────────────────────
-function buildGenrePills() {
-  const freq = {};
-  for (const a of allAlbums)
-    for (const g of (a.genres || []))
-      freq[g] = (freq[g] || 0) + 1;
-  const top = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,20).map(e=>e[0]);
-  if (!top.length) {
-    document.getElementById('genre-pills').innerHTML = '<div class="sb-empty">Sin géneros</div>';
-    return;
-  }
-  document.getElementById('genre-pills').innerHTML = top.map(g =>
-    `<span class="pill${activeGenres.has(g)?' active':''}" onclick="toggleGenre('${escH(g)}')">${escH(g)}</span>`
-  ).join('');
-}
+function buildGenrePills() { /* no-op: genre navigation via sidebar tree */ }
 
 function toggleGenre(g) {
   if (activeGenres.has(g)) activeGenres.delete(g);
   else activeGenres.add(g);
-  buildGenrePills();
   renderGrid();
 }
 
@@ -2853,7 +2911,7 @@ function renderGrid() {
   if (activeFilter === 'missing')    f = f.filter(a => !a.heard);
   if (activeFilter === 'heard')      f = f.filter(a =>  a.heard);
   if (activeFilter === 'recomendar') f = f.filter(a => !a.heard && a.extraHeard && a.extraHeard.some(Boolean));
-  if (activeGenres.size)  f = f.filter(a => (a.genres||[]).some(g => activeGenres.has(g)));
+  if (activeGenres.size)  f = f.filter(a => (a.genres||[]).some(g => activeGenres.has(g.name || g)));
   if (activeDecades.size) f = f.filter(a => a.year && activeDecades.has(Math.floor(a.year/10)*10));
   if (activeSort === 'year_asc')  f.sort((a,b) => (a.year||0)-(b.year||0));
   if (activeSort === 'year_desc') f.sort((a,b) => (b.year||0)-(a.year||0));
@@ -2893,6 +2951,11 @@ function cardHTML(a) {
       <div class="card-title">${escH(a.title)}</div>
       <div class="card-artist">${escH(a.artist)}</div>
       ${a.year ? `<div class="card-year">${a.year}</div>` : ''}
+      ${(a.genres||[]).length ? `<div class="card-genres">${
+        (a.genres).slice(0,3).map(g =>
+          `<span class="card-genre depth-${Math.min(g.depth||1, 3)}">${escH(g.name)}</span>`
+        ).join('')
+      }</div>` : ''}
     </div>
   </div>`;
 }
