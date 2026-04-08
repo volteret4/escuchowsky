@@ -3313,6 +3313,7 @@ function openDetailPanel(ref) {
     title = a.orig_a; artist = a.orig_a;
     year = ''; cover = ''; mbid = ''; yt_id = ''; heard = false; extraHeard = null;
     descCached = '';
+    // title kept as artist name for display; album passed as '' to fetchAlbumInfo
   } else {
     const a = discoverAlbums[ref.idx];
     if (!a) return;
@@ -3416,7 +3417,9 @@ function openDetailPanel(ref) {
   document.body.style.overflow = 'hidden';
 
   // Fetch LFM + MB info asynchronously
-  fetchAlbumInfo(artist || '', title || '', mbid || '');
+  // For artist-only entries pass album='' so only artist.getInfo is fetched
+  const fetchAlbum = ref.type === 'discover_artist' ? '' : (title || '');
+  fetchAlbumInfo(artist || '', fetchAlbum, mbid || '');
 }
 
 function closeDetailPanel() {
@@ -3434,12 +3437,17 @@ document.addEventListener('keydown', e => {
 });
 
 function _applyAlbumInfoToPanel(data, artist) {
-  // Better cover if we now have MBID
-  if (data.cover_url) {
-    const dpCover = document.getElementById('dp-cover');
-    if (!dpCover.src || dpCover.src.endsWith('undefined') || dpCover.src.includes('undefined')) {
-      dpCover.src = data.cover_url; dpCover.style.display = '';
-    }
+  const dpCover = document.getElementById('dp-cover');
+  const coverMissing = !dpCover.src || dpCover.src.endsWith('undefined') || dpCover.style.display === 'none';
+
+  // Better cover from MBID lookup
+  if (data.cover_url && coverMissing) {
+    dpCover.src = data.cover_url; dpCover.style.display = '';
+  }
+
+  // Fall back to Last.fm artist image when there is no album cover
+  if (data.artist?.image && (coverMissing || (!data.cover_url && dpCover.style.display === 'none'))) {
+    dpCover.src = data.artist.image; dpCover.style.display = '';
   }
 
   // Stats
