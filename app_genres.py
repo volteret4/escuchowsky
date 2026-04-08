@@ -1558,7 +1558,10 @@ input::placeholder { color: var(--ink3); }
   width: 46px; background: var(--bg3); border: 1px solid var(--border);
   color: var(--ink); padding: 3px 4px; border-radius: 3px;
   font-family: var(--mono); font-size: 0.7rem; text-align: center;
+  -moz-appearance: textfield;
 }
+.disc-controls input[type=number]::-webkit-inner-spin-button,
+.disc-controls input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .disc-controls select {
   flex: 1; background: var(--bg3); border: 1px solid var(--border);
   color: var(--ink); padding: 3px 4px; border-radius: 3px;
@@ -1589,40 +1592,12 @@ input::placeholder { color: var(--ink3); }
   vertical-align: middle; margin-right: 2px;
 }
 
-/* ── Secondary users bar (above chart grid) ─────────────────────────────── */
-#secondary-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 0 0.5rem;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 0.75rem;
-  flex-wrap: wrap;
+/* ── Discover pagination ─────────────────────────────────────────────────── */
+.discover-pagination {
+  display: flex; align-items: center; justify-content: center;
+  gap: 1rem; padding: 1rem 0 0.5rem;
 }
-#secondary-bar-users {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.sbar-user {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.2rem 0.5rem 0.2rem 0.3rem;
-  border: 1px solid var(--border2);
-  border-radius: 20px;
-  font-family: var(--mono);
-  font-size: 0.65rem;
-  color: var(--ink2);
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.sbar-user:hover { border-color: var(--accent); }
-.sbar-user img, .sbar-user .sbar-dot {
-  width: 16px; height: 16px; border-radius: 50%; object-fit: cover;
-}
-.sbar-user .sbar-dot { display: inline-block; }
+.discover-pagination button:disabled { opacity: 0.35; cursor: default; }
 
 /* ── Genre chips on album cards ──────────────────────────────────────────── */
 .card-genres {
@@ -1935,11 +1910,6 @@ input::placeholder { color: var(--ink3); }
       </div>
 
       <!-- Stats -->
-      <!-- Usuarios secundarios (encima del chart) -->
-      <div id="secondary-bar" style="display:none">
-        <div id="secondary-bar-users"></div>
-      </div>
-
       <div id="stats-bar">
         <div class="stat">
           <div class="stat-val" id="s-total">—</div>
@@ -1997,6 +1967,11 @@ input::placeholder { color: var(--ink3); }
         </div>
         <div class="discover-filters" id="discover-decade-pills"></div>
         <div id="discover-grid"></div>
+        <div class="discover-pagination" id="discover-pagination" style="display:none">
+          <button class="btn-sm" id="disc-prev" onclick="discoverPrevPage()">← Anteriores</button>
+          <span id="disc-page-info" style="font-family:var(--mono);font-size:0.72rem;color:var(--ink3)"></span>
+          <button class="btn-sm" id="disc-next" onclick="discoverNextPage()">Siguientes →</button>
+        </div>
         <div class="discover-footer" id="discover-footer" style="display:none">
           <span id="discover-progress"></span>
         </div>
@@ -2055,13 +2030,18 @@ const USER_COLORS = ['#6a9fb5','#78b56c','#b56c6c','#9b6cb5','#b59b6c','#6cb5b5'
 let extraUsers = [];  // [{user, pairs:[[na,nt,oa,ot,count],...], color, count, fetched_at}]
 
 // discover state
-let discoverMode       = false;
-let discoverCandidates = [];  // all candidates sorted by play count
-let discoverAlbums     = [];  // enriched albums (cumulative)
-let discoverOffset     = 0;   // how many have been sent for enrichment
-let discoverSearching  = false;
-let discoverEs         = null;
+let discoverMode         = false;
+let discoverAllCandidates = []; // full sorted candidate list (unsliced)
+let discoverCandidates   = [];  // current page candidates
+let discoverAlbums       = [];  // enriched albums for current page
+let discoverOffset       = 0;   // how many have been sent for enrichment
+let discoverSearching    = false;
+let discoverEs           = null;
 let discoverDecadeFilter = new Set();
+let discoverPage         = 0;
+let discoverLimit        = 20;
+let discoverModeType     = 'albums'; // 'albums' | 'artists'
+let discoverUserIdx      = 0;
 
 // collection load cancellation
 let _loadController = null;
@@ -2190,23 +2170,6 @@ function buildExtraUsersList() {
   } else {
     extraFiltersEl.innerHTML = '';
     if (activeFilter.startsWith('extra_')) { activeFilter = 'all'; renderGrid(); }
-  }
-
-  // ── Secondary-bar above the chart grid ───────────────────────────────────
-  const sbar = document.getElementById('secondary-bar');
-  const sbarUsers = document.getElementById('secondary-bar-users');
-  sbar.style.display = hasExtra ? '' : 'none';
-  if (hasExtra) {
-    sbarUsers.innerHTML = extraUsers.map((u, i) => {
-      const avatar = u.image
-        ? `<img src="${escH(u.image)}" alt="">`
-        : `<span class="sbar-dot" style="background:${u.color}"></span>`;
-      return `<span class="sbar-user${i===activeDiscoverUserIdx?' active':''}" onclick="setActiveDiscoverUser(${i})"
-          title="${escH(u.user)} — clic para seleccionar en Descubrir">
-        ${avatar} ${escH(u.user)}
-        <span style="color:var(--ink3)">${u.count.toLocaleString()}</span>
-      </span>`;
-    }).join('');
   }
 
   // ── Sidebar Descubrir panel ───────────────────────────────────────────────
@@ -3130,10 +3093,13 @@ function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
   const u = extraUsers[userIdx];
   if (!u) return;
   limit = Math.min(100, Math.max(1, limit));
-  discoverMode = true;
-  discoverCandidates = [];
-  discoverAlbums     = [];
-  discoverOffset     = 0;
+
+  discoverMode     = true;
+  discoverPage     = 0;
+  discoverLimit    = limit;
+  discoverModeType = mode;
+  discoverUserIdx  = userIdx;
+  discoverAllCandidates = [];
   discoverDecadeFilter.clear();
   if (discoverEs) { discoverEs.close(); discoverEs = null; }
 
@@ -3155,11 +3121,7 @@ function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
         amap[normA].users.push({ user: u.user, count: 0, color: u.color, image: u.image || '' });
       amap[normA].users[0].count += count;
     }
-    discoverCandidates = Object.values(amap).sort((a, b) => b.total - a.total).slice(0, limit);
-    // For artists, populate discoverAlbums directly (no enrichment needed)
-    discoverAlbums = discoverCandidates.map(c => ({
-      ...c, mb_artist: c.orig_a, mb_title: '', cover_url: '', date: '', mbid: '',
-    }));
+    discoverAllCandidates = Object.values(amap).sort((a, b) => b.total - a.total);
   } else {
     // ── Albums mode (default) ────────────────────────────────────────────────
     const cmap = {};
@@ -3175,7 +3137,7 @@ function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
       cmap[key].total += count;
       cmap[key].users.push({ user: u.user, count, color: u.color, image: u.image || '' });
     }
-    discoverCandidates = Object.values(cmap).sort((a, b) => b.total - a.total).slice(0, limit);
+    discoverAllCandidates = Object.values(cmap).sort((a, b) => b.total - a.total);
   }
 
   // Show discover view, hide collection view
@@ -3186,21 +3148,72 @@ function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
   filtersEl.classList.remove('visible');
   closeSidebar();
 
-  renderDiscoverGrid();
-  document.getElementById('discover-footer').style.display =
-    discoverCandidates.length > 0 ? '' : 'none';
-  document.getElementById('discover-progress').textContent =
-    discoverCandidates.length
-      ? `${mode === 'artists' ? discoverCandidates.length + ' artistas' : 'Buscando top ' + discoverCandidates.length + ' álbumes'} de ${escH(u.user)}…`
-      : 'Sin candidatos para este usuario';
+  _loadDiscoverPage();
+}
 
-  // Albums mode: enrich via MusicBrainz SSE; artists mode: already populated
-  if (mode === 'albums' && discoverCandidates.length) loadMoreDiscover();
-  else if (mode === 'artists') {
-    document.getElementById('discover-progress').textContent =
-      `${discoverAlbums.length} artistas de ${escH(u.user)}`;
+function _loadDiscoverPage() {
+  discoverAlbums  = [];
+  discoverOffset  = 0;
+  discoverSearching = false;
+  discoverDecadeFilter.clear();
+  if (discoverEs) { discoverEs.close(); discoverEs = null; }
+
+  discoverCandidates = discoverAllCandidates.slice(
+    discoverPage * discoverLimit,
+    (discoverPage + 1) * discoverLimit
+  );
+
+  _updateDiscoverPagination();
+
+  const u = extraUsers[discoverUserIdx];
+  const uName = u ? escH(u.user) : '?';
+
+  if (!discoverCandidates.length) {
+    document.getElementById('discover-progress').textContent = 'Sin candidatos para este usuario';
+    document.getElementById('discover-footer').style.display = '';
     renderDiscoverGrid();
+    return;
   }
+
+  if (discoverModeType === 'artists') {
+    discoverAlbums = discoverCandidates.map(c => ({
+      ...c, mb_artist: c.orig_a, mb_title: '', cover_url: '', date: '', mbid: '',
+    }));
+    renderDiscoverGrid();
+    document.getElementById('discover-footer').style.display = '';
+    document.getElementById('discover-progress').textContent =
+      `${discoverAlbums.length} artistas de ${uName} (pág. ${discoverPage + 1})`;
+  } else {
+    document.getElementById('discover-footer').style.display = '';
+    document.getElementById('discover-progress').textContent =
+      `Buscando ${discoverCandidates.length} álbumes de ${uName}…`;
+    loadMoreDiscover();
+  }
+}
+
+function _updateDiscoverPagination() {
+  const total   = discoverAllCandidates.length;
+  const maxPage = Math.ceil(total / discoverLimit) - 1;
+  const pag  = document.getElementById('discover-pagination');
+  pag.style.display = total > discoverLimit ? '' : 'none';
+  document.getElementById('disc-prev').disabled = discoverPage <= 0;
+  document.getElementById('disc-next').disabled = discoverPage >= maxPage;
+  const from = discoverPage * discoverLimit + 1;
+  const to   = Math.min((discoverPage + 1) * discoverLimit, total);
+  document.getElementById('disc-page-info').textContent = `${from}–${to} de ${total}`;
+}
+
+function discoverPrevPage() {
+  if (discoverPage <= 0 || discoverSearching) return;
+  discoverPage--;
+  _loadDiscoverPage();
+}
+
+function discoverNextPage() {
+  const maxPage = Math.ceil(discoverAllCandidates.length / discoverLimit) - 1;
+  if (discoverPage >= maxPage || discoverSearching) return;
+  discoverPage++;
+  _loadDiscoverPage();
 }
 
 function leaveDiscoverMode() {
@@ -3252,7 +3265,7 @@ function loadMoreDiscover() {
     if (typeof msg.i === 'number' && discoverAlbums[startIdx + msg.i]) {
       Object.assign(discoverAlbums[startIdx + msg.i], {
         mbid:      msg.mbid,
-        cover_url: msg.cover_url,
+        cover_url: msg.mbid ? `/api/cover?mbid=${encodeURIComponent(msg.mbid)}` : (msg.cover_url || ''),
         mb_title:  msg.mb_title || discoverAlbums[startIdx + msg.i].orig_t,
         mb_artist: msg.mb_artist || discoverAlbums[startIdx + msg.i].orig_a,
         date:      msg.date,
