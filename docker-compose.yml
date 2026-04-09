@@ -1,0 +1,44 @@
+services:
+  escuchowsky:
+    build:
+      context: ./
+      dockerfile: Dockerfile.escuchowsky
+    container_name: escuchowsky
+    restart: unless-stopped
+    environment:
+      - LASTFM_API_KEY=${LASTFM_API_KEY}
+      - DB_PATH=/app/db/must_hear_rym_new.db
+    volumes:
+      - ./db:/app/db
+    networks:
+      - musica
+
+  tumtumpa:
+    build:
+      context: ./
+      dockerfile: Dockerfile.tumtumpa
+    container_name: tumtumpa
+    restart: unless-stopped
+    environment:
+      - LASTFM_API_KEY=${LASTFM_API_KEY}
+    networks:
+      - musica
+
+  nginx:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - escuchowsky
+      - tumtumpa
+    networks:
+      - musica
+
+networks:
+  musica:
+    driver: bridge

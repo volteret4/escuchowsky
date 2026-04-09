@@ -1,0 +1,26 @@
+FROM python:3.12-slim
+
+WORKDIR /app_escuchowsky
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY .collections_ignore .
+COPY app_discover.py .
+COPY sops_env.py .
+
+# La DB se monta como volumen en runtime
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 5001
+
+# gunicorn: 2 procesos × 4 threads = 8 requests concurrentes
+# --timeout 120 para scrobbles largos / SSE streams
+CMD ["gunicorn", \
+     "-w", "2", \
+     "--threads", "4", \
+     "-b", "0.0.0.0:5001", \
+     "--timeout", "120", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "app_discover:app"]

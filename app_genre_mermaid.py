@@ -6,8 +6,8 @@ Generates docs/must_hear/rym_genre_tree.html (or --output path).
 Usage:
     python3 html_rym_genre_mermaid.py --mh-db db/must_hear_rym_new.db
     python3 html_rym_genre_mermaid.py --mh-db db/must_hear_rym_new.db \\
-        --genres-json docs/must_hear/rym_charts/rym_genres.json \\
-        --output docs/must_hear/rym_genre_tree.html
+        --genres-json db/rym_genres.json \\
+        --output rym_genre_tree.html
 
 Can also be called from html_must_hear.py via --rym-genre-mermaid.
 
@@ -221,23 +221,20 @@ def render_html(
     panel_data: dict[str, dict],
     scraped_map: dict[str, dict],
     generated: str,
-    users: list[str] = None,
     all_pairs: dict[str, list] = None,
 ) -> str:
-    from html_must_hear import _mh_user_modal_css, _mh_user_modal_html, _mh_user_modal_btn, _mh_user_modal_js
     # Compact tree for JS: {s, n, c[]}
     def _compact(nodes: list[dict]) -> list[dict]:
         return [{"s": n["slug"], "n": n["name"],
                  "c": _compact(n.get("subgenres", []))} for n in nodes]
 
-    compact_json    = json.dumps(_compact(genre_tree), ensure_ascii=False, separators=(",", ":"))
-    charts_json     = json.dumps(
+    compact_json   = json.dumps(_compact(genre_tree), ensure_ascii=False, separators=(",", ":"))
+    charts_json    = json.dumps(
         {cs: d["total"] for cs, d in scraped_map.items()},
         ensure_ascii=False, separators=(",", ":"),
     )
-    panel_json      = json.dumps(panel_data, ensure_ascii=False, separators=(",", ":"))
-    users_meta_json = json.dumps(users or [], ensure_ascii=False)
-    all_pairs_json  = json.dumps(all_pairs or {}, ensure_ascii=False, separators=(",", ":"))
+    panel_json     = json.dumps(panel_data, ensure_ascii=False, separators=(",", ":"))
+    all_pairs_json = json.dumps(all_pairs or {}, ensure_ascii=False, separators=(",", ":"))
 
     n_scraped = len(scraped_map)
     n_total   = sum(1 + _count_all(g) for g in genre_tree)
@@ -264,7 +261,7 @@ def render_html(
 <title>RYM Genre Tree</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="icon" type="image/png" href="/images/discount.png" />
-<script defer src="https://cloud.umami.is/script.js" data-website-id="5d84fd6c-0760-4a0c-a2d0-ffabb82179f5"></script>
+<script defer src="https://cloud.umami.is/script.js" data-website-id="c8ed5b67-0cf6-4b14-b498-a324fd4371ad"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <style>
@@ -321,19 +318,25 @@ def render_html(
   .mg-link:hover, .mg-link.active {{ background:rgba(255,255,255,.04); color:var(--accent); }}
   .dot {{ flex-shrink:0; width:6px; height:6px; border-radius:50%; background:#333; }}
   .dot-scraped {{ background:var(--accent); }}
-  /* MH user modal */
-  {_mh_user_modal_css()}
-
-  /* ── secondary user chips ── */
-  #sec-users {{ display:none; align-items:center; gap:4px; margin-left:6px; flex-wrap:nowrap; overflow:hidden; }}
-  .sec-chip {{
-    display:flex; align-items:center; gap:4px;
-    font-family:'DM Mono',monospace; font-size:.52rem; letter-spacing:.05em;
-    text-transform:uppercase; color:var(--muted); background:none;
-    border:1px solid var(--border); border-radius:3px; padding:2px 7px;
-    cursor:default; white-space:nowrap; flex-shrink:0;
+  /* ── user input ── */
+  #user-form {{ display:flex; align-items:center; gap:6px; margin-left:auto; flex-shrink:0; }}
+  #user-input {{
+    background:var(--surface); border:1px solid var(--border); color:var(--text);
+    font-family:'DM Mono',monospace; font-size:.68rem; padding:4px 8px;
+    border-radius:4px; width:130px; outline:none; transition:border-color .12s;
   }}
-  .sec-dot {{ width:5px; height:5px; border-radius:50%; flex-shrink:0; }}
+  #user-input:focus {{ border-color:var(--accent); }}
+  #user-load-btn {{
+    background:var(--accent); color:#000; border:none; border-radius:4px;
+    font-family:'DM Mono',monospace; font-size:.65rem; font-weight:600;
+    padding:5px 10px; cursor:pointer; white-space:nowrap; transition:opacity .12s;
+  }}
+  #user-load-btn:hover {{ opacity:.82; }}
+  #user-load-btn:disabled {{ opacity:.4; cursor:default; }}
+  #user-status {{
+    font-family:'DM Mono',monospace; font-size:.6rem; color:var(--muted);
+    white-space:nowrap; max-width:160px; overflow:hidden; text-overflow:ellipsis;
+  }}
 
   /* ── layout ── */
   #layout {{ display:flex; position:fixed; top:var(--header-h); left:0; right:0; bottom:0; }}
@@ -488,18 +491,17 @@ def render_html(
 </style>
 </head>
 <body>
-{_mh_user_modal_html(users or [])}
 <header>
   <div class="mh-title">Géneros RYM</div>
   <nav class="mh-nav">
-    <a class="mh-na" href="index.html">Colección</a>
-    <a class="mh-na" href="index_alternativo.html">Explorador</a>
     <a class="mh-na on" href="rym_genre_tree.html">Géneros RYM</a>
-    <a class="mh-na" href="estadisticas.html">Estadísticas</a>
   </nav>
-  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
-    <div id="sec-users"></div>
-    {_mh_user_modal_btn()}
+  <div id="user-form">
+    <input id="user-input" type="text" placeholder="usuario last.fm"
+           autocomplete="off" spellcheck="false"
+           onkeydown="if(event.key==='Enter') loadUser()">
+    <button id="user-load-btn" onclick="loadUser()">Cargar</button>
+    <span id="user-status"></span>
   </div>
 </header>
 
@@ -831,6 +833,7 @@ function selectGenre(slug) {{
 
 // ── Panel ──────────────────────────────────────────────────────────────────
 function showPanel(slug) {{
+  _currentPanelSlug = slug;
   const data = PANEL_DATA[slug] || {{}};
   const cs   = cslug(slug);
   const hasChart = !!CHARTS[cs];
@@ -947,59 +950,120 @@ async function loadHeardFromIdb() {{
   try {{
     const username = localStorage.getItem('mh_user');
     if (!username) return;
-    const db  = await _openIDB();
+    const db   = await _openIDB();
     const data = await new Promise((res, rej) => {{
       const req = db.transaction('sessions','readonly').objectStore('sessions').get(username.toLowerCase());
       req.onsuccess = e => res(e.target.result || null);
       req.onerror   = e => rej(e.target.error);
     }});
     if (!data?.pairs?.length) return;
-
-    // Build a Set of "artist\x00title" for fast lookup
-    const heard = new Set(data.pairs.map(p => (p[0]||'') + '\x00' + (p[1]||'')));
-
-    HEARD = {{}};
-    for (const [cs, pairs] of Object.entries(ALL_PAIRS)) {{
-      let count = 0;
-      for (const [a, t] of pairs) {{
-        if (heard.has(a + '\x00' + t)) count++;
-      }}
-      if (count > 0) HEARD[cs] = count;
-    }}
-
-    // Re-render node subtext
-    if (treeRoot) render();
+    const status = document.getElementById('user-status');
+    if (status) status.textContent = `✓ ${{data.pairs.length.toLocaleString()}} álbumes (caché)`;
+    _computeHeardFromPairs(data.pairs);
   }} catch(e) {{ console.warn('loadHeardFromIdb:', e); }}
 }}
 
-// ── Secondary users (Para Ti) ─────────────────────────────────────────────
-const MH_USERS_META = {users_meta_json};
-const USER_COLORS_G = ['#c9a227','#6a9fb5','#78b56c','#b56c6c','#9b6cb5','#b59b6c','#6cb5b5','#b56ca0'];
+// ── User scrobble loading ─────────────────────────────────────────────────
+let _scrobbleEs = null;
+let _currentPanelSlug = null;
 
-function updateSecUsers(primaryName) {{
-  const bar = document.getElementById('sec-users');
-  if (!bar) return;
-  const others = MH_USERS_META.filter(u => u !== primaryName);
-  if (!primaryName || others.length === 0) {{ bar.style.display = 'none'; return; }}
-  bar.style.display = 'flex';
-  bar.innerHTML = others.map((u, i) => {{
-    const allIdx = MH_USERS_META.indexOf(u);
-    const col = USER_COLORS_G[allIdx % USER_COLORS_G.length];
-    return `<span class="sec-chip"><span class="sec-dot" style="background:${{col}}"></span>${{u}}</span>`;
-  }}).join('');
+function _computeHeardFromPairs(pairs) {{
+  // pairs: [[norm_a, norm_t, orig_a, orig_t, count], ...]
+  const heardSet = new Set(pairs.map(p => (p[0]||'') + '\x00' + (p[1]||'')));
+  HEARD = {{}};
+  for (const [cs, albumPairs] of Object.entries(ALL_PAIRS)) {{
+    let n = 0;
+    for (const [a, t] of albumPairs) {{
+      if (heardSet.has(a + '\x00' + t)) n++;
+    }}
+    if (n > 0) HEARD[cs] = n;
+  }}
+  if (treeRoot) render();
+  if (_currentPanelSlug) showPanel(_currentPanelSlug);
 }}
 
-// Init: restore from localStorage
+async function loadUser() {{
+  const inp    = document.getElementById('user-input');
+  const status = document.getElementById('user-status');
+  const btn    = document.getElementById('user-load-btn');
+  const username = (inp.value || '').trim().toLowerCase();
+  if (!username) return;
+
+  status.textContent = 'Buscando en caché…';
+  try {{
+    const db   = await _openIDB();
+    const data = await new Promise((res, rej) => {{
+      const req = db.transaction('sessions','readonly').objectStore('sessions').get(username);
+      req.onsuccess = e => res(e.target.result || null);
+      req.onerror   = e => rej(e.target.error);
+    }});
+    if (data?.pairs?.length) {{
+      localStorage.setItem('mh_user', username);
+      status.textContent = `✓ ${{data.pairs.length.toLocaleString()}} álbumes (caché)`;
+      _computeHeardFromPairs(data.pairs);
+      return;
+    }}
+  }} catch(e) {{}}
+
+  // Fetch from Flask backend
+  if (_scrobbleEs) {{ _scrobbleEs.close(); _scrobbleEs = null; }}
+  status.textContent = 'Conectando…';
+  btn.disabled = true;
+
+  _scrobbleEs = new EventSource(`/api/scrobbles?user=${{encodeURIComponent(username)}}`);
+  _scrobbleEs.onmessage = async (e) => {{
+    const msg = JSON.parse(e.data);
+    if (msg.error) {{
+      status.textContent = `✗ ${{msg.error}}`;
+      _scrobbleEs.close(); _scrobbleEs = null;
+      btn.disabled = false;
+      return;
+    }}
+    if (msg.done) {{
+      _scrobbleEs.close(); _scrobbleEs = null;
+      btn.disabled = false;
+      localStorage.setItem('mh_user', username);
+      status.textContent = `✓ ${{msg.count.toLocaleString()}} álbumes`;
+      const sessionData = {{
+        user: username, pairs: msg.heard,
+        fetched_at: msg.fetched_at,
+        last_scrobble_ts: msg.last_scrobble_ts,
+        last_scrobble_artist: msg.last_scrobble_artist,
+        last_scrobble_track: msg.last_scrobble_track,
+      }};
+      try {{
+        const db = await _openIDB();
+        await new Promise((res, rej) => {{
+          const tx = db.transaction('sessions','readwrite');
+          tx.objectStore('sessions').put(sessionData);
+          tx.oncomplete = res; tx.onerror = err => rej(err.target.error);
+        }});
+      }} catch(err) {{ console.warn('IDB save:', err); }}
+      _computeHeardFromPairs(msg.heard);
+    }} else {{
+      status.textContent = `Pág.${{msg.page}}/${{msg.total_pages}} · ${{(msg.count||0).toLocaleString()}}…`;
+    }}
+  }};
+  _scrobbleEs.onerror = () => {{
+    status.textContent = '✗ Error de conexión';
+    _scrobbleEs.close(); _scrobbleEs = null;
+    btn.disabled = false;
+  }};
+}}
+
+// Init: restore session from localStorage / IDB
 (function() {{
   try {{
     const u = localStorage.getItem('mh_user');
-    if (u && MH_USERS_META.includes(u)) updateSecUsers(u);
+    if (u) {{
+      const inp = document.getElementById('user-input');
+      if (inp) inp.value = u;
+      loadHeardFromIdb();
+    }}
   }} catch(e) {{}}
-  loadHeardFromIdb();
 }})();
 
 </script>
-{_mh_user_modal_js(users or [], on_select_js="if (u) updateSecUsers(u); else updateSecUsers(null); loadHeardFromIdb();")}
 </body>
 </html>
 """
@@ -1016,7 +1080,7 @@ def run(args: argparse.Namespace) -> None:
         genres_json = Path(args.genres_json)
     else:
         candidates = [
-            mh_db.parent.parent / "docs/must_hear/rym_charts/rym_genres.json",
+            mh_db.parent.parent / "rym_genres.json",
             mh_db.parent / "rym_genres.json",
         ]
         genres_json = next((p for p in candidates if p.exists()), None)
@@ -1026,7 +1090,7 @@ def run(args: argparse.Namespace) -> None:
             )
 
     out_path = Path(getattr(args, "output", "") or
-                    str(mh_db.parent.parent / "docs/must_hear/rym_genre_tree.html"))
+                    str(mh_db.parent.parent / "rym_genre_tree.html"))
 
     print(f"📂 genres JSON : {genres_json}")
     print(f"🗄  must_hear DB: {mh_db}")
@@ -1036,22 +1100,23 @@ def run(args: argparse.Namespace) -> None:
 
     charts_dir = out_path.parent / "rym_charts"
 
+    n_yt = getattr(args, "yt_videos", 15)
+
     conn = sqlite3.connect(str(mh_db))
     scraped_map  = get_scraped_collections(conn, charts_dir=charts_dir)
     top_albums   = get_top_albums_per_collection(
-        conn, list(scraped_map.keys()), n_yt=15, n_fetch=40, charts_dir=charts_dir
+        conn, list(scraped_map.keys()), n_yt=n_yt, n_fetch=max(n_yt * 3, 40), charts_dir=charts_dir
     )
     all_pairs    = get_all_album_pairs_per_collection(
         conn, list(scraped_map.keys()), charts_dir=charts_dir
     )
-    users = [r[0] for r in conn.execute("SELECT username FROM users ORDER BY username").fetchall()]
     conn.close()
-    print(f"✅ {len(scraped_map)} scraped collections")
+    print(f"✅ {len(scraped_map)} scraped collections  (top {n_yt} vídeos por colección)")
 
     panel_data = build_panel_data(genre_tree, scraped_map, top_albums)
     generated  = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    html = render_html(genre_tree, panel_data, scraped_map, generated, users=users, all_pairs=all_pairs)
+    html = render_html(genre_tree, panel_data, scraped_map, generated, all_pairs=all_pairs)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
     print(f"✨ {out_path}  ({len(html)//1024}KB)")
@@ -1062,6 +1127,8 @@ def main() -> None:
     p.add_argument("--mh-db",       required=True, help="Path to must_hear DB")
     p.add_argument("--genres-json", default="",    help="Path to rym_genres.json")
     p.add_argument("--output",      default="",    help="Output HTML path")
+    p.add_argument("--yt-videos",   type=int, default=15,
+                   help="Max YouTube videos to embed per genre panel (default: 15)")
     run(p.parse_args())
 
 
