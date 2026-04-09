@@ -2412,6 +2412,738 @@ function idbDownloadSession(username) {
     URL.revokeObjectURL(a.href);
   });
 }
+
+function saveExtraUserJSON(idx) {
+  const u = extraUsers[idx];
+  if (!u) return;
+  const blob = new Blob([JSON.stringify({ version:1, user: u.user, count: u.count, fetched_at: u.fetched_at, heard: u.pairs }, null, 0)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `mustlisten_${u.user}_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function addExtraUser() {
+  const inp = document.getElementById('inp-extra-user');
+  const prog = document.getElementById('um-extra-progress');
+  const user = inp.value.trim();
+  if (!user) return;
+  if (extraUsers.some(u => u.user.toLowerCase() === user.toLowerCase())) {
+    inp.value = ''; return;
+  }
+  const btn = document.getElementById('btn-extra-lfm');
+  btn.disabled = true; inp.disabled = true;
+  prog.textContent = 'Conectando con Last.fm...';
+  try {
+    const [userInfo, lfmResult] = await Promise.all([
+      fetch(`/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
+      fetchScrobblesSSE(user, msg => {
+        prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+      }),
+    ]);
+    const heard     = lfmResult.heard;
+    const color     = USER_COLORS[extraUsers.length % USER_COLORS.length];
+    const image     = userInfo?.ok ? (userInfo.image || '') : '';
+    const realUser  = userInfo?.ok ? userInfo.username : user;
+    const fetched_at = Math.floor(Date.now()/1000);
+    const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
+    const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
+    const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
+    extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    saveExtraUsersLS();
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    inp.value = '';
+    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes`;
+    if (allAlbums.length) applyCollection();
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false; inp.disabled = false;
+  }
+}
+
+async function syncExtraUser(idx) {
+  const u = extraUsers[idx];
+  if (!u) return;
+  const prog = document.getElementById('um-extra-progress');
+  prog.textContent = `Sincronizando ${u.user}...`;
+  try {
+    const url = `/api/scrobbles/since?user=${encodeURIComponent(u.user)}&since=${u.fetched_at || 0}`;
+    const r = await fetch(url);
+    if (!r.ok) { const t = await r.text(); throw new Error(`Error ${r.status}: ${t.slice(0, 120)}`); }
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    const existing = new Set(u.pairs.map(p => p[0] + '|' + p[1]));
+    const added = data.new_pairs.filter(p => !existing.has(p[0] + '|' + p[1]));
+    extraUsers[idx].pairs      = [...u.pairs, ...added];
+    extraUsers[idx].count      = extraUsers[idx].pairs.length;
+    extraUsers[idx].fetched_at = data.fetched_at;
+    if (data.last_scrobble_ts && data.last_scrobble_ts > (extraUsers[idx].last_scrobble_ts || 0)) {
+      extraUsers[idx].last_scrobble_ts     = data.last_scrobble_ts;
+      extraUsers[idx].last_scrobble_artist = data.last_scrobble_artist || '';
+      extraUsers[idx].last_scrobble_track  = data.last_scrobble_track  || '';
+    }
+    saveExtraUsersLS();
+    await idbSave({ user: extraUsers[idx].user, count: extraUsers[idx].count, fetched_at: extraUsers[idx].fetched_at, heard: extraUsers[idx].pairs, last_scrobble_ts: extraUsers[idx].last_scrobble_ts || 0, last_scrobble_artist: extraUsers[idx].last_scrobble_artist || '', last_scrobble_track: extraUsers[idx].last_scrobble_track || '' });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    prog.textContent = `✓ ${u.user}: +${added.length} nuevos (total ${extraUsers[idx].count.toLocaleString()})`;
+    if (allAlbums.length) applyCollection();
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  }
+}
+
+document.getElementById('btn-extra-lfm').addEventListener('click', addExtraUser);
+document.getElementById('inp-extra-user').addEventListener('keydown', e => { if (e.key === 'Enter') addExtraUser(); });
+
+// ── Friends loader ─────────────────────────────────────────────────────────
+document.getElementById('btn-load-friends').addEventListener('click', loadFriends);
+
+async function loadFriends() {
+  const listEl = document.getElementById('friends-list');
+  const btn    = document.getElementById('btn-load-friends');
+  const user   = heardCache?.user || document.getElementById('inp-user').value.trim();
+  if (!user) {
+    listEl.innerHTML = '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Carga primero el usuario principal.</div>';
+    return;
+  }
+  btn.disabled = true;
+  listEl.innerHTML = '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Cargando amigos…</div>';
+  try {
+    const data = await fetch(`/api/friends?user=${encodeURIComponent(user)}`).then(r => r.json());
+    if (!data.ok || !data.friends.length) {
+      listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">${escH(data.error || 'Este usuario no tiene amigos en Last.fm.')}</div>`;
+      return;
+    }
+    renderFriendsList(data.friends);
+  } catch(e) {
+    listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Error: ${escH(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderFriendsList(friends) {
+  const listEl = document.getElementById('friends-list');
+  const alreadyAdded = new Set(extraUsers.map(u => u.user.toLowerCase()));
+  listEl.innerHTML = friends.map(f => {
+    const added = alreadyAdded.has(f.username.toLowerCase());
+    const avatar = f.image
+      ? `<img class="fr-avatar" src="${escH(f.image)}" alt="" onerror="this.style.display='none'">`
+      : `<span class="fr-avatar" style="background:var(--bg3);display:inline-block"></span>`;
+    return `<div class="fr-row" id="fr-row-${escH(f.username.toLowerCase().replace(/[^a-z0-9]/g,''))}">
+      ${avatar}
+      <span class="fr-name">${escH(f.username)}</span>
+      <button class="btn-sm fr-add" ${added ? 'disabled' : ''} onclick="addExtraUserByName('${escH(f.username)}', this)">
+        ${added ? '✓' : 'Añadir'}
+      </button>
+    </div>`;
+  }).join('');
+}
+
+async function addExtraUserByName(username, btn) {
+  if (!username) return;
+  if (extraUsers.some(u => u.user.toLowerCase() === username.toLowerCase())) return;
+  const prog = document.getElementById('um-extra-progress');
+  btn.disabled = true;
+  btn.textContent = '…';
+  prog.textContent = `Cargando ${username}…`;
+  try {
+    const [userInfo, lfmResult] = await Promise.all([
+      fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null),
+      fetchScrobblesSSE(username, msg => {
+        prog.textContent = `${username}: página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+      }),
+    ]);
+    const heard      = lfmResult.heard;
+    const color      = USER_COLORS[extraUsers.length % USER_COLORS.length];
+    const image      = userInfo?.ok ? (userInfo.image || '') : '';
+    const realUser   = userInfo?.ok ? userInfo.username : username;
+    const fetched_at = Math.floor(Date.now()/1000);
+    const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
+    const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
+    const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
+    extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    saveExtraUsersLS();
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    btn.textContent = '✓';
+    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes`;
+    const frList = document.getElementById('friends-list');
+    if (frList?.children.length) {
+      frList.querySelectorAll('.fr-add').forEach(b => {
+        const row = b.closest('.fr-row');
+        const name = row?.querySelector('.fr-name')?.textContent?.trim() || '';
+        if (extraUsers.some(eu => eu.user.toLowerCase() === name.toLowerCase())) {
+          b.disabled = true; b.textContent = '✓';
+        }
+      });
+    }
+    if (allAlbums.length) applyCollection();
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = 'Añadir';
+    prog.textContent = 'Error: ' + e.message;
+  }
+}
+
+document.getElementById('btn-extra-json').addEventListener('click', () => {
+  document.getElementById('inp-extra-json').click();
+});
+document.getElementById('inp-extra-json').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const prog = document.getElementById('um-extra-progress');
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data.heard || !data.user) throw new Error('Formato inválido');
+    if (extraUsers.some(u => u.user.toLowerCase() === data.user.toLowerCase())) {
+      prog.textContent = `${data.user} ya está en la lista.`; return;
+    }
+    const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
+    const ft = data.fetched_at || 0;
+    extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: ft, image: '' });
+    saveExtraUsersLS();
+    await idbSave({ user: data.user, count: data.heard.length, fetched_at: ft, heard: data.heard });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
+    if (allAlbums.length) applyCollection();
+  } catch(err) {
+    prog.textContent = 'Error: ' + err.message;
+  }
+  e.target.value = '';
+});
+
+function removeExtraUser(idx) {
+  extraUsers.splice(idx, 1);
+  saveExtraUsersLS();
+  buildExtraUsersList();
+  renderIdbExtraList();
+  if (allAlbums.length) applyCollection();
+}
+
+// ── Helper: consume /api/scrobbles SSE stream ─────────────────────────────
+async function fetchScrobblesSSE(user, onProgress) {
+  const response = await fetch(`/api/scrobbles?user=${encodeURIComponent(user)}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const reader   = response.body.getReader();
+  const decoder  = new TextDecoder();
+  let buffer = '';
+  let result = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop();
+    for (const part of parts) {
+      if (!part.startsWith('data: ')) continue;
+      const msg = JSON.parse(part.slice(6));
+      if (msg.error) throw new Error(msg.error);
+      if (msg.done) result = msg;
+      else onProgress(msg);
+    }
+  }
+  if (!result) throw new Error('No se recibió respuesta del servidor');
+  return result;
+}
+
+// ── Init: load collections into sidebar ───────────────────────────────────
+(async () => {
+  loadExtraUsersLS();
+  if (extraUsers.length) {
+    try {
+      const sessions = await idbList();
+      const inIdb = new Set(sessions.map(s => s.user.toLowerCase()));
+      const valid = extraUsers.filter(u => inIdb.has(u.user.toLowerCase()));
+      if (valid.length !== extraUsers.length) {
+        extraUsers.length = 0;
+        valid.forEach(u => extraUsers.push(u));
+        saveExtraUsersLS();
+      }
+    } catch(e) {}
+  }
+  try {
+    const cols = await fetch('/api/collections').then(r => r.json());
+    renderCollsSidebar(cols);
+  } catch(e) {
+    document.getElementById('colls-body').innerHTML = '<div class="sb-empty">Error cargando</div>';
+  }
+  await renderIdbList();
+  await renderIdbExtraList();
+  buildExtraUsersList();
+})();
+
+function renderCollsSidebar(cols) {
+  const groups = {};
+  for (const c of cols) {
+    const g = c.group || 'Otros';
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(c);
+  }
+  const order = Object.keys(groups).sort((a,b) => a.localeCompare(b));
+  let html = '';
+  for (const g of order) {
+    const gid = 'grp-' + g.replace(/[^a-z0-9]/gi,'_');
+    const isRym = (g === 'Rate Your Music');
+    html += `<div class="sb-grp" id="${gid}">
+      <div class="sb-grp-hdr" onclick="toggleGrp('${gid}')">
+        <span class="sb-grp-name">${escH(g)}</span>
+        <span class="sb-grp-arrow">▶</span>
+      </div>
+      <div class="sb-grp-body">`;
+    if (isRym) {
+      html += buildRymTree(groups[g]);
+    } else {
+      for (const c of groups[g]) {
+        const lbl = c.name.replace(/^(AOTY Must Hear|Scaruffi|Bandcamp:|Kerrang!|Pitchfork) ?/,'').trim() || c.name;
+        html += `<div class="sb-coll-item" data-slug="${escH(c.slug)}" onclick="selectCollection('${escH(c.slug)}')">
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escH(lbl)}</span>
+          ${c.total_albums ? `<span class="sb-coll-count">${c.total_albums}</span>` : ''}
+        </div>`;
+      }
+    }
+    html += `</div></div>`;
+  }
+  document.getElementById('colls-body').innerHTML = html;
+}
+
+function buildRymTree(cols) {
+  const byTopGenre = {};
+  const legacy = [];
+  for (const c of cols) {
+    const tp = c.tree_path;
+    if (!tp) { legacy.push(c); continue; }
+    const top = tp[0];
+    if (!byTopGenre[top]) byTopGenre[top] = { self: null, subs: [] };
+    if (tp.length === 1) byTopGenre[top].self = c;
+    else byTopGenre[top].subs.push({ label: tp[tp.length-1], col: c });
+  }
+  let html = '';
+  const topGenres = Object.keys(byTopGenre).sort();
+  for (const top of topGenres) {
+    const node   = byTopGenre[top];
+    const nid    = 'tree-' + top.replace(/[^a-z0-9]/gi,'_');
+    const selfSlug = node.self ? escH(node.self.slug) : '';
+    const hasSubs  = node.subs.length > 0;
+    html += `<div class="tree-genre" id="${nid}">
+      <div class="tree-genre-hdr"
+           onclick="${hasSubs ? `toggleTree('${nid}');` : ''}${selfSlug ? `selectCollection('${selfSlug}')` : ''}"
+           data-slug="${selfSlug}">
+        <span class="tree-genre-name">${escH(top)}</span>
+        ${hasSubs ? `<span class="tree-genre-arrow">▶</span>` : ''}
+        ${node.self && node.self.total_albums ? `<span class="sb-coll-count">${node.self.total_albums}</span>` : ''}
+      </div>`;
+    if (hasSubs) {
+      html += `<div class="tree-sub">`;
+      for (const sub of node.subs.sort((a,b)=>a.label.localeCompare(b.label))) {
+        html += `<div class="tree-sub-item" data-slug="${escH(sub.col.slug)}"
+            onclick="selectCollection('${escH(sub.col.slug)}')">
+          ${escH(sub.label)}
+          ${sub.col.total_albums ? `<span class="sb-coll-count" style="margin-left:auto">${sub.col.total_albums}</span>` : ''}
+        </div>`;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+  if (legacy.length) {
+    html += `<div style="padding:0.3rem 0.9rem 0.1rem;font-family:var(--mono);font-size:0.55rem;color:var(--ink3);letter-spacing:.1em;text-transform:uppercase;border-top:1px solid var(--border);margin-top:0.3rem">Otros</div>`;
+    for (const c of legacy) {
+      html += `<div class="sb-coll-item" data-slug="${escH(c.slug)}" onclick="selectCollection('${escH(c.slug)}')">
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escH(c.name)}</span>
+        ${c.total_albums ? `<span class="sb-coll-count">${c.total_albums}</span>` : ''}
+      </div>`;
+    }
+  }
+  return html;
+}
+
+function toggleGrp(id) {
+  document.getElementById(id).classList.toggle('open');
+}
+
+function toggleTree(id) {
+  document.getElementById(id).classList.toggle('open');
+}
+
+async function selectCollection(slug) {
+  activeSlug = slug;
+  document.querySelectorAll('.sb-coll-item, .tree-genre-hdr, .tree-sub-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.slug === slug);
+  });
+  activeGenres.clear();
+  activeDecades.clear();
+  closeSidebar();
+  await loadAndRender(slug);
+}
+
+// ── User badge (header) ────────────────────────────────────────────────────
+function showUserBadge(username, img, albumCount, lastTs, lastArtist, lastTrack) {
+  const setAvatar = (el, src) => { el.src = src || ''; el.style.display = src ? '' : 'none'; };
+  setAvatar(document.getElementById('badge-avatar'), img);
+  setAvatar(document.getElementById('um-avatar'),    img);
+  const countStr = typeof albumCount === 'number' ? albumCount.toLocaleString() + ' álb.' : albumCount;
+  const dateStr  = lastTs ? new Date(lastTs * 1000).toLocaleDateString() : '';
+  const lastStr  = (lastArtist && lastTrack) ? `${lastArtist} — ${lastTrack}` : '';
+  const metaStr  = [countStr, dateStr].filter(Boolean).join(' · ');
+  document.getElementById('badge-name').textContent  = username;
+  document.getElementById('badge-plays').textContent = metaStr;
+  document.getElementById('badge-inline').style.display = 'flex';
+  const btnU = document.getElementById('btn-usuario');
+  btnU.textContent = username;
+  btnU.classList.add('loaded');
+  document.getElementById('um-username').textContent = username;
+  document.getElementById('um-usermeta').textContent = lastStr
+    ? `${countStr} · ${dateStr}${lastStr ? ' · ' + lastStr : ''}`
+    : metaStr;
+  document.getElementById('um-current-user').classList.add('visible');
+  document.getElementById('btn-save-session').style.display  = '';
+  document.getElementById('btn-sync-session').textContent    = '↻ Sync';
+}
+function hideUserBadge() {
+  document.getElementById('badge-inline').style.display = 'none';
+  const btnU = document.getElementById('btn-usuario');
+  btnU.textContent = 'USUARIO'; btnU.classList.remove('loaded');
+  document.getElementById('um-current-user').classList.remove('visible');
+  document.getElementById('btn-save-session').style.display = 'none';
+}
+
+// ── Session: guardar JSON ─────────────────────────────────────────────────
+document.getElementById('btn-save-session').addEventListener('click', () => {
+  if (!heardCache) return;
+  const blob = new Blob([JSON.stringify({
+    version: 1, user: heardCache.user, count: heardCache.count,
+    fetched_at: heardCache.fetched_at, heard: heardCache.pairs,
+  }, null, 0)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `mustlisten_${heardCache.user}_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+// ── Session: importar JSON ────────────────────────────────────────────────
+document.getElementById('btn-import').addEventListener('click', () => inpSession.click());
+inpSession.addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const prog = document.getElementById('um-progress');
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data.heard || !data.user) throw new Error('Formato inválido');
+    loadHeardCache(data);
+    prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
+    if (activeSlug) { closeUserModal(); await loadAndRender(activeSlug); }
+  } catch(err) {
+    prog.textContent = 'Error: ' + err.message;
+  }
+  e.target.value = '';
+});
+
+// ── Session: sync incremental ──────────────────────────────────────────────
+document.getElementById('btn-sync-session').addEventListener('click', async () => {
+  if (!heardCache) return;
+  const btn = document.getElementById('btn-sync-session');
+  const prog = document.getElementById('um-progress');
+  btn.disabled = true;
+  btn.textContent = '↻ ...';
+  prog.textContent = 'Sincronizando con Last.fm...';
+  try {
+    const knownCount = heardCache.count || 0;
+    const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${knownCount}`;
+    const data = await fetch(url).then(r => r.json());
+    if (data.error) { prog.textContent = 'Error: ' + data.error; return; }
+    if (data.new_count === 0) {
+      prog.textContent = '✓ Al día'; btn.textContent = '↻ Sync'; return;
+    }
+    if (data.full_replace) {
+      const prev = heardCache.count;
+      heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
+      const added = heardCache.count - prev;
+      showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+      if (activeSlug && collCache[activeSlug]) applyCollection();
+      prog.textContent = added > 0 ? `✓ +${added} álbumes nuevos` : '✓ Al día';
+    }
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '↻ Sync';
+  }
+});
+
+function loadHeardCache(data) {
+  heardCache = {
+    user:                data.user,
+    pairs:               data.heard,
+    count:               data.heard.length,
+    fetched_at:          data.fetched_at          || 0,
+    last_scrobble_ts:    data.last_scrobble_ts    || 0,
+    last_scrobble_artist: data.last_scrobble_artist || '',
+    last_scrobble_track: data.last_scrobble_track  || '',
+  };
+  loadedUser    = data.user.toLowerCase();
+  inpUser.value = data.user;
+  showUserBadge(data.user, '', data.heard.length, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+  idbSave({
+    user:                heardCache.user,
+    count:               heardCache.count,
+    fetched_at:          heardCache.fetched_at,
+    heard:               heardCache.pairs,
+    last_scrobble_ts:    heardCache.last_scrobble_ts,
+    last_scrobble_artist: heardCache.last_scrobble_artist,
+    last_scrobble_track: heardCache.last_scrobble_track,
+  }).then(() => { renderIdbList(); renderIdbExtraList(); }).catch(() => {});
+}
+
+// ── Fuzzy match ────────────────────────────────────────────────────────────
+function norm(s) { return (s || '').toLowerCase().replace(/[^\w]/g, ''); }
+
+function checkHeard(pairs, artist, title) {
+  const aN = norm(artist), tN = norm(title);
+  if (!tN) return false;
+  for (const [uA, uT] of pairs) {
+    if (!uT) continue;
+    const tm = (tN === uT) || tN.includes(uT) || (uT.includes(tN) && uT.length >= tN.length * 0.8);
+    if (!tm) continue;
+    if (!aN || aN.includes(uA) || uA.includes(aN)) return true;
+  }
+  return false;
+}
+
+// ── Main: Cargar scrobbles ─────────────────────────────────────────────────
+btnGo.addEventListener('click', doLoadUser);
+inpUser.addEventListener('keydown', e => { if (e.key === 'Enter') doLoadUser(); });
+
+async function doLoadUser() {
+  const user = inpUser.value.trim();
+  if (!user) return;
+  hideError();
+  const prog = document.getElementById('um-progress');
+  btnGo.disabled = true;
+  try {
+    prog.textContent = 'Conectando con Last.fm...';
+    hideResults();
+    const result = await fetchScrobblesSSE(user, msg => {
+      prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes únicos`;
+    });
+    loadHeardCache({
+      user, heard: result.heard,
+      fetched_at:          Math.floor(Date.now()/1000),
+      last_scrobble_ts:    result.last_scrobble_ts    || 0,
+      last_scrobble_artist: result.last_scrobble_artist || '',
+      last_scrobble_track: result.last_scrobble_track  || '',
+    });
+    prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados`;
+    if (activeSlug) { closeUserModal(); await loadAndRender(activeSlug); }
+    else closeUserModal();
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  } finally {
+    btnGo.disabled = false;
+  }
+}
+
+// ── Cover enrichment ──────────────────────────────────────────────────────
+function enrichMissingCovers() {
+  if (_enrichEs) { _enrichEs.close(); _enrichEs = null; }
+  const toEnrich = [];
+  for (let i = 0; i < allAlbums.length && toEnrich.length < 50; i++) {
+    if (!allAlbums[i].cover) toEnrich.push({ idx: i, artist: allAlbums[i].artist, title: allAlbums[i].title });
+  }
+  if (!toEnrich.length) return;
+  const albumsParam = encodeURIComponent(JSON.stringify(toEnrich.map(a => [a.artist, a.title])));
+  _enrichEs = new EventSource(`/api/enrich_albums?albums=${albumsParam}`);
+  _enrichEs.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.done) { _enrichEs.close(); _enrichEs = null; return; }
+    if (typeof msg.i !== 'number' || !msg.cover_url) return;
+    const albumIdx = toEnrich[msg.i].idx;
+    allAlbums[albumIdx].cover = msg.cover_url;
+    if (msg.mbid) allAlbums[albumIdx].mbid = msg.mbid;
+    if (activeSlug && collCache[activeSlug]?.[albumIdx]) {
+      collCache[activeSlug][albumIdx].cover = msg.cover_url;
+      if (msg.mbid) collCache[activeSlug][albumIdx].mbid = msg.mbid;
+    }
+    const card = document.querySelector(`.card[data-idx="${albumIdx}"]`);
+    if (!card) return;
+    const ph = card.querySelector('.card-placeholder');
+    let img = card.querySelector('.card-cover');
+    if (img) {
+      img.src = msg.cover_url; img.style.display = '';
+      if (ph) ph.style.display = 'none';
+    } else if (ph) {
+      img = document.createElement('img');
+      img.className = 'card-cover'; img.src = msg.cover_url;
+      img.loading = 'lazy'; img.alt = '';
+      img.onerror = function() { this.style.display='none'; if(ph) ph.style.display='flex'; };
+      card.insertBefore(img, ph); ph.style.display = 'none';
+    }
+  };
+  _enrichEs.onerror = () => { if (_enrichEs) { _enrichEs.close(); _enrichEs = null; } };
+}
+
+async function loadAndRender(slug) {
+  if (_enrichEs) { _enrichEs.close(); _enrichEs = null; }
+  if (_loadController) _loadController.abort();
+  _loadController = new AbortController();
+  const signal = _loadController.signal;
+  grid.innerHTML = '';
+  hideError();
+  showLoading('Cargando colección...');
+  try {
+    if (!collCache[slug]) {
+      const r = await fetch(`/api/collection?slug=${encodeURIComponent(slug)}`, { signal });
+      const cData = await r.json();
+      if (cData.error) throw new Error(cData.error);
+      collCache[slug] = cData.albums;
+    }
+    if (!signal.aborted) {
+      applyCollection(slug);
+      hideLoading();
+    }
+  } catch(e) {
+    if (e.name === 'AbortError') return;
+    hideLoading();
+    showError('Error: ' + e.message);
+  }
+}
+
+function applyCollection(slug) {
+  slug = slug || activeSlug;
+  const raw = collCache[slug];
+  if (!raw) return;
+
+  allAlbums = raw.map(a => ({
+    ...a,
+    heard:      heardCache ? checkHeard(heardCache.pairs, a.artist, a.title) : false,
+    extraHeard: extraUsers.map(u => checkHeard(u.pairs, a.artist, a.title)),
+  }));
+
+  const heardN   = allAlbums.filter(a => a.heard).length;
+  const missingN = allAlbums.length - heardN;
+  const pct      = allAlbums.length ? Math.round(heardN / allAlbums.length * 100) : 0;
+
+  document.getElementById('s-total').textContent   = allAlbums.length;
+  document.getElementById('s-heard').textContent   = heardN;
+  document.getElementById('s-missing').textContent = missingN;
+  document.getElementById('s-pct').textContent     = pct + '%';
+  setTimeout(() => { document.getElementById('prog-fill').style.width = pct + '%'; }, 50);
+
+  statsBar.classList.add('visible');
+  filtersEl.classList.add('visible');
+  buildExtraUsersList();
+
+  buildGenrePills();
+  buildDecadePills();
+  renderGrid();
+  enrichMissingCovers();
+}
+
+// ── Genre pills ────────────────────────────────────────────────────────────
+function buildGenrePills() {
+  const freq = {};
+  for (const a of allAlbums)
+    for (const g of (a.genres || []))
+      freq[g] = (freq[g] || 0) + 1;
+  const top = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,20).map(e=>e[0]);
+  if (!top.length) {
+    document.getElementById('genre-pills').innerHTML = '<div class="sb-empty">Sin géneros</div>';
+    return;
+  }
+  document.getElementById('genre-pills').innerHTML = top.map(g =>
+    `<span class="pill${activeGenres.has(g)?' active':''}" onclick="toggleGenre('${escH(g)}')">${escH(g)}</span>`
+  ).join('');
+}
+
+function toggleGenre(g) {
+  if (activeGenres.has(g)) activeGenres.delete(g);
+  else activeGenres.add(g);
+  buildGenrePills();
+  renderGrid();
+}
+
+// ── Decade pills ───────────────────────────────────────────────────────────
+function buildDecadePills() {
+  const decades = new Set();
+  for (const a of allAlbums)
+    if (a.year) decades.add(Math.floor(a.year / 10) * 10);
+  const sorted = [...decades].sort();
+  if (!sorted.length) {
+    document.getElementById('decade-pills').innerHTML = '<div class="sb-empty">Sin fechas</div>';
+    return;
+  }
+  document.getElementById('decade-pills').innerHTML = sorted.map(d =>
+    `<span class="pill${activeDecades.has(d)?' active':''}" onclick="toggleDecade(${d})">${d}s</span>`
+  ).join('');
+}
+
+function toggleDecade(d) {
+  if (activeDecades.has(d)) activeDecades.delete(d);
+  else activeDecades.add(d);
+  buildDecadePills();
+  renderGrid();
+}
+
+// ── Grid ───────────────────────────────────────────────────────────────────
+function renderGrid() {
+  let f = [...allAlbums];
+  if (activeFilter === 'missing')    f = f.filter(a => !a.heard);
+  if (activeFilter === 'heard')      f = f.filter(a =>  a.heard);
+  if (activeFilter.startsWith('extra_')) {
+    const idx = parseInt(activeFilter.slice(6));
+    f = f.filter(a => a.extraHeard && a.extraHeard[idx]);
+  }
+  if (activeGenres.size)  f = f.filter(a => (a.genres||[]).some(g => activeGenres.has(g)));
+  if (activeDecades.size) f = f.filter(a => a.year && activeDecades.has(Math.floor(a.year/10)*10));
+  if (activeSort === 'year_asc')  f.sort((a,b) => (a.year||0)-(b.year||0));
+  if (activeSort === 'year_desc') f.sort((a,b) => (b.year||0)-(a.year||0));
+  if (activeSort === 'artist')    f.sort((a,b) => a.artist.localeCompare(b.artist));
+  if (activeSort === 'rank')      f.sort((a,b) => (a.n||0)-(b.n||0));
+
+  if (!f.length) { grid.innerHTML = ''; emptyEl.classList.add('visible'); return; }
+  emptyEl.classList.remove('visible');
+  grid.innerHTML = f.map(a => cardHTML(a)).join('');
+  grid.querySelectorAll('.card').forEach(c => {
+    c.addEventListener('click', () => openDetailPanel({ type:'collection', idx: parseInt(c.dataset.idx) }));
+  });
+}
+
+function cardHTML(a) {
+  const cls  = a.heard ? 'heard' : 'missing';
+  const idx  = allAlbums.indexOf(a);
+  const imgEl = a.cover
+    ? `<img class="card-cover" src="${escH(a.cover)}" loading="lazy" alt="${escH(a.title)}"
+          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+    : '';
+  const ph = `<div class="card-placeholder" ${a.cover ? 'style="display:none"' : ''}>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+    </svg></div>`;
+  const dots = (a.extraHeard && a.extraHeard.length)
+    ? `<div class="extra-dots">${a.extraHeard.map((h, i) =>
+        `<div class="extra-dot${h ? ' heard' : ''}" style="color:${extraUsers[i]?.color||'#fff'};background:${extraUsers[i]?.color||'#fff'}"></div>`
+      ).join('')}</div>`
+    : '';
+  return `<div class="card ${cls}" data-idx="${idx}">
+    ${imgEl}${ph}
+    <div class="card-overlay"></div>
+    <div class="card-n">${a.n}</div>${dots}
+    <div class="card-info">
+      <div class="card-title">${escH(a.title)}</div>
+      <div class="card-artist">${escH(a.artist)}</div>
+      ${a.year ? `<div class="card-year">${a.year}</div>` : ''}
+    </div>
+  </div>`;
+}
 </script>
 </body>
 </html>"""

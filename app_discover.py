@@ -509,40 +509,75 @@ def index():
     return render_template_string(HTML_TEMPLATE)
 
 
+@app.route("/manifest.json")
+def manifest():
+    return Response(json.dumps({
+        "name": "tumtumpa",
+        "short_name": "tumtumpa",
+        "description": "Descubre qué escuchan tus amigos que tú no has escuchado aún",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#0a0a12",
+        "theme_color": "#7c6fff",
+        "icons": []
+    }), content_type="application/json")
+
+
+@app.route("/sw.js")
+def service_worker():
+    sw = (
+        "const CACHE='tumtumpa-v1';\n"
+        "self.addEventListener('install',e=>{self.skipWaiting();});\n"
+        "self.addEventListener('activate',e=>{clients.claim();});\n"
+        "self.addEventListener('fetch',e=>{"
+        "if(e.request.method!=='GET')return;"
+        "e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));"
+        "});\n"
+    )
+    return Response(sw, content_type="application/javascript",
+                    headers={"Service-Worker-Allowed": "/"})
+
+
 # ── HTML Template ──────────────────────────────────────────────────────────────
 
 HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>mustlisten</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>tumtumpa</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#7c6fff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="tumtumpa">
+<meta name="description" content="Descubre qué escuchan tus amigos que tú no has escuchado aún">
 <!-- Umami Analytics -->
 <script defer src="https://cloud.umami.is/script.js" data-website-id="262419b6-9389-4f91-898c-3943726c6dc8"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 /* ── Reset & Variables ─────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:       #0d0d0d;
-  --bg2:      #141414;
-  --bg3:      #1c1c1c;
-  --border:   #2a2a2a;
-  --border2:  #333;
-  --ink:      #e8e2d8;
-  --ink2:     #9a9080;
-  --ink3:     #5a5248;
-  --accent:   #e8c14a;
-  --accent2:  #c8993a;
-  --heard-tint: rgba(232,193,74,0.06);
+  --bg:       #0a0a12;
+  --bg2:      #10101c;
+  --bg3:      #18182a;
+  --border:   #252535;
+  --border2:  #303048;
+  --ink:      #e4e0f0;
+  --ink2:     #8a86a0;
+  --ink3:     #50506a;
+  --accent:   #7c6fff;
+  --accent2:  #5c4fdf;
+  --heard-tint: rgba(124,111,255,0.07);
   --missing-tint: rgba(255,255,255,0.02);
   --red:      #c0392b;
-  --radius:   2px;
+  --radius:   4px;
   --mono:     'DM Mono', monospace;
-  --serif:    'Playfair Display', Georgia, serif;
+  --serif:    'Syne', sans-serif;
   --sans:     'DM Sans', sans-serif;
 }
 
@@ -1539,9 +1574,50 @@ input::placeholder { color: var(--ink3); }
 </head>
 <body>
 
+<!-- ── Welcome screen (shown when no data) ──────────────────────────── -->
+<div id="welcome-screen" style="display:none;position:fixed;inset:0;z-index:200;background:var(--bg);overflow-y:auto;padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0);">
+  <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1.5rem;gap:2rem;max-width:480px;margin:0 auto">
+    <div style="text-align:center">
+      <div style="font-family:var(--serif);font-size:2.5rem;font-weight:800;letter-spacing:-0.02em;line-height:1.1;margin-bottom:0.5rem">
+        tum<span style="color:var(--accent)">tumpa</span>
+      </div>
+      <div style="font-family:var(--mono);font-size:0.72rem;color:var(--ink3);letter-spacing:.12em;text-transform:uppercase">by mustlisten</div>
+    </div>
+
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:1.5rem;display:flex;flex-direction:column;gap:1.2rem;width:100%">
+      <p style="font-size:0.95rem;line-height:1.6;color:var(--ink2)">
+        Compara tu historial de <strong style="color:var(--ink)">Last.fm</strong> con el de tus amigos y descubre qué escuchan ellos que a ti te falta.
+      </p>
+
+      <div style="display:flex;flex-direction:column;gap:0.8rem">
+        <div style="display:flex;gap:0.75rem;align-items:flex-start">
+          <span style="font-family:var(--mono);font-size:0.75rem;color:var(--accent);background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:0.15rem 0.5rem;flex-shrink:0;margin-top:0.1rem">01</span>
+          <span style="font-size:0.85rem;color:var(--ink2);line-height:1.5">Carga <strong style="color:var(--ink)">tu usuario</strong> de Last.fm. Descargamos todos tus álbumes escuchados — puede tardar un minuto, pero se guardan en tu navegador para la próxima vez.</span>
+        </div>
+        <div style="display:flex;gap:0.75rem;align-items:flex-start">
+          <span style="font-family:var(--mono);font-size:0.75rem;color:var(--accent);background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:0.15rem 0.5rem;flex-shrink:0;margin-top:0.1rem">02</span>
+          <span style="font-size:0.85rem;color:var(--ink2);line-height:1.5">Añade <strong style="color:var(--ink)">usuarios secundarios</strong> — amigos, músicos, críticos — cuyo gusto quieras explorar.</span>
+        </div>
+        <div style="display:flex;gap:0.75rem;align-items:flex-start">
+          <span style="font-family:var(--mono);font-size:0.75rem;color:var(--accent);background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:0.15rem 0.5rem;flex-shrink:0;margin-top:0.1rem">03</span>
+          <span style="font-size:0.85rem;color:var(--ink2);line-height:1.5">Pulsa <strong style="color:var(--ink)">Descubrir</strong> junto a cualquier usuario para ver sus álbumes favoritos que tú no has escuchado.</span>
+        </div>
+      </div>
+
+      <button onclick="startFromWelcome()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:0.85rem 1.5rem;font-family:var(--serif);font-weight:700;font-size:1rem;cursor:pointer;letter-spacing:0.02em;transition:background 0.15s">
+        Comenzar →
+      </button>
+    </div>
+
+    <div style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3);text-align:center;line-height:1.6">
+      Los datos se guardan solo en tu navegador (IndexedDB).<br>Puedes exportar e importar JSON en cualquier momento.
+    </div>
+  </div>
+</div>
+
 <!-- ── Header ─────────────────────────────────────────────────────────── -->
 <header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:relative;z-index:10;">
-  <div class="logo" style="font-size:1.3rem">must<em>listen</em></div>
+  <div class="logo" style="font-family:var(--serif);font-size:1.3rem;font-weight:800">tum<em style="color:var(--accent);font-style:normal">tumpa</em></div>
   <div style="flex:1"></div>
   <div id="badge-inline" style="display:none;align-items:center;gap:0.45rem;cursor:pointer;" onclick="openUserModal()">
     <img id="badge-avatar" src="" alt="" style="width:26px;height:26px;border-radius:50%;object-fit:cover;background:var(--bg3);">
@@ -2843,6 +2919,199 @@ function idbDownloadSession(username) {
     URL.revokeObjectURL(a.href);
   });
 }
+
+// ── User badge (header) ────────────────────────────────────────────────────
+function showUserBadge(username, img, albumCount, lastTs, lastArtist, lastTrack) {
+  const setAvatar = (el, src) => { el.src = src || ''; el.style.display = src ? '' : 'none'; };
+  setAvatar(document.getElementById('badge-avatar'), img);
+  setAvatar(document.getElementById('um-avatar'),    img);
+  const countStr = typeof albumCount === 'number' ? albumCount.toLocaleString() + ' álb.' : albumCount;
+  const dateStr  = lastTs ? new Date(lastTs * 1000).toLocaleDateString() : '';
+  const lastStr  = (lastArtist && lastTrack) ? `${lastArtist} — ${lastTrack}` : '';
+  const metaStr  = [countStr, dateStr].filter(Boolean).join(' · ');
+  document.getElementById('badge-name').textContent  = username;
+  document.getElementById('badge-plays').textContent = metaStr;
+  document.getElementById('badge-inline').style.display = 'flex';
+  const btnU = document.getElementById('btn-usuario');
+  btnU.textContent = username;
+  btnU.classList.add('loaded');
+  document.getElementById('um-username').textContent = username;
+  document.getElementById('um-usermeta').textContent = lastStr
+    ? `${countStr} · ${dateStr}${lastStr ? ' · ' + lastStr : ''}`
+    : metaStr;
+  document.getElementById('um-current-user').classList.add('visible');
+  document.getElementById('btn-save-session').style.display  = '';
+  document.getElementById('btn-sync-session').textContent    = '↻ Sync';
+}
+function hideUserBadge() {
+  document.getElementById('badge-inline').style.display = 'none';
+  const btnU = document.getElementById('btn-usuario');
+  btnU.textContent = 'USUARIO'; btnU.classList.remove('loaded');
+  document.getElementById('um-current-user').classList.remove('visible');
+  document.getElementById('btn-save-session').style.display = 'none';
+}
+
+function loadHeardCache(data) {
+  heardCache = {
+    user:                data.user,
+    pairs:               data.heard,
+    count:               data.heard.length,
+    fetched_at:          data.fetched_at          || 0,
+    last_scrobble_ts:    data.last_scrobble_ts    || 0,
+    last_scrobble_artist: data.last_scrobble_artist || '',
+    last_scrobble_track: data.last_scrobble_track  || '',
+  };
+  loadedUser    = data.user.toLowerCase();
+  inpUser.value = data.user;
+  showUserBadge(data.user, '', data.heard.length, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+  idbSave({
+    user:                heardCache.user,
+    count:               heardCache.count,
+    fetched_at:          heardCache.fetched_at,
+    heard:               heardCache.pairs,
+    last_scrobble_ts:    heardCache.last_scrobble_ts,
+    last_scrobble_artist: heardCache.last_scrobble_artist,
+    last_scrobble_track: heardCache.last_scrobble_track,
+  }).then(() => { renderIdbList(); renderIdbExtraList(); }).catch(() => {});
+  dismissWelcome();
+}
+
+// ── Session: guardar JSON ─────────────────────────────────────────────────
+document.getElementById('btn-save-session').addEventListener('click', () => {
+  if (!heardCache) return;
+  const blob = new Blob([JSON.stringify({
+    version: 1, user: heardCache.user, count: heardCache.count,
+    fetched_at: heardCache.fetched_at, heard: heardCache.pairs,
+  }, null, 0)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `mustlisten_${heardCache.user}_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+// ── Session: importar JSON ────────────────────────────────────────────────
+document.getElementById('btn-import').addEventListener('click', () => inpSession.click());
+inpSession.addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const prog = document.getElementById('um-progress');
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data.heard || !data.user) throw new Error('Formato inválido');
+    loadHeardCache(data);
+    prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
+    closeUserModal();
+  } catch(err) {
+    prog.textContent = 'Error: ' + err.message;
+  }
+  e.target.value = '';
+});
+
+// ── Session: sync incremental ──────────────────────────────────────────────
+document.getElementById('btn-sync-session').addEventListener('click', async () => {
+  if (!heardCache) return;
+  const btn = document.getElementById('btn-sync-session');
+  const prog = document.getElementById('um-progress');
+  btn.disabled = true;
+  btn.textContent = '↻ ...';
+  prog.textContent = 'Sincronizando con Last.fm...';
+  try {
+    const knownCount = heardCache.count || 0;
+    const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${knownCount}`;
+    const data = await fetch(url).then(r => r.json());
+    if (data.error) { prog.textContent = 'Error: ' + data.error; return; }
+    if (data.new_count === 0) {
+      prog.textContent = '✓ Al día'; btn.textContent = '↻ Sync'; return;
+    }
+    if (data.full_replace) {
+      heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
+      showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+      prog.textContent = `✓ Al día`;
+    }
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '↻ Sync';
+  }
+});
+
+// ── Main: Cargar scrobbles ─────────────────────────────────────────────────
+btnGo.addEventListener('click', doLoadUser);
+inpUser.addEventListener('keydown', e => { if (e.key === 'Enter') doLoadUser(); });
+
+async function doLoadUser() {
+  const user = inpUser.value.trim();
+  if (!user) return;
+  hideError();
+  const prog = document.getElementById('um-progress');
+  btnGo.disabled = true;
+  try {
+    prog.textContent = 'Conectando con Last.fm...';
+    const result = await fetchScrobblesSSE(user, msg => {
+      prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes únicos`;
+    });
+    loadHeardCache({
+      user, heard: result.heard,
+      fetched_at:          Math.floor(Date.now()/1000),
+      last_scrobble_ts:    result.last_scrobble_ts    || 0,
+      last_scrobble_artist: result.last_scrobble_artist || '',
+      last_scrobble_track: result.last_scrobble_track  || '',
+    });
+    prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados`;
+    closeUserModal();
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  } finally {
+    btnGo.disabled = false;
+  }
+}
+
+// ── Welcome screen ─────────────────────────────────────────────────────────
+function dismissWelcome() {
+  localStorage.setItem('tt_welcomed', '1');
+  document.getElementById('welcome-screen').style.display = 'none';
+}
+
+function startFromWelcome() {
+  dismissWelcome();
+  openUserModal();
+}
+
+// ── PWA Service Worker registration ───────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────
+(async () => {
+  loadExtraUsersLS();
+  // Purge extra users no longer in IDB
+  if (extraUsers.length) {
+    try {
+      const sessions = await idbList();
+      const inIdb = new Set(sessions.map(s => s.user.toLowerCase()));
+      const valid = extraUsers.filter(u => inIdb.has(u.user.toLowerCase()));
+      if (valid.length !== extraUsers.length) {
+        extraUsers.length = 0;
+        valid.forEach(u => extraUsers.push(u));
+        saveExtraUsersLS();
+      }
+    } catch(e) {}
+  }
+  await renderIdbList();
+  await renderIdbExtraList();
+  buildExtraUsersList();
+
+  // Show welcome screen if no data at all and never seen before
+  const welcomed = localStorage.getItem('tt_welcomed');
+  if (!welcomed) {
+    const sessions = await idbList().catch(() => []);
+    if (!sessions.length && !extraUsers.length) {
+      document.getElementById('welcome-screen').style.display = 'block';
+    }
+  }
+})();
 </script>
 </body>
 </html>"""
