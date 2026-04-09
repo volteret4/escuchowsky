@@ -1757,6 +1757,10 @@ input::placeholder { color: var(--ink3); }
 </div>
 
 <script>
+// ── IndexedDB constants (must be before any async init that uses them) ──────
+const IDB_NAME  = 'mustlisten';
+const IDB_STORE = 'sessions';
+
 // ── State ──────────────────────────────────────────────────────────────────
 let heardCache   = null;   // { user, pairs:[[a,t],...], count, fetched_at }
 let loadedUser   = null;
@@ -2522,9 +2526,6 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
     activeFilter = btn.dataset.filter;
   });
 });
-document.getElementById('sort-select').addEventListener('change', e => {
-  activeSort = e.target.value;
-});
 
 // ── Modal ──────────────────────────────────────────────────────────────────
 // ── Detail side panel ──────────────────────────────────────────────────────
@@ -2732,9 +2733,6 @@ function escH(s) {
 }
 
 // ── IndexedDB ─────────────────────────────────────────────────────────────
-const IDB_NAME  = 'mustlisten';
-const IDB_STORE = 'sessions';
-
 function openIDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(IDB_NAME, 1);

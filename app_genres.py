@@ -2248,6 +2248,54 @@ function escH(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── Collapsible secondary users section ──────────────────────────────────
+function toggleUmExtra() {
+  document.getElementById('um-sec-extra').classList.toggle('collapsed');
+}
+
+async function renderIdbExtraList() {
+  const sessions = await idbList();
+  const listEl   = document.getElementById('idb-extra-list');
+  const sepEl    = document.getElementById('idb-extra-sep');
+  if (!listEl) return;
+  const primaryUser = heardCache?.user?.toLowerCase();
+  const visible = sessions.filter(s => s.user !== primaryUser);
+  if (!visible.length) { listEl.innerHTML = ''; if (sepEl) sepEl.style.display = 'none'; return; }
+  if (sepEl) sepEl.style.display = '';
+  listEl.innerHTML = visible
+    .sort((a, b) => b.fetched_at - a.fetched_at)
+    .map(s => {
+      const already = extraUsers.some(u => u.user.toLowerCase() === s.user.toLowerCase());
+      const _ts  = s.last_scrobble_ts || s.fetched_at;
+      const _lbl = s.last_scrobble_artist ? ` · ${escH(s.last_scrobble_artist)} — ${escH(s.last_scrobble_track||'')}` : '';
+      return `<div class="idb-entry">
+        <div class="idb-entry-info">
+          <div class="idb-entry-user">${escH(s.user)}</div>
+          <div class="idb-entry-meta">${(s.count||s.heard?.length||0).toLocaleString()} álb. · ${new Date(_ts*1000).toLocaleDateString()}${_lbl}</div>
+        </div>
+        ${already
+          ? `<span style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3)">añadido</span>`
+          : `<button class="btn-sm primary" onclick="idbAddAsExtra('${escH(s.user)}')">Añadir</button>`}
+      </div>`;
+    }).join('');
+}
+
+async function idbAddAsExtra(username) {
+  const data = await idbLoad(username);
+  if (!data) return;
+  if (extraUsers.some(u => u.user.toLowerCase() === username.toLowerCase())) return;
+  const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
+  const userInfo = await fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null);
+  const image = userInfo?.ok ? (userInfo.image || '') : '';
+  const pairs = (data.pairs || data.heard || []).map(p => [p[0],p[1],p[2]||'',p[3]||'',p[4]||1]);
+  extraUsers.push({ user: data.user, pairs, color, count: pairs.length, fetched_at: data.fetched_at || 0, image });
+  saveExtraUsersLS();
+  buildExtraUsersList();
+  renderIdbExtraList();
+  document.getElementById('um-extra-progress').textContent = `✓ ${data.user} añadido`;
+  if (allAlbums.length) applyCollection();
+}
+
 // ── IndexedDB ─────────────────────────────────────────────────────────────
 const IDB_NAME  = 'mustlisten';
 const IDB_STORE = 'sessions';
