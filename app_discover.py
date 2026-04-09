@@ -1,68 +1,33 @@
 #!/usr/bin/env python3
 """
-mustlisten — Flask backend
-Cruza scrobbles de Last.fm con must_hear.db para mostrar qué te falta escuchar.
+mustdiscover — Flask backend
+Comparación de scrobbles entre usuario principal y usuarios secundarios.
+Descubre qué escucha un usuario secundario que tú no has escuchado.
 
 Uso:
-    python app.py --db path/to/must_hear.db --lastfm-api-key KEY [--port 5000]
-    python app.py --db path/to/must_hear.db  # usa SOPS / env vars para las credenciales
+    python app_discover.py --lastfm-api-key KEY [--port 5001]
+    LASTFM_API_KEY=xxx python app_discover.py
 """
 import os
 import re
 import json
 import time
-import sqlite3
 import argparse
-import subprocess
 import urllib.request
 import urllib.parse
-from pathlib import Path
-from functools import lru_cache
 from flask import Flask, jsonify, request, render_template_string, abort, Response, stream_with_context
 
 app = Flask(__name__)
 
-# ── Config (se rellena en main() o via env vars para gunicorn) ───────────────
-DB_PATH      = os.environ.get("DB_PATH") or None
+# ── Config ────────────────────────────────────────────────────────────────────
 LFM_API_KEY  = os.environ.get("LASTFM_API_KEY") or None
 CAA          = "https://coverartarchive.org/release-group"
-
-# CDNs que bloquean peticiones desde navegadores externos (ORB/CORS)
-# Se descartan para evitar imágenes rotas; se usa CAA por MBID como fallback
-_BLOCKED_COVER_DOMAINS = ("snmc.io", "albumoftheyear.org", "aoty.org")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _norm(s: str) -> str:
     return re.sub(r"[^\w]", "", (s or "").lower())
-
-
-def check_heard(user_set: set, artist: str, title: str) -> bool:
-    """Fuzzy match idéntico al de html_must_hear.py."""
-    a_n = _norm(artist)
-    t_n = _norm(title)
-    if not t_n:
-        return False
-    for ua, ut in user_set:
-        if not ut:
-            continue
-        title_match = (
-            t_n == ut or
-            t_n in ut or
-            (ut in t_n and len(ut) >= len(t_n) * 0.8)
-        )
-        if not title_match:
-            continue
-        if not a_n or a_n in ua or ua in a_n:
-            return True
-    return False
-
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 # ── Last.fm API ────────────────────────────────────────────────────────────────
@@ -109,133 +74,7 @@ def mb_search_release_group(artist: str, album: str) -> dict:
     return {}
 
 
-# ── DB queries ─────────────────────────────────────────────────────────────────
-
-def _collection_group(slug: str, name: str) -> str:
-    s = slug.lower()
-    prefixes = [
-        ("aoty_",            "AOTY"),
-        ("scaruffi_",        "Scaruffi"),
-        ("bandcamp",         "Bandcamp"),
-        ("kerrang",          "Kerrang!"),
-        ("pitchfork",        "Pitchfork"),
-        ("rym_",             "Rate Your Music"),
-        ("rate_your_music",  "Rate Your Music"),
-        ("sputnik_",         "Sputnikmusic"),
-        ("sputnikmusic",     "Sputnikmusic"),
-        ("resident_advisor", "Resident Advisor"),
-        ("rolling_stone",    "Rolling Stone"),
-        ("grammy",           "Grammy"),
-        ("juno",             "Juno Awards"),
-        ("mu_",              "/mu/ 4chan"),
-    ]
-    for prefix, group in prefixes:
-        if s.startswith(prefix):
-            return group
-    return "Otros"
-
-
-def _rym_tree_path(name: str) -> list[str] | None:
-    """'RYM Top — Blues — Chicago Blues' → ['Blues', 'Chicago Blues']. Else None."""
-    if not name.startswith("RYM Top \u2014 "):
-        return None
-    return name[len("RYM Top \u2014 "):].split(" \u2014 ")
-
-
-@lru_cache(maxsize=1)
-def get_all_collections() -> list[dict]:
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT id, slug, name, total_albums, source_type FROM collections ORDER BY name"
-    ).fetchall()
-    conn.close()
-    result = []
-    for r in rows:
-        d = dict(r)
-        d["group"]     = _collection_group(d["slug"], d["name"])
-        d["tree_path"] = _rym_tree_path(d["name"])
-        result.append(d)
-    return result
-
-
-def _get_album_chart_genres(conn, album_ids: list) -> dict:
-    """Para cada álbum devuelve los charts RYM en los que aparece, con depth."""
-    if not album_ids:
-        return {}
-    placeholders = ",".join("?" * len(album_ids))
-    rows = conn.execute(f"""
-        SELECT ca.album_id, c.name, c.slug
-        FROM collection_albums ca
-        JOIN collections c ON c.id = ca.collection_id
-        WHERE c.slug LIKE 'rym_chart_all_time_%'
-        AND ca.album_id IN ({placeholders})
-    """, album_ids).fetchall()
-    result: dict = {}
-    for r in rows:
-        tp = _rym_tree_path(r["name"])   # e.g. ['Dance'] or ['Dance','Electronica']
-        depth = len(tp) if tp else 1
-        label = tp[-1] if tp else r["name"]
-        result.setdefault(r["album_id"], []).append({
-            "name":  label,
-            "slug":  r["slug"],
-            "depth": depth,
-        })
-    for v in result.values():
-        v.sort(key=lambda x: x["depth"])
-    return result
-
-
-def get_collection_albums(slug: str) -> list[dict]:
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT
-            al.id, ar.name AS artist, al.name AS title,
-            al.year, al.release_group_mbid AS mbid,
-            ca.rank, al.cover_url, al.yt_id,
-            al.aoty_critic_score, al.scaruffi_rating
-        FROM collection_albums ca
-        JOIN collections c  ON c.id  = ca.collection_id
-        JOIN albums al       ON al.id = ca.album_id
-        JOIN artists ar      ON ar.id = al.artist_id
-        WHERE c.slug = ?
-        ORDER BY ca.rank ASC NULLS LAST, al.year ASC
-    """, (slug,)).fetchall()
-    album_ids = [r["id"] for r in rows]
-    genres_map = _get_album_chart_genres(conn, album_ids)
-    conn.close()
-    result = []
-    for i, r in enumerate(rows):
-        d = dict(r)
-        d["number"] = d["rank"] or (i + 1)
-        raw = d.get("cover_url") or ""
-        if raw.startswith("data:") or any(dom in raw for dom in _BLOCKED_COVER_DOMAINS):
-            raw = ""
-        d["cover"] = raw or (f"{CAA}/{d['mbid']}/front-500" if d.get("mbid") else "")
-        d["genres"] = genres_map.get(d["id"], [])
-        result.append(d)
-    return result
-
-
 # ── API endpoints ──────────────────────────────────────────────────────────────
-
-def _load_ignore_slugs() -> set:
-    """Reads .collections_ignore — one slug per line, # for comments."""
-    p = Path(__file__).parent / ".collections_ignore"
-    if not p.exists():
-        return set()
-    slugs = set()
-    for line in p.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            slugs.add(line)
-    return slugs
-
-
-@app.route("/api/collections")
-def api_collections():
-    all_colls = get_all_collections()
-    rym = [c for c in all_colls if c["slug"].startswith("rym_chart_all_time_")]
-    return jsonify(rym)
 
 
 @app.route("/api/scrobbles")
@@ -498,29 +337,6 @@ def api_scrobbles_update():
     })
 
 
-@app.route("/api/collection")
-def api_collection():
-    slug = request.args.get("slug", "").strip()
-    if not slug:
-        return jsonify({"error": "Parámetro 'slug' requerido"}), 400
-    albums = get_collection_albums(slug)
-    if not albums:
-        return jsonify({"error": f"Colección '{slug}' no encontrada o vacía"}), 404
-    result = [{
-        "n":       a["number"],
-        "artist":  a["artist"],
-        "title":   a["title"],
-        "year":    a.get("year"),
-        "mbid":    a.get("mbid", ""),
-        "cover":   a.get("cover", ""),
-        "yt_id":   a.get("yt_id", ""),
-        "aoty":    a.get("aoty_critic_score"),
-        "scaruffi":a.get("scaruffi_rating"),
-        "genres":  a.get("genres", []),
-    } for a in albums]
-    return jsonify({"slug": slug, "albums": result})
-
-
 @app.route("/api/check_user")
 def api_check_user():
     """Verifica que el usuario de Last.fm existe."""
@@ -691,21 +507,6 @@ def api_album_info():
 @app.route("/")
 def index():
     return render_template_string(HTML_TEMPLATE)
-
-
-@app.route("/genres")
-def genres_tree():
-    """Sirve el HTML generado por app_genre_mermaid.py."""
-    from pathlib import Path
-    from flask import send_file, abort
-    candidates = [
-        Path(__file__).parent / "docs/must_hear/rym_genre_tree.html",
-        Path(__file__).parent / "rym_genre_tree.html",
-    ]
-    for p in candidates:
-        if p.exists():
-            return send_file(str(p))
-    abort(404)
 
 
 # ── HTML Template ──────────────────────────────────────────────────────────────
@@ -1289,6 +1090,47 @@ input::placeholder { color: var(--ink3); }
 }
 .dp-link:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ── Descubrir section ─────────────────────────────────────────────── */
+#discover-view { display: none; }
+#discover-view.visible { display: block; }
+.discover-nav {
+  display: flex; align-items: center; gap: 1rem;
+  margin-bottom: 1.2rem; flex-wrap: wrap;
+}
+.discover-nav h2 {
+  font-family: var(--serif); font-size: 1.1rem; font-weight: 700; margin: 0;
+}
+.discover-filters {
+  display: flex; gap: 0.4rem; flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+.filter-pill {
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--ink3);
+  font-family: var(--mono); font-size: 0.68rem; padding: 0.22rem 0.65rem;
+  border-radius: 20px; cursor: pointer; transition: border-color .15s, color .15s;
+}
+.filter-pill:hover { border-color: var(--accent); color: var(--ink); }
+.filter-pill.active { border-color: var(--accent); color: var(--accent); background: var(--bg2); }
+#discover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1.2rem;
+}
+.discover-footer {
+  display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  padding: 0.5rem 0; border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+#discover-progress { font-family: var(--mono); font-size: 0.72rem; color: var(--ink3); flex: 1; }
+#btn-discover-more {
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--ink2);
+  font-family: var(--mono); font-size: 0.72rem; padding: 0.35rem 0.9rem;
+  border-radius: var(--radius); cursor: pointer;
+}
+#btn-discover-more:hover { border-color: var(--accent); color: var(--accent); }
+#btn-discover-more:disabled { opacity: .4; cursor: not-allowed; }
+
 
 /* ── Collapsible um-section ────────────────────────────────────────── */
 .um-section-toggle {
@@ -1523,6 +1365,41 @@ input::placeholder { color: var(--ink3); }
   font-style: italic;
 }
 
+/* ── Discover compact controls ───────────────────────────────────────────── */
+.disc-controls {
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0.5rem 0.9rem 0.4rem;
+}
+.disc-controls input[type=number] {
+  width: 46px; background: var(--bg3); border: 1px solid var(--border);
+  color: var(--ink); padding: 3px 4px; border-radius: 3px;
+  font-family: var(--mono); font-size: 0.7rem; text-align: center;
+  -moz-appearance: textfield;
+}
+.disc-controls input[type=number]::-webkit-inner-spin-button,
+.disc-controls input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.disc-controls select {
+  flex: 1; background: var(--bg3); border: 1px solid var(--border);
+  color: var(--ink); padding: 3px 4px; border-radius: 3px;
+  font-family: var(--mono); font-size: 0.7rem;
+}
+#disc-play-btn {
+  width: 26px; height: 22px; background: var(--accent); color: var(--bg);
+  border: none; border-radius: 3px; cursor: pointer; font-size: 0.6rem;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+#disc-play-btn:hover { background: var(--accent2); }
+#disc-user-indicator {
+  padding: 0 0.9rem 0.5rem;
+  font-family: var(--mono); font-size: 0.62rem; color: var(--ink3);
+  display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap;
+}
+#disc-user-indicator .disc-ind-user {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 6px 1px 3px; border-radius: 10px;
+  border: 1px solid var(--border2); cursor: pointer;
+}
+#disc-user-indicator .disc-ind-user.active { border-color: var(--accent); color: var(--accent); }
 
 /* ── Per-user filter buttons ─────────────────────────────────────────────── */
 #filter-extra-users { display: contents; }
@@ -1531,6 +1408,12 @@ input::placeholder { color: var(--ink3); }
   vertical-align: middle; margin-right: 2px;
 }
 
+/* ── Discover pagination ─────────────────────────────────────────────────── */
+.discover-pagination {
+  display: flex; align-items: center; justify-content: center;
+  gap: 1rem; padding: 1rem 0 0.5rem;
+}
+.discover-pagination button:disabled { opacity: 0.35; cursor: default; }
 
 /* ── Genre chips on album cards ──────────────────────────────────────────── */
 .card-genres {
@@ -1546,6 +1429,25 @@ input::placeholder { color: var(--ink3); }
 .card-genre.depth-2 { color: rgba(255,255,255,0.5); }
 .card-genre.depth-3 { color: rgba(255,255,255,0.3); }
 
+/* ── Discover artist card ────────────────────────────────────────────── */
+.disc-artist-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface2);
+  min-height: 140px;
+}
+.disc-artist-icon {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 0.5rem;
+}
+.disc-artist-icon svg { width: 28px; height: 28px; stroke: var(--ink3); }
+.disc-artist-card .card-info { position: static; padding: 0; background: none; text-align: center; }
+.disc-artist-card .card-title { font-size: 0.72rem; }
 
 /* ── About button in sidebar ─────────────────────────────────────────── */
 .sb-about-btn {
@@ -1760,32 +1662,26 @@ input::placeholder { color: var(--ink3); }
   <aside id="sidebar">
     <div class="sb-scroll">
 
-      <!-- Géneros (árbol de RYM charts) -->
-      <div class="sb-panel open" id="panel-colls">
-        <div class="sb-panel-hdr" onclick="togglePanel('panel-colls')">
-          <span class="sb-panel-title">Géneros</span>
-          <span class="sb-panel-arrow">▶</span>
-        </div>
-        <div class="sb-panel-body" id="colls-body">
-          <div class="sb-empty">Cargando…</div>
-        </div>
-      </div>
-
-      <!-- Fechas -->
-      <div class="sb-panel open" id="panel-dates">
-        <div class="sb-panel-hdr" onclick="togglePanel('panel-dates')">
-          <span class="sb-panel-title">Fechas</span>
+      <!-- Descubrir (visible when secondary users loaded) -->
+      <div class="sb-panel open" id="panel-discover" style="display:none">
+        <div class="sb-panel-hdr" onclick="togglePanel('panel-discover')">
+          <span class="sb-panel-title">Descubrir</span>
           <span class="sb-panel-arrow">▶</span>
         </div>
         <div class="sb-panel-body">
-          <div class="sb-pills" id="decade-pills">
-            <div class="sb-empty">Selecciona una colección</div>
+          <div class="disc-controls">
+            <input type="number" id="disc-limit-global" min="5" max="100" value="20">
+            <select id="disc-mode-select">
+              <option value="albums">Álbumes</option>
+              <option value="artists">Artistas</option>
+            </select>
+            <button id="disc-play-btn" onclick="triggerDiscover()" title="Descubrir">▶</button>
           </div>
+          <div id="disc-user-indicator"></div>
         </div>
       </div>
 
-      <!-- About + Géneros RYM link -->
-      <a class="sb-about-btn" href="/genres" target="_blank" style="text-decoration:none;display:block;text-align:center">Árbol géneros ↗</a>
+      <!-- About -->
       <button class="sb-about-btn" onclick="openAboutModal()">about</button>
 
     </div><!-- .sb-scroll -->
@@ -1805,54 +1701,24 @@ input::placeholder { color: var(--ink3); }
         <span id="loading-text">Cargando scrobbles...</span>
       </div>
 
-      <!-- Stats -->
-      <div id="stats-bar">
-        <div class="stat">
-          <div class="stat-val" id="s-total">—</div>
-          <div class="stat-lbl">Total</div>
+      <!-- Discover view -->
+      <div id="discover-view">
+        <div class="discover-nav">
+          <button class="btn-sm" onclick="leaveDiscoverMode()">← Inicio</button>
+          <h2>Descubrir</h2>
+          <span id="discover-count" style="font-family:var(--mono);font-size:0.72rem;color:var(--ink3)"></span>
         </div>
-        <div class="stat-sep"></div>
-        <div class="stat">
-          <div class="stat-val accent" id="s-heard">—</div>
-          <div class="stat-lbl">Escuchados</div>
+        <div class="discover-filters" id="discover-decade-pills"></div>
+        <div id="discover-grid"></div>
+        <div class="discover-pagination" id="discover-pagination" style="display:none">
+          <button class="btn-sm" id="disc-prev" onclick="discoverPrevPage()">← Anteriores</button>
+          <span id="disc-page-info" style="font-family:var(--mono);font-size:0.72rem;color:var(--ink3)"></span>
+          <button class="btn-sm" id="disc-next" onclick="discoverNextPage()">Siguientes →</button>
         </div>
-        <div class="stat-sep"></div>
-        <div class="stat">
-          <div class="stat-val" id="s-missing">—</div>
-          <div class="stat-lbl">Pendientes</div>
-        </div>
-        <div class="stat-sep"></div>
-        <div class="stat">
-          <div class="stat-val" id="s-pct">—</div>
-          <div class="stat-lbl">Completado</div>
-        </div>
-        <div class="stat-sep"></div>
-        <div class="prog-wrap">
-          <div class="stat-lbl">Progreso</div>
-          <div class="prog-track"><div class="prog-fill" id="prog-fill"></div></div>
+        <div class="discover-footer" id="discover-footer" style="display:none">
+          <span id="discover-progress"></span>
         </div>
       </div>
-
-      <!-- Filters -->
-      <div id="filters">
-        <button class="filter-btn active" data-filter="all">Todos</button>
-        <button class="filter-btn" data-filter="missing">Pendientes</button>
-        <button class="filter-btn" data-filter="heard">Escuchados</button>
-        <div id="filter-extra-users"></div>
-        <div class="filter-sep"></div>
-        <label for="sort-select" style="margin:0">
-          <select id="sort-select">
-            <option value="rank">Orden lista</option>
-            <option value="year_asc">Año ↑</option>
-            <option value="year_desc">Año ↓</option>
-            <option value="artist">Artista A–Z</option>
-          </select>
-        </label>
-      </div>
-
-      <!-- Grid (collection view) -->
-      <div id="grid"></div>
-      <div id="empty"><p>No hay álbumes para mostrar</p></div>
 
     </div><!-- .main-inner -->
   </div><!-- #main -->
@@ -1892,25 +1758,26 @@ input::placeholder { color: var(--ink3); }
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
-let allAlbums      = [];
-let heardCache     = null;     // { user, pairs:[[a,t],...], count, fetched_at }
-let collCache      = {};       // slug → albums[]
-let activeSlug     = null;
-let activeFilter   = 'all';
-let activeSort     = 'rank';
-let activeGenres   = new Set();
-let activeDecades  = new Set();
-let loadedUser     = null;
+let heardCache   = null;   // { user, pairs:[[a,t],...], count, fetched_at }
+let loadedUser   = null;
 
 // extra users for cross-reference / recommendation
 const USER_COLORS = ['#6a9fb5','#78b56c','#b56c6c','#9b6cb5','#b59b6c','#6cb5b5','#b56ca0','#7ab5a0'];
 let extraUsers = [];  // [{user, pairs:[[na,nt,oa,ot,count],...], color, count, fetched_at}]
 
-// collection load cancellation
-let _loadController = null;
-
-// cover enrichment SSE (for albums without cover in collection)
-let _enrichEs = null;
+// discover state
+let discoverMode          = false;
+let discoverAllCandidates = [];
+let discoverCandidates    = [];
+let discoverAlbums        = [];
+let discoverOffset        = 0;
+let discoverSearching     = false;
+let discoverEs            = null;
+let discoverDecadeFilter  = new Set();
+let discoverPage          = 0;
+let discoverLimit         = 20;
+let discoverModeType      = 'albums';
+let discoverUserIdx       = 0;
 
 // album info cache (artist|||title → data)
 const albumInfoCache = new Map();
@@ -1918,13 +1785,9 @@ const albumInfoCache = new Map();
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const inpUser    = document.getElementById('inp-user');
 const btnGo      = document.getElementById('btn-go');
-const grid       = document.getElementById('grid');
 const loading    = document.getElementById('loading');
 const loadTxt    = document.getElementById('loading-text');
 const errMsg     = document.getElementById('error-msg');
-const statsBar   = document.getElementById('stats-bar');
-const filtersEl  = document.getElementById('filters');
-const emptyEl    = document.getElementById('empty');
 const inpSession = document.getElementById('inp-session');
 
 // ── Sidebar panel toggle ───────────────────────────────────────────────────
@@ -2016,54 +1879,673 @@ function buildExtraUsersList() {
 
   const hasExtra = extraUsers.length > 0;
 
-  // ── Per-user filter buttons in the filters bar ───────────────────────────
-  const extraFiltersEl = document.getElementById('filter-extra-users');
+  // ── Sidebar Descubrir panel ───────────────────────────────────────────────
+  const discPanel = document.getElementById('panel-discover');
+  discPanel.style.display = hasExtra ? '' : 'none';
   if (hasExtra) {
-    extraFiltersEl.innerHTML = extraUsers.map((u, i) => {
-      const av = u.image
-        ? `<img src="${escH(u.image)}" alt="">`
-        : `<span class="fbu-dot" style="background:${u.color}"></span>`;
-      return `<button class="filter-btn filter-btn-user" data-filter="extra_${i}" onclick="setExtraFilter(${i})">
-        ${av}${escH(u.user)}
-      </button>`;
-    }).join('');
-  } else {
-    extraFiltersEl.innerHTML = '';
-    if (activeFilter.startsWith('extra_')) { activeFilter = 'all'; renderGrid(); }
+    if (activeDiscoverUserIdx >= extraUsers.length) activeDiscoverUserIdx = 0;
+    _updateDiscoverIndicator();
   }
 
 }
 
-function setExtraFilter(i) {
-  document.querySelectorAll('#filters .filter-btn').forEach(b => b.classList.remove('active'));
-  document.querySelector(`#filters .filter-btn[data-filter="extra_${i}"]`)?.classList.add('active');
-  activeFilter = `extra_${i}`;
-  renderGrid();
+function selectDiscoverUser(i) { setActiveDiscoverUser(i); }
+
+function setActiveDiscoverUser(i) {
+  activeDiscoverUserIdx = i;
+  // Highlight in secondary-bar
+  document.querySelectorAll('.sbar-user').forEach((el, j) =>
+    el.classList.toggle('active', j === i));
+  _updateDiscoverIndicator();
 }
 
+function _updateDiscoverIndicator() {
+  const el = document.getElementById('disc-user-indicator');
+  if (!el) return;
+  const u = extraUsers[activeDiscoverUserIdx];
+  if (!u) { el.innerHTML = ''; return; }
+  const av = u.image
+    ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover">`
+    : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block"></span>`;
+  el.innerHTML = extraUsers.map((uu, i) =>
+    `<span class="disc-ind-user${i===activeDiscoverUserIdx?' active':''}" onclick="setActiveDiscoverUser(${i})">
+      ${uu.image ? `<img src="${escH(uu.image)}" style="width:12px;height:12px;border-radius:50%;object-fit:cover">` : `<span style="width:7px;height:7px;border-radius:50%;background:${uu.color};display:inline-block"></span>`}
+      ${escH(uu.user)}
+    </span>`
+  ).join('');
+}
+
+function triggerDiscover() {
+  if (!extraUsers.length) return;
+  const mode = document.getElementById('disc-mode-select')?.value || 'albums';
+  const limit = Math.min(100, Math.max(1,
+    parseInt(document.getElementById('disc-limit-global')?.value || '20')
+  ));
+  enterDiscoverMode(activeDiscoverUserIdx, limit, mode);
+}
+
+function saveExtraUserJSON(idx) {
+  const u = extraUsers[idx];
+  if (!u) return;
+  const blob = new Blob([JSON.stringify({ version:1, user: u.user, count: u.count, fetched_at: u.fetched_at, heard: u.pairs }, null, 0)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `mustlisten_${u.user}_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+
+async function addExtraUser() {
+  const inp = document.getElementById('inp-extra-user');
+  const prog = document.getElementById('um-extra-progress');
+  const user = inp.value.trim();
+  if (!user) return;
+  if (extraUsers.some(u => u.user.toLowerCase() === user.toLowerCase())) {
+    inp.value = ''; return;
+  }
+  const btn = document.getElementById('btn-extra-lfm');
+  btn.disabled = true; inp.disabled = true;
+  prog.textContent = 'Conectando con Last.fm...';
+  try {
+    const [userInfo, lfmResult] = await Promise.all([
+      fetch(`/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
+      fetchScrobblesSSE(user, msg => {
+        prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+      }),
+    ]);
+    const heard     = lfmResult.heard;
+    const color     = USER_COLORS[extraUsers.length % USER_COLORS.length];
+    const image     = userInfo?.ok ? (userInfo.image || '') : '';
+    const realUser  = userInfo?.ok ? userInfo.username : user;
+    const fetched_at = Math.floor(Date.now()/1000);
+    const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
+    const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
+    const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
+    extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    saveExtraUsersLS();
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    inp.value = '';
+    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes`;
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false; inp.disabled = false;
+  }
+}
+
+async function syncExtraUser(idx) {
+  const u = extraUsers[idx];
+  if (!u) return;
+  const prog = document.getElementById('um-extra-progress');
+  prog.textContent = `Sincronizando ${u.user}...`;
+  try {
+    const url = `/api/scrobbles/since?user=${encodeURIComponent(u.user)}&since=${u.fetched_at || 0}`;
+    const r = await fetch(url);
+    if (!r.ok) { const t = await r.text(); throw new Error(`Error ${r.status}: ${t.slice(0, 120)}`); }
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    // merge: add only pairs not already present
+    const existing = new Set(u.pairs.map(p => p[0] + '|' + p[1]));
+    const added = data.new_pairs.filter(p => !existing.has(p[0] + '|' + p[1]));
+    extraUsers[idx].pairs      = [...u.pairs, ...added];
+    extraUsers[idx].count      = extraUsers[idx].pairs.length;
+    extraUsers[idx].fetched_at = data.fetched_at;
+    // Update last scrobble info if sync returned newer data
+    if (data.last_scrobble_ts && data.last_scrobble_ts > (extraUsers[idx].last_scrobble_ts || 0)) {
+      extraUsers[idx].last_scrobble_ts     = data.last_scrobble_ts;
+      extraUsers[idx].last_scrobble_artist = data.last_scrobble_artist || '';
+      extraUsers[idx].last_scrobble_track  = data.last_scrobble_track  || '';
+    }
+    saveExtraUsersLS();
+    await idbSave({ user: extraUsers[idx].user, count: extraUsers[idx].count, fetched_at: extraUsers[idx].fetched_at, heard: extraUsers[idx].pairs, last_scrobble_ts: extraUsers[idx].last_scrobble_ts || 0, last_scrobble_artist: extraUsers[idx].last_scrobble_artist || '', last_scrobble_track: extraUsers[idx].last_scrobble_track || '' });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    prog.textContent = `✓ ${u.user}: +${added.length} nuevos (total ${extraUsers[idx].count.toLocaleString()})`;
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  }
+}
+
+document.getElementById('btn-extra-lfm').addEventListener('click', addExtraUser);
+document.getElementById('inp-extra-user').addEventListener('keydown', e => { if (e.key === 'Enter') addExtraUser(); });
+
+// ── Friends loader ─────────────────────────────────────────────────────────
+document.getElementById('btn-load-friends').addEventListener('click', loadFriends);
+
+async function loadFriends() {
+  const listEl = document.getElementById('friends-list');
+  const btn    = document.getElementById('btn-load-friends');
+  const user   = heardCache?.user || document.getElementById('inp-user').value.trim();
+  if (!user) {
+    listEl.innerHTML = '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Carga primero el usuario principal.</div>';
+    return;
+  }
+  btn.disabled = true;
+  listEl.innerHTML = '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Cargando amigos…</div>';
+  try {
+    const data = await fetch(`/api/friends?user=${encodeURIComponent(user)}`).then(r => r.json());
+    if (!data.ok || !data.friends.length) {
+      listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">${escH(data.error || 'Este usuario no tiene amigos en Last.fm.')}</div>`;
+      return;
+    }
+    renderFriendsList(data.friends);
+  } catch(e) {
+    listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Error: ${escH(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderFriendsList(friends) {
+  const listEl = document.getElementById('friends-list');
+  const alreadyAdded = new Set(extraUsers.map(u => u.user.toLowerCase()));
+  listEl.innerHTML = friends.map(f => {
+    const added = alreadyAdded.has(f.username.toLowerCase());
+    const avatar = f.image
+      ? `<img class="fr-avatar" src="${escH(f.image)}" alt="" onerror="this.style.display='none'">`
+      : `<span class="fr-avatar" style="background:var(--bg3);display:inline-block"></span>`;
+    return `<div class="fr-row" id="fr-row-${escH(f.username.toLowerCase().replace(/[^a-z0-9]/g,''))}">
+      ${avatar}
+      <span class="fr-name">${escH(f.username)}</span>
+      <button class="btn-sm fr-add" ${added ? 'disabled' : ''} onclick="addExtraUserByName('${escH(f.username)}', this)">
+        ${added ? '✓' : 'Añadir'}
+      </button>
+    </div>`;
+  }).join('');
+}
+
+async function addExtraUserByName(username, btn) {
+  if (!username) return;
+  if (extraUsers.some(u => u.user.toLowerCase() === username.toLowerCase())) return;
+  const prog = document.getElementById('um-extra-progress');
+  btn.disabled = true;
+  btn.textContent = '…';
+  prog.textContent = `Cargando ${username}…`;
+  try {
+    const [userInfo, lfmResult] = await Promise.all([
+      fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null),
+      fetchScrobblesSSE(username, msg => {
+        prog.textContent = `${username}: página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+      }),
+    ]);
+    const heard      = lfmResult.heard;
+    const color      = USER_COLORS[extraUsers.length % USER_COLORS.length];
+    const image      = userInfo?.ok ? (userInfo.image || '') : '';
+    const realUser   = userInfo?.ok ? userInfo.username : username;
+    const fetched_at = Math.floor(Date.now()/1000);
+    const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
+    const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
+    const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
+    extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    saveExtraUsersLS();
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    btn.textContent = '✓';
+    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes`;
+    // Refresh friends list so the newly added user shows as already added
+    const frList = document.getElementById('friends-list');
+    if (frList?.children.length) {
+      frList.querySelectorAll('.fr-add').forEach(b => {
+        const row = b.closest('.fr-row');
+        const name = row?.querySelector('.fr-name')?.textContent?.trim() || '';
+        if (extraUsers.some(eu => eu.user.toLowerCase() === name.toLowerCase())) {
+          b.disabled = true;
+          b.textContent = '✓';
+        }
+      });
+    }
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = 'Añadir';
+    prog.textContent = 'Error: ' + e.message;
+  }
+}
+
+// import extra user from JSON file
+document.getElementById('btn-extra-json').addEventListener('click', () => {
+  document.getElementById('inp-extra-json').click();
+});
+document.getElementById('inp-extra-json').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const prog = document.getElementById('um-extra-progress');
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data.heard || !data.user) throw new Error('Formato inválido');
+    if (extraUsers.some(u => u.user.toLowerCase() === data.user.toLowerCase())) {
+      prog.textContent = `${data.user} ya está en la lista.`; return;
+    }
+    const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
+    const ft = data.fetched_at || 0;
+    extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: ft, image: '' });
+    saveExtraUsersLS();
+    await idbSave({ user: data.user, count: data.heard.length, fetched_at: ft, heard: data.heard });
+    await renderIdbExtraList();
+    buildExtraUsersList();
+    prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
+  } catch(err) {
+    prog.textContent = 'Error: ' + err.message;
+  }
+  e.target.value = '';
+});
+
+function removeExtraUser(idx) {
+  extraUsers.splice(idx, 1);
+  saveExtraUsersLS();
+  buildExtraUsersList();
+  renderIdbExtraList();
+}
+
+async function renderIdbExtraList() {
+  const sessions = await idbList();
+  const listEl   = document.getElementById('idb-extra-list');
+  const sepEl    = document.getElementById('idb-extra-sep');
+  if (!listEl) return;
+  const primaryUser = heardCache?.user?.toLowerCase();
+  const visible = sessions.filter(s => s.user !== primaryUser);
+  if (!visible.length) { listEl.innerHTML = ''; if (sepEl) sepEl.style.display = 'none'; return; }
+  if (sepEl) sepEl.style.display = '';
+  listEl.innerHTML = visible
+    .sort((a, b) => b.fetched_at - a.fetched_at)
+    .map(s => {
+      const already = extraUsers.some(u => u.user.toLowerCase() === s.user.toLowerCase());
+      const _ts = s.last_scrobble_ts || s.fetched_at;
+      const _lbl = s.last_scrobble_artist ? ` · ${s.last_scrobble_artist} — ${s.last_scrobble_track||''}` : '';
+      return `<div class="idb-entry">
+        <div class="idb-entry-info">
+          <div class="idb-entry-user">${escH(s.user)}</div>
+          <div class="idb-entry-meta">${s.count.toLocaleString()} álb. · ${new Date(_ts*1000).toLocaleDateString()}${escH(_lbl)}</div>
+        </div>
+        ${already
+          ? `<span style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3)">añadido</span>`
+          : `<button class="btn-sm primary" onclick="idbAddAsExtra('${escH(s.user)}')">Añadir</button>`}
+      </div>`;
+    }).join('');
+}
+
+async function idbAddAsExtra(username) {
+  const data = await idbLoad(username);
+  if (!data) return;
+  if (extraUsers.some(u => u.user.toLowerCase() === username.toLowerCase())) return;
+  const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
+  // try to get avatar
+  const userInfo = await fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null);
+  const image = userInfo?.ok ? (userInfo.image || '') : '';
+  extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: data.fetched_at || 0, image });
+  saveExtraUsersLS();
+  buildExtraUsersList();
+  renderIdbExtraList();
+  document.getElementById('um-extra-progress').textContent = `✓ ${data.user} añadido`;
+}
+
+// ── Helper: consume /api/scrobbles SSE stream ─────────────────────────────
+async function fetchScrobblesSSE(user, onProgress) {
+  const response = await fetch(`/api/scrobbles?user=${encodeURIComponent(user)}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const reader   = response.body.getReader();
+  const decoder  = new TextDecoder();
+  let buffer = '';
+  let result = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop();
+    for (const part of parts) {
+      if (!part.startsWith('data: ')) continue;
+      const msg = JSON.parse(part.slice(6));
+      if (msg.error) throw new Error(msg.error);
+      if (msg.done) result = msg;
+      else onProgress(msg);
+    }
+  }
+  if (!result) throw new Error('No se recibió respuesta del servidor');
+  return result; // {heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, ...}
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+(async () => {
+  loadExtraUsersLS();
+  // Purge extra users from localStorage that are no longer in IDB
+  if (extraUsers.length) {
+    try {
+      const sessions = await idbList();
+      const inIdb = new Set(sessions.map(s => s.user.toLowerCase()));
+      const valid = extraUsers.filter(u => inIdb.has(u.user.toLowerCase()));
+      if (valid.length !== extraUsers.length) {
+        extraUsers.length = 0;
+        valid.forEach(u => extraUsers.push(u));
+        saveExtraUsersLS();
+      }
+    } catch(e) {}
+  }
+  // pre-populate idb lists (so they're ready when modal opens)
+  await renderIdbList();
+  await renderIdbExtraList();
+  buildExtraUsersList();
+})();
+
+// ── Collapsible secondary users section ──────────────────────────────────
+function toggleUmExtra() {
+  document.getElementById('um-sec-extra').classList.toggle('collapsed');
+}
+
+// ── Discover mode ─────────────────────────────────────────────────────────
+function discoverCardHTML(a, i) {
+  if (a.type === 'artist') {
+    const userBadges = (a.users || []).map(u =>
+      u.image
+        ? `<img class="rc-avatar" src="${escH(u.image)}" title="${escH(u.user)}: ${u.count} plays" alt="">`
+        : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`
+    ).join('');
+    return `<div class="card rec-card disc-artist-card" data-disc="${i}" style="cursor:pointer">
+      <div class="disc-artist-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+        </svg>
+      </div>
+      <div class="card-info">
+        <div class="card-title">${escH(a.orig_a)}</div>
+        <div class="card-artist" style="opacity:0.6">${a.album_count} álbum${a.album_count !== 1 ? 'es' : ''}</div>
+        <div class="rc-users">${userBadges}<span class="rc-count">${a.total} plays</span></div>
+      </div>
+    </div>`;
+  }
+  const cover = a.cover_url
+    ? `<img class="card-cover" src="${escH(a.cover_url)}" loading="lazy" alt=""
+          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+    : '';
+  const ph = `<div class="card-placeholder" ${a.cover_url ? 'style="display:none"' : ''}>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+    </svg></div>`;
+  const userBadges = (a.users || []).map(u =>
+    u.image
+      ? `<img class="rc-avatar" src="${escH(u.image)}" title="${escH(u.user)}: ${u.count} plays" alt="">`
+      : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`
+  ).join('');
+  return `<div class="card rec-card" data-disc="${i}" style="cursor:pointer">
+    ${cover}${ph}
+    <div class="card-overlay"></div>
+    <div class="card-info">
+      <div class="card-title">${escH(a.mb_title || a.orig_t)}</div>
+      <div class="card-artist">${escH(a.mb_artist || a.orig_a)}</div>
+      ${a.date ? `<div class="card-year">${escH(a.date.slice(0,4))}</div>` : ''}
+      <div class="rc-users">${userBadges}<span class="rc-count">${a.total} plays</span></div>
+    </div>
+  </div>`;
+}
+
+function renderDiscoverGrid() {
+  const dg = document.getElementById('discover-grid');
+  let filtered = discoverAlbums;
+  if (discoverDecadeFilter.size) {
+    filtered = filtered.filter(a => {
+      const yr = parseInt((a.date || '').slice(0,4));
+      if (!yr) return false;
+      return discoverDecadeFilter.has(Math.floor(yr / 10) * 10);
+    });
+  }
+  dg.innerHTML = filtered.map((a, i) => discoverCardHTML(a, discoverAlbums.indexOf(a))).join('');
+  dg.querySelectorAll('.card[data-disc]').forEach(c => {
+    c.addEventListener('click', () => {
+      const idx = parseInt(c.dataset.disc);
+      const entry = discoverAlbums[idx];
+      if (entry && entry.type === 'artist') {
+        openDetailPanel({ type: 'discover_artist', idx });
+      } else {
+        openDetailPanel({ type: 'discover', idx });
+      }
+    });
+  });
+  // Update count label
+  document.getElementById('discover-count').textContent =
+    `${filtered.length} álbumes${discoverCandidates.length > discoverAlbums.length ? ` de ${discoverCandidates.length} candidatos` : ''}`;
+  // Decade pills
+  const decades = new Set();
+  discoverAlbums.forEach(a => {
+    const yr = parseInt((a.date || '').slice(0,4));
+    if (yr) decades.add(Math.floor(yr / 10) * 10);
+  });
+  const pillsEl = document.getElementById('discover-decade-pills');
+  pillsEl.innerHTML = [...decades].sort().map(d =>
+    `<button class="filter-pill${discoverDecadeFilter.has(d) ? ' active' : ''}" data-decade="${d}">${d}s</button>`
+  ).join('');
+  pillsEl.querySelectorAll('.filter-pill').forEach(b => {
+    b.addEventListener('click', () => {
+      const d = parseInt(b.dataset.decade);
+      if (discoverDecadeFilter.has(d)) discoverDecadeFilter.delete(d);
+      else discoverDecadeFilter.add(d);
+      renderDiscoverGrid();
+    });
+  });
+}
+
+function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
+  if (!extraUsers.length) return;
+  const u = extraUsers[userIdx];
+  if (!u) return;
+  limit = Math.min(100, Math.max(1, limit));
+
+  discoverMode     = true;
+  discoverPage     = 0;
+  discoverLimit    = limit;
+  discoverModeType = mode;
+  discoverUserIdx  = userIdx;
+  discoverAllCandidates = [];
+  discoverDecadeFilter.clear();
+  if (discoverEs) { discoverEs.close(); discoverEs = null; }
+
+  const primaryPairs = heardCache ? new Set(heardCache.pairs.map(p => p[0] + '|' + p[1])) : new Set();
+
+  if (mode === 'artists') {
+    // ── Artists mode: group by artist, exclude artists with any heard album ──
+    const primaryArtists = heardCache ? new Set(heardCache.pairs.map(p => p[0])) : new Set();
+    const amap = {};
+    for (const p of u.pairs) {
+      const normA = p[0];
+      if (primaryArtists.has(normA)) continue;
+      const origA = p[2] || p[0];
+      if (!amap[normA]) amap[normA] = { orig_a: origA, orig_t: '', total: 0, album_count: 0, users: [], type: 'artist' };
+      const count = p[4] || 1;
+      amap[normA].total += count;
+      amap[normA].album_count++;
+      if (!amap[normA].users.length)
+        amap[normA].users.push({ user: u.user, count: 0, color: u.color, image: u.image || '' });
+      amap[normA].users[0].count += count;
+    }
+    discoverAllCandidates = Object.values(amap).sort((a, b) => b.total - a.total);
+  } else {
+    // ── Albums mode (default) ────────────────────────────────────────────────
+    const cmap = {};
+    for (const p of u.pairs) {
+      const key = p[0] + '|' + p[1];
+      if (primaryPairs.has(key)) continue;
+      if (!cmap[key]) cmap[key] = {
+        norm_a: p[0], norm_t: p[1],
+        orig_a: p[2] || p[0], orig_t: p[3] || p[1],
+        total: 0, users: [],
+      };
+      const count = p[4] || 1;
+      cmap[key].total += count;
+      cmap[key].users.push({ user: u.user, count, color: u.color, image: u.image || '' });
+    }
+    discoverAllCandidates = Object.values(cmap).sort((a, b) => b.total - a.total);
+  }
+
+  // Show discover view
+  document.getElementById('discover-view').classList.add('visible');
+  closeSidebar();
+
+  _loadDiscoverPage();
+}
+
+function _loadDiscoverPage() {
+  discoverAlbums  = [];
+  discoverOffset  = 0;
+  discoverSearching = false;
+  discoverDecadeFilter.clear();
+  if (discoverEs) { discoverEs.close(); discoverEs = null; }
+
+  discoverCandidates = discoverAllCandidates.slice(
+    discoverPage * discoverLimit,
+    (discoverPage + 1) * discoverLimit
+  );
+
+  _updateDiscoverPagination();
+
+  const u = extraUsers[discoverUserIdx];
+  const uName = u ? escH(u.user) : '?';
+
+  if (!discoverCandidates.length) {
+    document.getElementById('discover-progress').textContent = 'Sin candidatos para este usuario';
+    document.getElementById('discover-footer').style.display = '';
+    renderDiscoverGrid();
+    return;
+  }
+
+  if (discoverModeType === 'artists') {
+    discoverAlbums = discoverCandidates.map(c => ({
+      ...c, mb_artist: c.orig_a, mb_title: '', cover_url: '', date: '', mbid: '',
+    }));
+    renderDiscoverGrid();
+    document.getElementById('discover-footer').style.display = '';
+    document.getElementById('discover-progress').textContent =
+      `${discoverAlbums.length} artistas de ${uName} (pág. ${discoverPage + 1})`;
+  } else {
+    document.getElementById('discover-footer').style.display = '';
+    document.getElementById('discover-progress').textContent =
+      `Buscando ${discoverCandidates.length} álbumes de ${uName}…`;
+    loadMoreDiscover();
+  }
+}
+
+function _updateDiscoverPagination() {
+  const total   = discoverAllCandidates.length;
+  const maxPage = Math.ceil(total / discoverLimit) - 1;
+  const pag  = document.getElementById('discover-pagination');
+  pag.style.display = total > discoverLimit ? '' : 'none';
+  document.getElementById('disc-prev').disabled = discoverPage <= 0;
+  document.getElementById('disc-next').disabled = discoverPage >= maxPage;
+  const from = discoverPage * discoverLimit + 1;
+  const to   = Math.min((discoverPage + 1) * discoverLimit, total);
+  document.getElementById('disc-page-info').textContent = `${from}–${to} de ${total}`;
+}
+
+function discoverPrevPage() {
+  if (discoverPage <= 0 || discoverSearching) return;
+  discoverPage--;
+  _loadDiscoverPage();
+}
+
+function discoverNextPage() {
+  const maxPage = Math.ceil(discoverAllCandidates.length / discoverLimit) - 1;
+  if (discoverPage >= maxPage || discoverSearching) return;
+  discoverPage++;
+  _loadDiscoverPage();
+}
+
+function leaveDiscoverMode() {
+  discoverMode = false;
+  if (discoverEs) { discoverEs.close(); discoverEs = null; }
+  document.getElementById('discover-view').classList.remove('visible');
+}
+
+function loadMoreDiscover() {
+  if (discoverSearching) return;
+  // Load all remaining candidates (limit was chosen at entry)
+  const batch = discoverCandidates.slice(discoverOffset);
+  if (!batch.length) {
+    document.getElementById('discover-progress').textContent = '✓ No hay más candidatos';
+    return;
+  }
+
+  discoverSearching = true;
+  const prog = document.getElementById('discover-progress');
+  prog.textContent = `Consultando MusicBrainz… (0 / ${batch.length})`;
+  document.getElementById('discover-footer').style.display = '';
+
+  // Append placeholders immediately
+  const startIdx = discoverAlbums.length;
+  batch.forEach(c => discoverAlbums.push({
+    ...c, mbid: '', cover_url: '', mb_title: c.orig_t, mb_artist: c.orig_a, date: ''
+  }));
+  renderDiscoverGrid();
+
+  if (discoverEs) { discoverEs.close(); discoverEs = null; }
+  const albumsParam = encodeURIComponent(JSON.stringify(batch.map(c => [c.orig_a, c.orig_t])));
+  discoverEs = new EventSource(`/api/enrich_albums?albums=${albumsParam}`);
+
+  discoverEs.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.done) {
+      discoverEs.close(); discoverEs = null;
+      discoverOffset += batch.length;
+      discoverSearching = false;
+      prog.textContent = `✓ ${discoverAlbums.length} álbumes encontrados`;
+      renderDiscoverGrid();
+      return;
+    }
+    if (typeof msg.i === 'number' && discoverAlbums[startIdx + msg.i]) {
+      Object.assign(discoverAlbums[startIdx + msg.i], {
+        mbid:      msg.mbid,
+        cover_url: msg.mbid ? `/api/cover?mbid=${encodeURIComponent(msg.mbid)}` : (msg.cover_url || ''),
+        mb_title:  msg.mb_title || discoverAlbums[startIdx + msg.i].orig_t,
+        mb_artist: msg.mb_artist || discoverAlbums[startIdx + msg.i].orig_a,
+        date:      msg.date,
+      });
+      renderDiscoverGrid();
+    }
+    prog.textContent = `Consultando MusicBrainz… (${msg.i + 1} / ${batch.length})`;
+  };
+
+  discoverEs.onerror = () => {
+    discoverEs.close(); discoverEs = null;
+    discoverOffset += batch.length;
+    discoverSearching = false;
+    prog.textContent = `✓ ${discoverAlbums.length} álbumes encontrados`;
+    renderDiscoverGrid();
+  };
+}
 
 document.querySelectorAll('.filter-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     activeFilter = btn.dataset.filter;
-    renderGrid();
   });
 });
 document.getElementById('sort-select').addEventListener('change', e => {
-  activeSort = e.target.value; renderGrid();
+  activeSort = e.target.value;
 });
 
 // ── Modal ──────────────────────────────────────────────────────────────────
 // ── Detail side panel ──────────────────────────────────────────────────────
 function openDetailPanel(ref) {
-  // ref: {type:'collection', idx}
+  // ref: {type:'discover', idx} | {type:'discover_artist', idx}
   let title, artist, year, cover, mbid, yt_id, heard, extraHeard, descCached;
-  const a = allAlbums[ref.idx];
-  if (!a) return;
-  title = a.title; artist = a.artist; year = a.year; cover = a.cover;
-  mbid = a.mbid; yt_id = a.yt_id; heard = a.heard; extraHeard = a.extraHeard;
-  descCached = a.desc_lfm_album || a.desc_mb_album || a.desc_lfm_artist || '';
+  if (ref.type === 'discover_artist') {
+    const a = discoverAlbums[ref.idx];
+    if (!a) return;
+    title = a.orig_a; artist = a.orig_a;
+    year = ''; cover = ''; mbid = ''; yt_id = ''; heard = false; extraHeard = null;
+    descCached = '';
+    // title kept as artist name for display; album passed as '' to fetchAlbumInfo
+  } else {
+    const a = discoverAlbums[ref.idx];
+    if (!a) return;
+    title = a.mb_title || a.orig_t; artist = a.mb_artist || a.orig_a;
+    year = a.date ? a.date.slice(0,4) : ''; cover = a.cover_url;
+    mbid = a.mbid; yt_id = ''; heard = false; extraHeard = null;
+    descCached = '';
+  }
 
   // Reset panel
   const panel = document.getElementById('detail-panel');
@@ -2085,20 +2567,12 @@ function openDetailPanel(ref) {
   document.getElementById('dp-artist').textContent = artist || '';
   document.getElementById('dp-year').textContent   = year   || '';
 
-  // Status
-  const st = document.getElementById('dp-status');
-  if (heard) {
-    st.className = 'dp-status heard';
-    st.innerHTML = `<svg width="10" height="10" viewBox="0 0 12 9" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4l3.5 3.5L11 1"/></svg> Escuchado`;
-  } else {
-    st.className = 'dp-status missing';
-    st.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg> Pendiente`;
-  }
-  st.style.display = '';
+  // Status not shown for discover entries
+  document.getElementById('dp-status').style.display = 'none';
 
   // Extra users status
   const extraSt = document.getElementById('dp-extra-status');
-  if (extraUsers.length && extraHeard) {
+  if (false) { // collection extra-status not used in app_discover
     extraSt.innerHTML = extraUsers.map((u, i) => {
       const h = extraHeard[i];
       const icon = u.image
@@ -2108,6 +2582,19 @@ function openDetailPanel(ref) {
         ${icon} ${escH(u.user)}: ${h ? '✓' : '—'}</span>`;
     }).join('');
     extraSt.style.display = 'flex';
+  } else if (ref.type === 'discover' || ref.type === 'discover_artist') {
+    const a = discoverAlbums[ref.idx];
+    if (a?.users?.length) {
+      const extraLabel = ref.type === 'discover_artist'
+        ? a.users.map(u => `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
+            ${u.image ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover">` : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block"></span>`}
+            ${escH(u.user)}: ${a.total} plays · ${a.album_count} álbum${a.album_count!==1?'es':''}</span>`)
+        : a.users.map(u => `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
+            ${u.image ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover">` : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block"></span>`}
+            ${escH(u.user)}: ${u.count} plays</span>`);
+      extraSt.innerHTML = extraLabel.join('');
+      extraSt.style.display = 'flex';
+    } else { extraSt.innerHTML = ''; extraSt.style.display = 'none'; }
   } else { extraSt.innerHTML = ''; extraSt.style.display = 'none'; }
 
   // YouTube
@@ -2142,7 +2629,9 @@ function openDetailPanel(ref) {
   document.body.style.overflow = 'hidden';
 
   // Fetch LFM + MB info asynchronously
-  fetchAlbumInfo(artist || '', title || '', mbid || '');
+  // For artist-only entries pass album='' so only artist.getInfo is fetched
+  const fetchAlbum = ref.type === 'discover_artist' ? '' : (title || '');
+  fetchAlbumInfo(artist || '', fetchAlbum, mbid || '');
 }
 
 function closeDetailPanel() {
@@ -2237,13 +2726,7 @@ function showLoading(msg) { loadTxt.textContent = msg || 'Cargando...'; loading.
 function hideLoading()    { loading.classList.remove('visible'); }
 function showError(msg)   { errMsg.textContent = msg; errMsg.classList.add('visible'); }
 function hideError()      { errMsg.classList.remove('visible'); }
-function hideResults()    {
-  allAlbums = []; grid.innerHTML = '';
-  statsBar.classList.remove('visible');
-  filtersEl.classList.remove('visible');
-  emptyEl.classList.remove('visible');
-  activeGenres.clear(); activeDecades.clear();
-}
+function hideResults() { heardCache = null; loadedUser = null; }
 function escH(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -2326,8 +2809,7 @@ async function idbLoadSession(username) {
   if (!data) return;
   loadHeardCache(data);
   document.getElementById('um-progress').textContent = `✓ ${data.user} cargado desde BD`;
-  if (activeSlug) { closeUserModal(); await loadAndRender(activeSlug); }
-  else closeUserModal();
+  closeUserModal();
 }
 
 async function idbDeleteSession(username) {
@@ -2347,7 +2829,6 @@ async function idbDeleteSession(username) {
     extraUsers.splice(idx, 1);
     saveExtraUsersLS();
     buildExtraUsersList();
-    if (allAlbums.length) applyCollection();
   }
   await renderIdbList();
   await renderIdbExtraList();
@@ -2390,28 +2871,22 @@ def resolve_lastfm_key(cli_key: str | None) -> str:
 
 
 def main():
-    global DB_PATH, LFM_API_KEY
+    global LFM_API_KEY
 
-    parser = argparse.ArgumentParser(description="mustlisten — web app")
-    parser.add_argument("--db",             required=True, help="Ruta a must_hear.db")
+    parser = argparse.ArgumentParser(description="mustdiscover — comparación entre usuarios")
     parser.add_argument("--lastfm-api-key", default=None,  help="Last.fm API key")
-    parser.add_argument("--port",           type=int, default=5000)
+    parser.add_argument("--port",           type=int, default=5001)
     parser.add_argument("--host",           default="127.0.0.1")
     parser.add_argument("--debug",          action="store_true")
     args = parser.parse_args()
 
-    DB_PATH     = args.db
     LFM_API_KEY = resolve_lastfm_key(args.lastfm_api_key)
 
-    if not Path(DB_PATH).exists():
-        print(f"❌ DB no encontrada: {DB_PATH}")
-        raise SystemExit(1)
     if not LFM_API_KEY:
         print("⚠  Sin Last.fm API key — las búsquedas fallarán.")
         print("   Usa --lastfm-api-key KEY, env LASTFM_API_KEY, o .encrypted.env")
 
-    print(f"🎵 mustlisten → http://{args.host}:{args.port}")
-    print(f"🗄  DB: {DB_PATH}")
+    print(f"🎵 mustdiscover → http://{args.host}:{args.port}")
     print(f"🔑 Last.fm API key: {'✓' if LFM_API_KEY else '✗ no encontrada'}")
 
     app.run(host=args.host, port=args.port, debug=args.debug)
