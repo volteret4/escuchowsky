@@ -1771,6 +1771,19 @@ input::placeholder { color: var(--ink3); }
         </div>
       </div>
 
+      <!-- Géneros (tags de álbumes de la colección) -->
+      <div class="sb-panel" id="panel-genres">
+        <div class="sb-panel-hdr" onclick="togglePanel('panel-genres')">
+          <span class="sb-panel-title">Géneros</span>
+          <span class="sb-panel-arrow">▶</span>
+        </div>
+        <div class="sb-panel-body">
+          <div class="sb-pills" id="genre-pills">
+            <div class="sb-empty">Selecciona una colección</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Fechas -->
       <div class="sb-panel open" id="panel-dates">
         <div class="sb-panel-hdr" onclick="togglePanel('panel-dates')">

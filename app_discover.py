@@ -1579,7 +1579,7 @@ input::placeholder { color: var(--ink3); }
   <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1.5rem;gap:2rem;max-width:480px;margin:0 auto">
     <div style="text-align:center">
       <div style="font-family:var(--serif);font-size:2.5rem;font-weight:800;letter-spacing:-0.02em;line-height:1.1;margin-bottom:0.5rem">
-        tum<span style="color:var(--accent)">tumpa</span>
+        tumtum<span style="color:var(--accent)">pa</span>
       </div>
       <div style="font-family:var(--mono);font-size:0.72rem;color:var(--ink3);letter-spacing:.12em;text-transform:uppercase">by mustlisten</div>
     </div>
@@ -1617,7 +1617,7 @@ input::placeholder { color: var(--ink3); }
 
 <!-- ── Header ─────────────────────────────────────────────────────────── -->
 <header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:relative;z-index:10;">
-  <div class="logo" style="font-family:var(--serif);font-size:1.3rem;font-weight:800">tum<em style="color:var(--accent);font-style:normal">tumpa</em></div>
+  <div class="logo" style="font-family:var(--serif);font-size:1.3rem;font-weight:800">tumtum<em style="color:var(--accent);font-style:normal">pa</em></div>
   <div style="flex:1"></div>
   <div id="badge-inline" style="display:none;align-items:center;gap:0.45rem;cursor:pointer;" onclick="openUserModal()">
     <img id="badge-avatar" src="" alt="" style="width:26px;height:26px;border-radius:50%;object-fit:cover;background:var(--bg3);">
@@ -1858,6 +1858,7 @@ let discoverPage          = 0;
 let discoverLimit         = 20;
 let discoverModeType      = 'albums';
 let discoverUserIdx       = 0;
+let activeDiscoverUserIdx = 0;
 
 // album info cache (artist|||title → data)
 const albumInfoCache = new Map();
