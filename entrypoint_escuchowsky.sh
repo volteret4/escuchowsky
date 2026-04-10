@@ -3,7 +3,12 @@ set -e
 
 # Genera el árbol de géneros si no existe o si la DB fue actualizada
 DB="${DB_PATH:-/app/db/must_hear_rym_new.db}"
-GENRES_JSON="/app/db/rym_genres.json"
+# Prefer rym_genres.json from mounted volume; fall back to bundled copy
+if [ -f "/app/db/rym_genres.json" ]; then
+  GENRES_JSON="/app/db/rym_genres.json"
+else
+  GENRES_JSON="/app_escuchowsky/rym_genres.json"
+fi
 OUT="/app_escuchowsky/rym_genre_tree.html"
 
 if [ -f "$DB" ] && [ -f "$GENRES_JSON" ]; then

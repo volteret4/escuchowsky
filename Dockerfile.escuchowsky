@@ -10,6 +10,7 @@ COPY app_genres.py .
 COPY app_genre_mermaid.py .
 COPY entrypoint_escuchowsky.sh .
 COPY sops_env.py .
+COPY rym_genres.json .
 
 RUN chmod +x entrypoint_escuchowsky.sh
 
