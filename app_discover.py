@@ -531,6 +531,8 @@ def service_worker():
         "self.addEventListener('activate',e=>{clients.claim();});\n"
         "self.addEventListener('fetch',e=>{"
         "if(e.request.method!=='GET')return;"
+        "const p=new URL(e.request.url).pathname;"
+        "if(p.startsWith('/api/'))return;"  # never intercept API/SSE calls
         "e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));"
         "});\n"
     )
@@ -1177,6 +1179,41 @@ input::placeholder { color: var(--ink3); }
 .um-section.collapsed .um-section-body { display: none; }
 .um-section.collapsed .um-section-toggle { transform: rotate(-90deg); }
 
+/* ── Modal close button ────────────────────────────────────────────── */
+.modal-close {
+  position: absolute; top: 0.75rem; right: 0.75rem;
+  background: none; border: none; color: var(--ink3);
+  font-size: 1.1rem; cursor: pointer; line-height: 1; padding: 0.2rem 0.4rem;
+}
+.modal-close:hover { color: var(--ink); }
+
+/* ── Primary user card in modal ────────────────────────────────────── */
+.um-primary-card {
+  display: flex; align-items: center; gap: 0.65rem;
+  padding: 0.65rem 0.85rem;
+  background: var(--bg3);
+  border-radius: var(--radius);
+  border-left: 3px solid var(--accent);
+  margin-bottom: 0.5rem;
+}
+.um-primary-card img { flex-shrink:0; }
+
+/* ── Secondary users in modal ──────────────────────────────────────── */
+.sec-user-row {
+  display: flex; flex-direction: column;
+  padding: 0.45rem 0; border-bottom: 1px solid var(--border);
+}
+.sec-user-row:last-child { border-bottom: none; }
+.sec-user-left { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem; }
+.sec-user-info { flex: 1; min-width: 0; }
+.sec-user-name { font-family: var(--mono); font-size: 0.8rem; font-weight: 600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sec-user-row.active .sec-user-name { color: var(--ink); }
+.sec-user-row:not(.active) .sec-user-name { color: var(--ink2); }
+.sec-user-meta { font-family: var(--mono); font-size: 0.62rem; color: var(--ink3); }
+.sec-user-btns { display: flex; gap: 0.3rem; flex-wrap: wrap; padding-left: 1.8rem; }
+.btn-sm.act { background: var(--accent); border-color: var(--accent); color: #0d0d0d; }
+.btn-sm.act:hover { background: var(--accent2); border-color: var(--accent2); }
+
 @keyframes modalIn { from { opacity:0; transform: scale(0.96) translateY(8px); } }
 
 /* ── Loading / Error ───────────────────────────────────────────────── */
@@ -1627,63 +1664,59 @@ input::placeholder { color: var(--ink3); }
   <button id="btn-usuario" onclick="openUserModal()">USUARIO</button>
 </header>
 
-<input type="file" id="inp-session"       accept=".json" style="display:none">
-<input type="file" id="inp-extra-json"    accept=".json" style="display:none">
+<input type="file" id="inp-session" accept=".json" style="display:none">
 
 <!-- ── User modal ──────────────────────────────────────────────────────── -->
 <div id="user-modal-bg">
   <div id="user-modal">
     <button class="modal-close" onclick="closeUserModal()">✕</button>
 
-    <!-- Usuario principal -->
+    <!-- Buscador universal -->
     <div class="um-section">
-      <div class="um-section-title">Usuario principal</div>
-      <div id="um-current-user">
-        <img id="um-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover;background:var(--bg3);flex-shrink:0">
-        <div style="flex:1;min-width:0">
-          <div class="um-user-name" id="um-username"></div>
-          <div class="um-user-meta" id="um-usermeta"></div>
-        </div>
-        <button class="btn-sm" id="btn-sync-session">↻ Sync</button>
-      </div>
+      <div class="um-section-title">Buscar usuario</div>
       <div class="um-row">
         <input id="inp-user" type="text" placeholder="Usuario Last.fm" autocomplete="off" spellcheck="false">
-        <button class="btn" id="btn-go" style="padding:0.4rem 1rem;font-size:0.72rem;">Last.fm</button>
+        <button class="btn-sm primary" id="btn-go">Last.fm</button>
+        <button class="btn-sm" id="btn-import">↑ JSON</button>
       </div>
       <div class="um-progress" id="um-progress"></div>
-      <div class="um-actions">
-        <button class="btn-sm" id="btn-import">↑ Importar JSON</button>
-        <button class="btn-sm" id="btn-save-session" style="display:none">↓ Guardar JSON</button>
-      </div>
-      <div class="um-sep">Sesiones guardadas en este navegador</div>
-      <div id="idb-list"><span class="idb-empty">Sin sesiones guardadas</span></div>
     </div>
 
-    <!-- Usuarios adicionales (colapsable) -->
-    <div class="um-section collapsed" id="um-sec-extra">
-      <div class="um-section-title" style="display:flex;align-items:center;cursor:pointer" onclick="toggleUmExtra()">
-        Usuarios secundarios
-        <button class="um-section-toggle" tabindex="-1">▾</button>
-      </div>
-      <div class="um-section-body">
-        <div id="extra-users-list"></div>
-        <div class="um-row" style="margin-top:0.5rem">
-          <input id="inp-extra-user" type="text" placeholder="usuario last.fm" autocomplete="off" spellcheck="false">
-          <button class="btn-sm" id="btn-extra-lfm">Last.fm</button>
-          <button class="btn-sm" id="btn-extra-json">↑ JSON</button>
+    <!-- Usuario principal (destacado) -->
+    <div class="um-section" id="um-sec-primary" style="display:none">
+      <div class="um-section-title">Usuario principal</div>
+      <div class="um-primary-card">
+        <img id="um-avatar" src="" alt="" style="width:36px;height:36px;border-radius:50%;object-fit:cover;background:var(--bg3);flex-shrink:0;display:none">
+        <div style="flex:1;min-width:0;overflow:hidden">
+          <div class="um-user-name" id="um-username" style="color:var(--ink)"></div>
+          <div class="um-user-meta" id="um-usermeta" style="font-size:0.65rem"></div>
         </div>
-        <div class="um-progress" id="um-extra-progress"></div>
-        <div class="um-sep" style="display:flex;align-items:center;justify-content:space-between">
-          Amigos del usuario principal
-          <button class="btn-sm" id="btn-load-friends" style="font-size:0.65rem">Cargar</button>
-        </div>
-        <div id="friends-list"></div>
-        <div id="idb-extra-sep" class="um-sep" style="display:none">Desde sesiones guardadas en este navegador</div>
-        <div id="idb-extra-list"></div>
+        <button class="btn-sm" id="btn-sync-session" title="Sincronizar">↻</button>
+        <button class="btn-sm" id="btn-save-session" style="display:none" title="Guardar JSON">↓ JSON</button>
+        <button class="btn-sm" id="btn-unload-primary" title="Descargar usuario">✕</button>
       </div>
+    </div>
+
+    <!-- Usuarios secundarios -->
+    <div class="um-section" id="um-sec-secondary">
+      <div class="um-section-title">Usuarios secundarios</div>
+      <div id="secondary-users-list"></div>
+      <div class="um-progress" id="um-extra-progress"></div>
+    </div>
+
+    <!-- Amigos -->
+    <div class="um-section">
+      <div class="um-section-title" style="display:flex;align-items:center;justify-content:space-between">
+        Amigos del usuario principal
+        <button class="btn-sm" id="btn-load-friends" style="font-size:0.62rem">Cargar</button>
+      </div>
+      <div id="friends-list" style="max-height:200px;overflow-y:auto;scrollbar-width:thin"></div>
     </div>
   </div>
 </div>
+
+<!-- Hidden file inputs keep their IDs for JS event listeners -->
+<input type="file" id="inp-extra-json" accept=".json" style="display:none">
 
 <!-- About modal -->
 <div id="about-overlay" onclick="if(event.target===this)closeAboutModal()">
@@ -1906,9 +1939,7 @@ document.addEventListener('keydown', e => {
 function openUserModal() {
   document.getElementById('user-modal-bg').classList.add('open');
   document.body.style.overflow = 'hidden';
-  renderIdbList();
-  buildExtraUsersList();
-  renderIdbExtraList();
+  renderSecondaryUsers();
 }
 function closeUserModal() {
   document.getElementById('user-modal-bg').classList.remove('open');
@@ -1940,34 +1971,16 @@ function loadExtraUsersLS() {
 }
 
 function buildExtraUsersList() {
-  const list = document.getElementById('extra-users-list');
-  if (!extraUsers.length) { list.innerHTML = ''; }
-  else {
-    list.innerHTML = extraUsers.map((u, i) => {
-      const avatar = u.image
-        ? `<img class="eu-avatar" src="${escH(u.image)}" alt="">`
-        : `<div class="eu-dot" style="background:${u.color}"></div>`;
-      return `<div class="eu-row">
-        ${avatar}
-        <span class="eu-name">${escH(u.user)}</span>
-        <span class="eu-meta">${u.count.toLocaleString()} álb.</span>
-        <button class="btn-sm" onclick="syncExtraUser(${i})" title="Sincronizar">↻</button>
-        <button class="btn-sm" onclick="saveExtraUserJSON(${i})" title="Guardar JSON">↓ JSON</button>
-        <button class="eu-del" onclick="removeExtraUser(${i})" title="Eliminar">✕</button>
-      </div>`;
-    }).join('');
-  }
-
+  // Update sidebar Descubrir panel visibility
   const hasExtra = extraUsers.length > 0;
-
-  // ── Sidebar Descubrir panel ───────────────────────────────────────────────
   const discPanel = document.getElementById('panel-discover');
   discPanel.style.display = hasExtra ? '' : 'none';
   if (hasExtra) {
     if (activeDiscoverUserIdx >= extraUsers.length) activeDiscoverUserIdx = 0;
     _updateDiscoverIndicator();
   }
-
+  // Refresh secondary list if modal is open
+  renderSecondaryUsers();
 }
 
 function selectDiscoverUser(i) { setActiveDiscoverUser(i); }
@@ -2090,8 +2103,7 @@ async function syncExtraUser(idx) {
   }
 }
 
-document.getElementById('btn-extra-lfm').addEventListener('click', addExtraUser);
-document.getElementById('inp-extra-user').addEventListener('keydown', e => { if (e.key === 'Enter') addExtraUser(); });
+// (inp-extra-user / btn-extra-lfm removed — search box now handles both primary and secondary)
 
 // ── Friends loader ─────────────────────────────────────────────────────────
 document.getElementById('btn-load-friends').addEventListener('click', loadFriends);
@@ -2186,10 +2198,7 @@ async function addExtraUserByName(username, btn) {
   }
 }
 
-// import extra user from JSON file
-document.getElementById('btn-extra-json').addEventListener('click', () => {
-  document.getElementById('inp-extra-json').click();
-});
+// inp-extra-json is still in DOM (appended after modal), handle it for back-compat
 document.getElementById('inp-extra-json').addEventListener('change', async e => {
   const file = e.target.files[0];
   if (!file) return;
@@ -2205,7 +2214,6 @@ document.getElementById('inp-extra-json').addEventListener('change', async e => 
     extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: ft, image: '' });
     saveExtraUsersLS();
     await idbSave({ user: data.user, count: data.heard.length, fetched_at: ft, heard: data.heard });
-    await renderIdbExtraList();
     buildExtraUsersList();
     prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
   } catch(err) {
@@ -2218,35 +2226,10 @@ function removeExtraUser(idx) {
   extraUsers.splice(idx, 1);
   saveExtraUsersLS();
   buildExtraUsersList();
-  renderIdbExtraList();
 }
 
-async function renderIdbExtraList() {
-  const sessions = await idbList();
-  const listEl   = document.getElementById('idb-extra-list');
-  const sepEl    = document.getElementById('idb-extra-sep');
-  if (!listEl) return;
-  const primaryUser = heardCache?.user?.toLowerCase();
-  const visible = sessions.filter(s => s.user !== primaryUser);
-  if (!visible.length) { listEl.innerHTML = ''; if (sepEl) sepEl.style.display = 'none'; return; }
-  if (sepEl) sepEl.style.display = '';
-  listEl.innerHTML = visible
-    .sort((a, b) => b.fetched_at - a.fetched_at)
-    .map(s => {
-      const already = extraUsers.some(u => u.user.toLowerCase() === s.user.toLowerCase());
-      const _ts = s.last_scrobble_ts || s.fetched_at;
-      const _lbl = s.last_scrobble_artist ? ` · ${s.last_scrobble_artist} — ${s.last_scrobble_track||''}` : '';
-      return `<div class="idb-entry">
-        <div class="idb-entry-info">
-          <div class="idb-entry-user">${escH(s.user)}</div>
-          <div class="idb-entry-meta">${s.count.toLocaleString()} álb. · ${new Date(_ts*1000).toLocaleDateString()}${escH(_lbl)}</div>
-        </div>
-        ${already
-          ? `<span style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3)">añadido</span>`
-          : `<button class="btn-sm primary" onclick="idbAddAsExtra('${escH(s.user)}')">Añadir</button>`}
-      </div>`;
-    }).join('');
-}
+// Legacy alias kept for call sites that haven't been updated yet
+async function renderIdbExtraList() { return renderSecondaryUsers(); }
 
 async function idbAddAsExtra(username) {
   const data = await idbLoad(username);
@@ -2290,32 +2273,9 @@ async function fetchScrobblesSSE(user, onProgress) {
   return result; // {heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, ...}
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────
-(async () => {
-  loadExtraUsersLS();
-  // Purge extra users from localStorage that are no longer in IDB
-  if (extraUsers.length) {
-    try {
-      const sessions = await idbList();
-      const inIdb = new Set(sessions.map(s => s.user.toLowerCase()));
-      const valid = extraUsers.filter(u => inIdb.has(u.user.toLowerCase()));
-      if (valid.length !== extraUsers.length) {
-        extraUsers.length = 0;
-        valid.forEach(u => extraUsers.push(u));
-        saveExtraUsersLS();
-      }
-    } catch(e) {}
-  }
-  // pre-populate idb lists (so they're ready when modal opens)
-  await renderIdbList();
-  await renderIdbExtraList();
-  buildExtraUsersList();
-})();
+// (duplicate init block removed — single init at bottom of script)
 
-// ── Collapsible secondary users section ──────────────────────────────────
-function toggleUmExtra() {
-  document.getElementById('um-sec-extra').classList.toggle('collapsed');
-}
+// (toggleUmExtra removed — secondary section is now always visible in modal)
 
 // ── Discover mode ─────────────────────────────────────────────────────────
 function discoverCardHTML(a, i) {
@@ -2853,30 +2813,54 @@ async function idbDelete(username) {
   });
 }
 
-// ── IndexedDB list (inside user modal) ───────────────────────────────────
-async function renderIdbList() {
+// ── Unified secondary users list ─────────────────────────────────────────
+async function renderSecondaryUsers() {
   const sessions = await idbList();
-  const listEl   = document.getElementById('idb-list');
-  if (!sessions.length) {
-    listEl.innerHTML = '<span class="idb-empty">Sin sesiones guardadas</span>';
+  const el = document.getElementById('secondary-users-list');
+  if (!el) return;
+  const primaryUser = heardCache?.user?.toLowerCase();
+  const visible = sessions
+    .filter(s => s.user.toLowerCase() !== primaryUser)
+    .sort((a, b) => b.fetched_at - a.fetched_at);
+
+  if (!visible.length) {
+    el.innerHTML = '<div class="idb-empty">Sin sesiones guardadas</div>';
     return;
   }
-  listEl.innerHTML = sessions
-    .sort((a, b) => b.fetched_at - a.fetched_at)
-    .map(s => {
-      const _ts  = s.last_scrobble_ts || s.fetched_at;
-      const _lbl = s.last_scrobble_artist ? ` · ${s.last_scrobble_artist} — ${s.last_scrobble_track||''}` : '';
-      return `
-      <div class="idb-entry">
-        <div class="idb-entry-info">
-          <div class="idb-entry-user">${escH(s.user)}</div>
-          <div class="idb-entry-meta">${s.count.toLocaleString()} álb. · ${new Date(_ts*1000).toLocaleDateString()}${escH(_lbl)}</div>
+  el.innerHTML = visible.map(s => {
+    const eu = extraUsers.find(u => u.user.toLowerCase() === s.user.toLowerCase());
+    const isActive = !!eu;
+    const _ts = s.last_scrobble_ts || s.fetched_at;
+    const dateStr = new Date(_ts * 1000).toLocaleDateString();
+    const lastLbl = s.last_scrobble_artist ? ` · ${s.last_scrobble_artist}` : '';
+    const avatar = eu?.image
+      ? `<img class="eu-avatar" src="${escH(eu.image)}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0">`
+      : `<div class="eu-dot" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${eu?.color || 'var(--ink3)'}"></div>`;
+    return `<div class="sec-user-row${isActive ? ' active' : ''}">
+      <div class="sec-user-left">
+        ${avatar}
+        <div class="sec-user-info">
+          <div class="sec-user-name">${escH(s.user)}</div>
+          <div class="sec-user-meta">${s.count.toLocaleString()} álb. · ${dateStr}${escH(lastLbl)}</div>
         </div>
-        <button class="btn-sm primary" onclick="idbLoadSession('${escH(s.user)}')">Cargar</button>
-        <button class="btn-sm" onclick="idbDownloadSession('${escH(s.user)}')">↓ JSON</button>
-        <button class="btn-sm" onclick="idbDeleteSession('${escH(s.user)}')">✕</button>
-      </div>`;
-    }).join('');
+      </div>
+      <div class="sec-user-btns">
+        <button class="btn-sm" onclick="syncSecondaryIdb('${escH(s.user)}')" title="Sincronizar desde Last.fm">↻ Sync</button>
+        <button class="btn-sm${isActive ? ' act' : ''}" onclick="toggleSecondaryUser('${escH(s.user)}')">${isActive ? 'ACTIVO' : 'CARGAR'}</button>
+        <button class="btn-sm" onclick="idbDownloadSession('${escH(s.user)}')" title="Guardar JSON">↓ JSON</button>
+        <button class="btn-sm" onclick="setPrimaryFromSecondary('${escH(s.user)}')" title="Cargar como usuario principal">→ Prin.</button>
+        <button class="eu-del" onclick="idbDeleteSession('${escH(s.user)}')" title="Eliminar">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function idbLoadSession(username) {
+  const data = await idbLoad(username);
+  if (!data) return;
+  loadHeardCache(data);
+  document.getElementById('um-progress').textContent = `✓ ${data.user} cargado desde BD`;
+  closeUserModal();
 }
 
 async function idbLoadSession(username) {
@@ -2892,11 +2876,9 @@ async function idbDeleteSession(username) {
   const lc = username.toLowerCase();
   // Evict from active heardCache
   if (heardCache?.user?.toLowerCase() === lc) {
-    heardCache = null;
-    loadedUser = null;
+    heardCache = null; loadedUser = null;
     inpUser.value = '';
-    hideUserBadge();
-    hideResults();
+    hideUserBadge(); hideResults();
   }
   // Evict from extraUsers + localStorage
   const idx = extraUsers.findIndex(u => u.user.toLowerCase() === lc);
@@ -2905,8 +2887,7 @@ async function idbDeleteSession(username) {
     saveExtraUsersLS();
     buildExtraUsersList();
   }
-  await renderIdbList();
-  await renderIdbExtraList();
+  renderSecondaryUsers();
 }
 
 function idbDownloadSession(username) {
@@ -2923,7 +2904,7 @@ function idbDownloadSession(username) {
 
 // ── User badge (header) ────────────────────────────────────────────────────
 function showUserBadge(username, img, albumCount, lastTs, lastArtist, lastTrack) {
-  const setAvatar = (el, src) => { el.src = src || ''; el.style.display = src ? '' : 'none'; };
+  const setAvatar = (el, src) => { if (!el) return; el.src = src || ''; el.style.display = src ? '' : 'none'; };
   setAvatar(document.getElementById('badge-avatar'), img);
   setAvatar(document.getElementById('um-avatar'),    img);
   const countStr = typeof albumCount === 'number' ? albumCount.toLocaleString() + ' álb.' : albumCount;
@@ -2938,18 +2919,99 @@ function showUserBadge(username, img, albumCount, lastTs, lastArtist, lastTrack)
   btnU.classList.add('loaded');
   document.getElementById('um-username').textContent = username;
   document.getElementById('um-usermeta').textContent = lastStr
-    ? `${countStr} · ${dateStr}${lastStr ? ' · ' + lastStr : ''}`
+    ? `${countStr} · ${dateStr} · ${lastStr}`
     : metaStr;
-  document.getElementById('um-current-user').classList.add('visible');
-  document.getElementById('btn-save-session').style.display  = '';
-  document.getElementById('btn-sync-session').textContent    = '↻ Sync';
+  document.getElementById('um-sec-primary').style.display = '';
+  document.getElementById('btn-save-session').style.display = '';
+  renderSecondaryUsers(); // re-render so primary is hidden from secondary list
 }
 function hideUserBadge() {
   document.getElementById('badge-inline').style.display = 'none';
   const btnU = document.getElementById('btn-usuario');
   btnU.textContent = 'USUARIO'; btnU.classList.remove('loaded');
-  document.getElementById('um-current-user').classList.remove('visible');
+  document.getElementById('um-sec-primary').style.display = 'none';
   document.getElementById('btn-save-session').style.display = 'none';
+  renderSecondaryUsers(); // re-render so former primary appears in secondary list
+}
+
+// ── Unload primary user ────────────────────────────────────────────────────
+function unloadPrimaryUser() {
+  heardCache = null; loadedUser = null;
+  inpUser.value = '';
+  hideUserBadge();
+  hideResults();
+  renderSecondaryUsers();
+}
+
+// ── Toggle secondary user active state (adds/removes from extraUsers) ──────
+async function toggleSecondaryUser(username) {
+  const idx = extraUsers.findIndex(u => u.user.toLowerCase() === username.toLowerCase());
+  if (idx !== -1) {
+    // Already active → deactivate
+    extraUsers.splice(idx, 1);
+    saveExtraUsersLS();
+    buildExtraUsersList();
+    renderSecondaryUsers();
+    return;
+  }
+  // Not active → activate (load from IDB + get image)
+  const data = await idbLoad(username);
+  if (!data) return;
+  const prog = document.getElementById('um-extra-progress');
+  const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
+  const userInfo = await fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null);
+  const image = userInfo?.ok ? (userInfo.image || '') : '';
+  extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: data.fetched_at || 0, image });
+  saveExtraUsersLS();
+  buildExtraUsersList();
+  renderSecondaryUsers();
+  if (prog) prog.textContent = `✓ ${data.user} cargado`;
+}
+
+// ── Sync a secondary user from Last.fm (by username in IDB) ───────────────
+async function syncSecondaryIdb(username) {
+  const prog = document.getElementById('um-extra-progress');
+  if (prog) prog.textContent = `Sincronizando ${username}...`;
+  try {
+    const existing = await idbLoad(username);
+    const since = existing?.fetched_at || 0;
+    const url = `/api/scrobbles/since?user=${encodeURIComponent(username)}&since=${since}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    // merge new pairs into existing
+    const existSet = new Set((existing?.heard || []).map(p => p[0] + '|' + p[1]));
+    const added = (data.new_pairs || []).filter(p => !existSet.has(p[0] + '|' + p[1]));
+    const merged = [...(existing?.heard || []), ...added];
+    const newFetched = data.fetched_at || Math.floor(Date.now()/1000);
+    await idbSave({ user: username, count: merged.length, fetched_at: newFetched, heard: merged,
+      last_scrobble_ts: data.last_scrobble_ts || existing?.last_scrobble_ts || 0,
+      last_scrobble_artist: data.last_scrobble_artist || existing?.last_scrobble_artist || '',
+      last_scrobble_track: data.last_scrobble_track || existing?.last_scrobble_track || '' });
+    // update in-memory if in extraUsers
+    const eu = extraUsers.find(u => u.user.toLowerCase() === username.toLowerCase());
+    if (eu) {
+      eu.pairs = merged; eu.count = merged.length; eu.fetched_at = newFetched;
+      saveExtraUsersLS();
+    }
+    renderSecondaryUsers();
+    if (prog) prog.textContent = `✓ ${username}: +${added.length} nuevos (total ${merged.length.toLocaleString()})`;
+  } catch(e) {
+    if (prog) prog.textContent = 'Error: ' + e.message;
+  }
+}
+
+// ── Load secondary user as primary ────────────────────────────────────────
+async function setPrimaryFromSecondary(username) {
+  const data = await idbLoad(username);
+  if (!data) return;
+  // Remove from extraUsers if present
+  const idx = extraUsers.findIndex(u => u.user.toLowerCase() === username.toLowerCase());
+  if (idx !== -1) { extraUsers.splice(idx, 1); saveExtraUsersLS(); }
+  loadHeardCache(data);
+  document.getElementById('um-progress').textContent = `✓ ${data.user} cargado como principal`;
+  buildExtraUsersList();
 }
 
 function loadHeardCache(data) {
@@ -2991,7 +3053,7 @@ document.getElementById('btn-save-session').addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
 });
 
-// ── Session: importar JSON ────────────────────────────────────────────────
+// ── Session: importar JSON (routes to primary or secondary) ───────────────
 document.getElementById('btn-import').addEventListener('click', () => inpSession.click());
 inpSession.addEventListener('change', async e => {
   const file = e.target.files[0];
@@ -3000,9 +3062,23 @@ inpSession.addEventListener('change', async e => {
   try {
     const data = JSON.parse(await file.text());
     if (!data.heard || !data.user) throw new Error('Formato inválido');
-    loadHeardCache(data);
-    prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
-    closeUserModal();
+    const addAsSecondary = !!heardCache && heardCache.user.toLowerCase() !== data.user.toLowerCase();
+    if (addAsSecondary) {
+      if (extraUsers.some(u => u.user.toLowerCase() === data.user.toLowerCase())) {
+        prog.textContent = `${data.user} ya está activo`; e.target.value = ''; return;
+      }
+      const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
+      const ft = data.fetched_at || 0;
+      extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: ft, image: '' });
+      saveExtraUsersLS();
+      await idbSave({ user: data.user, count: data.heard.length, fetched_at: ft, heard: data.heard });
+      buildExtraUsersList();
+      prog.textContent = `✓ ${data.user} importado como secundario — ${data.heard.length.toLocaleString()} álbumes`;
+    } else {
+      loadHeardCache(data);
+      prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
+      closeUserModal();
+    }
   } catch(err) {
     prog.textContent = 'Error: ' + err.message;
   }
@@ -3037,6 +3113,9 @@ document.getElementById('btn-sync-session').addEventListener('click', async () =
   }
 });
 
+// ── Unload primary button ──────────────────────────────────────────────────
+document.getElementById('btn-unload-primary').addEventListener('click', unloadPrimaryUser);
+
 // ── Main: Cargar scrobbles ─────────────────────────────────────────────────
 btnGo.addEventListener('click', doLoadUser);
 inpUser.addEventListener('keydown', e => { if (e.key === 'Enter') doLoadUser(); });
@@ -3047,20 +3126,60 @@ async function doLoadUser() {
   hideError();
   const prog = document.getElementById('um-progress');
   btnGo.disabled = true;
+
+  // If primary already loaded AND this user is not the primary → add as secondary
+  const addAsSecondary = !!heardCache && heardCache.user.toLowerCase() !== user.toLowerCase();
+
   try {
-    prog.textContent = 'Conectando con Last.fm...';
-    const result = await fetchScrobblesSSE(user, msg => {
-      prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes únicos`;
-    });
-    loadHeardCache({
-      user, heard: result.heard,
-      fetched_at:          Math.floor(Date.now()/1000),
-      last_scrobble_ts:    result.last_scrobble_ts    || 0,
-      last_scrobble_artist: result.last_scrobble_artist || '',
-      last_scrobble_track: result.last_scrobble_track  || '',
-    });
-    prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados`;
-    closeUserModal();
+    if (addAsSecondary) {
+      // Check for existing IDB session first (avoid full re-fetch)
+      const existing = await idbLoad(user);
+      if (existing) {
+        await toggleSecondaryUser(user);
+        prog.textContent = `✓ ${user} activado como secundario`;
+        return;
+      }
+      // Full fetch as secondary
+      prog.textContent = 'Conectando con Last.fm...';
+      const [userInfo, lfmResult] = await Promise.all([
+        fetch(`/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
+        fetchScrobblesSSE(user, msg => {
+          prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
+        }),
+      ]);
+      const heard = lfmResult.heard;
+      const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
+      const image = userInfo?.ok ? (userInfo.image || '') : '';
+      const realUser = userInfo?.ok ? userInfo.username : user;
+      const fetched_at = Math.floor(Date.now()/1000);
+      extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image,
+        last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
+        last_scrobble_artist: lfmResult.last_scrobble_artist || '',
+        last_scrobble_track: lfmResult.last_scrobble_track || '' });
+      saveExtraUsersLS();
+      await idbSave({ user: realUser, count: heard.length, fetched_at, heard,
+        last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
+        last_scrobble_artist: lfmResult.last_scrobble_artist || '',
+        last_scrobble_track: lfmResult.last_scrobble_track || '' });
+      buildExtraUsersList();
+      prog.textContent = `✓ ${realUser} añadido — ${heard.length.toLocaleString()} álbumes`;
+      inpUser.value = '';
+    } else {
+      // Load as primary
+      prog.textContent = 'Conectando con Last.fm...';
+      const result = await fetchScrobblesSSE(user, msg => {
+        prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes únicos`;
+      });
+      loadHeardCache({
+        user, heard: result.heard,
+        fetched_at:           Math.floor(Date.now()/1000),
+        last_scrobble_ts:     result.last_scrobble_ts    || 0,
+        last_scrobble_artist: result.last_scrobble_artist || '',
+        last_scrobble_track:  result.last_scrobble_track  || '',
+      });
+      prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados`;
+      closeUserModal();
+    }
   } catch(e) {
     prog.textContent = 'Error: ' + e.message;
   } finally {
@@ -3094,14 +3213,12 @@ if ('serviceWorker' in navigator) {
       const inIdb = new Set(sessions.map(s => s.user.toLowerCase()));
       const valid = extraUsers.filter(u => inIdb.has(u.user.toLowerCase()));
       if (valid.length !== extraUsers.length) {
-        extraUsers.length = 0;
-        valid.forEach(u => extraUsers.push(u));
+        extraUsers.length = 0; valid.forEach(u => extraUsers.push(u));
         saveExtraUsersLS();
       }
     } catch(e) {}
   }
-  await renderIdbList();
-  await renderIdbExtraList();
+  await renderSecondaryUsers();
   buildExtraUsersList();
 
   // Show welcome screen if no data at all and never seen before
