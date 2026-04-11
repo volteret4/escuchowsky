@@ -3132,14 +3132,9 @@ async function doLoadUser() {
 
   try {
     if (addAsSecondary) {
-      // Check for existing IDB session first (avoid full re-fetch)
-      const existing = await idbLoad(user);
-      if (existing) {
-        await toggleSecondaryUser(user);
-        prog.textContent = `✓ ${user} activado como secundario`;
-        return;
-      }
-      // Full fetch as secondary
+      // Always do a full fresh download via the search box — never short-circuit
+      // from IDB here; the IDB may contain a truncated previous download.
+      // Use the "CARGAR" button on the secondary list to load from IDB instead.
       prog.textContent = 'Conectando con Last.fm...';
       const [userInfo, lfmResult] = await Promise.all([
         fetch(`/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
@@ -3152,10 +3147,14 @@ async function doLoadUser() {
       const image = userInfo?.ok ? (userInfo.image || '') : '';
       const realUser = userInfo?.ok ? userInfo.username : user;
       const fetched_at = Math.floor(Date.now()/1000);
-      extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image,
+      // Replace existing extraUsers entry if present, else push new
+      const euIdx = extraUsers.findIndex(u => u.user.toLowerCase() === realUser.toLowerCase());
+      const eu = { user: realUser, pairs: heard, color: euIdx !== -1 ? extraUsers[euIdx].color : color,
+        count: heard.length, fetched_at, image,
         last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
         last_scrobble_artist: lfmResult.last_scrobble_artist || '',
-        last_scrobble_track: lfmResult.last_scrobble_track || '' });
+        last_scrobble_track: lfmResult.last_scrobble_track || '' };
+      if (euIdx !== -1) extraUsers[euIdx] = eu; else extraUsers.push(eu);
       saveExtraUsersLS();
       await idbSave({ user: realUser, count: heard.length, fetched_at, heard,
         last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
