@@ -31,6 +31,7 @@ exec gunicorn \
   --threads 4 \
   -b 0.0.0.0:5001 \
   --timeout 120 \
-  --access-logfile - \
-  --error-logfile - \
+  --forwarded-allow-ips "*" \
+  --access-logfile /app/logs/access.log \
+  --error-logfile /app/logs/error.log \
   app_genres:app

@@ -8,8 +8,15 @@ services:
     environment:
       - LASTFM_API_KEY=${LASTFM_API_KEY}
       - DB_PATH=/app/db/must_hear_rym_new.db
+    read_only: true
+    tmpfs:
+      - /tmp
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./db:/app/db
+      - ./logs/escuchowsky:/app/logs
     networks:
       - musica
 
@@ -21,6 +28,14 @@ services:
     restart: unless-stopped
     environment:
       - LASTFM_API_KEY=${LASTFM_API_KEY}
+    read_only: true
+    tmpfs:
+      - /tmp
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./logs/tumtumpa:/app/logs
     networks:
       - musica
 
@@ -33,6 +48,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - CROWDSEC_ENABLE=true
+      - CROWDSEC_LABELS_TYPE=nginx
     depends_on:
       - escuchowsky
       - tumtumpa

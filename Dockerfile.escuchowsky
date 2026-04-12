@@ -14,10 +14,14 @@ COPY rym_genres.json .
 
 RUN chmod +x entrypoint_escuchowsky.sh
 
+RUN adduser --disabled-password --gecos '' appuser
+USER appuser
+
 # La DB y rym_genres.json se montan como volumen en runtime
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 5001
+
 
 # El entrypoint genera el árbol de géneros y luego arranca gunicorn
 CMD ["./entrypoint_escuchowsky.sh"]
