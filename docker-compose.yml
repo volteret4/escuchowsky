@@ -8,9 +8,9 @@ services:
     environment:
       - LASTFM_API_KEY=${LASTFM_API_KEY}
       - DB_PATH=/app/db/must_hear_rym_new.db
-    read_only: true
-    tmpfs:
-      - /tmp
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
     user: "1000:1000"
     security_opt:
       - no-new-privileges:true
@@ -28,9 +28,9 @@ services:
     restart: unless-stopped
     environment:
       - LASTFM_API_KEY=${LASTFM_API_KEY}
-    read_only: true
-    tmpfs:
-      - /tmp
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
     user: "1000:1000"
     security_opt:
       - no-new-privileges:true

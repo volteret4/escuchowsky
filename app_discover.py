@@ -159,7 +159,7 @@ def api_scrobbles():
             page += 1
 
         heard_pairs = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
-        yield f"data: {json.dumps({'done': True, 'user': username, 'count': len(heard_pairs), 'fetched_at': int(time.time()), 'heard': heard_pairs, 'last_scrobble_ts': last_scrobble_ts, 'last_scrobble_artist': last_scrobble_artist, 'last_scrobble_track': last_scrobble_track})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'user': username, 'count': len(heard_pairs), 'fetched_at': int(time.time()), 'heard': heard_pairs, 'last_scrobble_ts': last_scrobble_ts, 'last_scrobble_artist': last_scrobble_artist, 'last_scrobble_track': last_scrobble_track, 'total_pages': total_pages or 0})}\n\n"
 
     return Response(
         stream_with_context(generate()),
@@ -1607,6 +1607,20 @@ input::placeholder { color: var(--ink3); }
   #sidebar-fab { display: none !important; }
   #sidebar-overlay { display: none !important; }
 }
+@media (max-width: 600px) {
+  #user-modal-bg {
+    padding: 0;
+    align-items: flex-end;
+  }
+  #user-modal {
+    max-width: 100%;
+    border-radius: 12px 12px 0 0;
+    max-height: 90dvh;
+    overflow-y: auto;
+  }
+  .um-section { padding: 0.85rem 1rem 0.9rem; }
+  .modal-close { top: 0.6rem; right: 0.6rem; }
+}
 </style>
 </head>
 <body>
@@ -2058,7 +2072,7 @@ async function addExtraUser() {
     const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
     extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
     saveExtraUsersLS();
-    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, complete: true, total_pages: lfmResult.total_pages || 0 });
     await renderIdbExtraList();
     buildExtraUsersList();
     inp.value = '';
@@ -2833,6 +2847,7 @@ async function renderSecondaryUsers() {
     const _ts = s.last_scrobble_ts || s.fetched_at;
     const dateStr = new Date(_ts * 1000).toLocaleDateString();
     const lastLbl = s.last_scrobble_artist ? ` · ${s.last_scrobble_artist}` : '';
+    const incompleteTag = s.complete === false ? ' <span style="color:var(--red);font-size:0.7rem" title="Descarga incompleta — usa ↻ Sync">⚠</span>' : '';
     const avatar = eu?.image
       ? `<img class="eu-avatar" src="${escH(eu.image)}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0">`
       : `<div class="eu-dot" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${eu?.color || 'var(--ink3)'}"></div>`;
@@ -2841,7 +2856,7 @@ async function renderSecondaryUsers() {
         ${avatar}
         <div class="sec-user-info">
           <div class="sec-user-name">${escH(s.user)}</div>
-          <div class="sec-user-meta">${s.count.toLocaleString()} álb. · ${dateStr}${escH(lastLbl)}</div>
+          <div class="sec-user-meta">${s.count.toLocaleString()} álb. · ${dateStr}${escH(lastLbl)}${incompleteTag}</div>
         </div>
       </div>
       <div class="sec-user-btns">
@@ -2853,14 +2868,6 @@ async function renderSecondaryUsers() {
       </div>
     </div>`;
   }).join('');
-}
-
-async function idbLoadSession(username) {
-  const data = await idbLoad(username);
-  if (!data) return;
-  loadHeardCache(data);
-  document.getElementById('um-progress').textContent = `✓ ${data.user} cargado desde BD`;
-  closeUserModal();
 }
 
 async function idbLoadSession(username) {
@@ -2974,6 +2981,25 @@ async function syncSecondaryIdb(username) {
   if (prog) prog.textContent = `Sincronizando ${username}...`;
   try {
     const existing = await idbLoad(username);
+    // Si la sesión no está marcada como completa, descargar todo desde cero
+    if (existing && existing.complete === false) {
+      if (prog) prog.textContent = `Sesión incompleta — descargando completo...`;
+      const lfmResult = await fetchScrobblesSSE(username, msg => {
+        if (prog) prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
+      });
+      const heard = lfmResult.heard;
+      const newFetched = Math.floor(Date.now()/1000);
+      await idbSave({ user: username, count: heard.length, fetched_at: newFetched, heard,
+        last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
+        last_scrobble_artist: lfmResult.last_scrobble_artist || '',
+        last_scrobble_track: lfmResult.last_scrobble_track || '',
+        complete: true, total_pages: lfmResult.total_pages || 0 });
+      const eu = extraUsers.find(u => u.user.toLowerCase() === username.toLowerCase());
+      if (eu) { eu.pairs = heard; eu.count = heard.length; eu.fetched_at = newFetched; saveExtraUsersLS(); }
+      renderSecondaryUsers();
+      if (prog) prog.textContent = `✓ ${username}: ${heard.length.toLocaleString()} álbumes (descarga completa)`;
+      return;
+    }
     const since = existing?.fetched_at || 0;
     const url = `/api/scrobbles/since?user=${encodeURIComponent(username)}&since=${since}`;
     const r = await fetch(url);
@@ -2988,7 +3014,8 @@ async function syncSecondaryIdb(username) {
     await idbSave({ user: username, count: merged.length, fetched_at: newFetched, heard: merged,
       last_scrobble_ts: data.last_scrobble_ts || existing?.last_scrobble_ts || 0,
       last_scrobble_artist: data.last_scrobble_artist || existing?.last_scrobble_artist || '',
-      last_scrobble_track: data.last_scrobble_track || existing?.last_scrobble_track || '' });
+      last_scrobble_track: data.last_scrobble_track || existing?.last_scrobble_track || '',
+      complete: true, total_pages: existing?.total_pages || 0 });
     // update in-memory if in extraUsers
     const eu = extraUsers.find(u => u.user.toLowerCase() === username.toLowerCase());
     if (eu) {
@@ -3023,6 +3050,8 @@ function loadHeardCache(data) {
     last_scrobble_ts:    data.last_scrobble_ts    || 0,
     last_scrobble_artist: data.last_scrobble_artist || '',
     last_scrobble_track: data.last_scrobble_track  || '',
+    complete:            data.complete !== undefined ? data.complete : true,
+    total_pages:         data.total_pages          || 0,
   };
   loadedUser    = data.user.toLowerCase();
   inpUser.value = data.user;
@@ -3035,6 +3064,8 @@ function loadHeardCache(data) {
     last_scrobble_ts:    heardCache.last_scrobble_ts,
     last_scrobble_artist: heardCache.last_scrobble_artist,
     last_scrobble_track: heardCache.last_scrobble_track,
+    complete:            heardCache.complete,
+    total_pages:         heardCache.total_pages,
   }).then(() => { renderIdbList(); renderIdbExtraList(); }).catch(() => {});
   dismissWelcome();
 }
@@ -3074,6 +3105,13 @@ inpSession.addEventListener('change', async e => {
       await idbSave({ user: data.user, count: data.heard.length, fetched_at: ft, heard: data.heard });
       buildExtraUsersList();
       prog.textContent = `✓ ${data.user} importado como secundario — ${data.heard.length.toLocaleString()} álbumes`;
+      // Fetch avatar in background
+      fetch(`/api/check_user?user=${encodeURIComponent(data.user)}`).then(r=>r.json()).then(info => {
+        if (!info?.ok || !info.image) return;
+        const eu = extraUsers.find(u => u.user.toLowerCase() === data.user.toLowerCase());
+        if (eu) { eu.image = info.image; saveExtraUsersLS(); renderSecondaryUsers(); }
+        idbLoad(data.user).then(d => { if (d) idbSave({ ...d, image: info.image }); }).catch(()=>{});
+      }).catch(()=>{});
     } else {
       loadHeardCache(data);
       prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
@@ -3159,7 +3197,8 @@ async function doLoadUser() {
       await idbSave({ user: realUser, count: heard.length, fetched_at, heard,
         last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
         last_scrobble_artist: lfmResult.last_scrobble_artist || '',
-        last_scrobble_track: lfmResult.last_scrobble_track || '' });
+        last_scrobble_track: lfmResult.last_scrobble_track || '',
+        complete: true, total_pages: lfmResult.total_pages || 0 });
       buildExtraUsersList();
       prog.textContent = `✓ ${realUser} añadido — ${heard.length.toLocaleString()} álbumes`;
       inpUser.value = '';
@@ -3175,6 +3214,8 @@ async function doLoadUser() {
         last_scrobble_ts:     result.last_scrobble_ts    || 0,
         last_scrobble_artist: result.last_scrobble_artist || '',
         last_scrobble_track:  result.last_scrobble_track  || '',
+        complete:             true,
+        total_pages:          result.total_pages          || 0,
       });
       prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados`;
       closeUserModal();

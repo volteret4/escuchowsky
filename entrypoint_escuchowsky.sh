@@ -26,6 +26,8 @@ else
   echo "   GENRES_JSON=$GENRES_JSON"
 fi
 
+mkdir -p /app/logs
+
 exec gunicorn \
   -w 2 \
   --threads 4 \
