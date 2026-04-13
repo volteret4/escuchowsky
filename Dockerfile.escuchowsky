@@ -5,19 +5,18 @@ WORKDIR /app_escuchowsky
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY db .
+COPY db ./db
 COPY .collections_ignore .
 COPY app_genres.py .
 COPY app_genre_mermaid.py .
 COPY entrypoint_escuchowsky.sh .
 COPY sops_env.py .
-COPY rym_genres.json ./db/
+
 
 RUN chmod +x entrypoint_escuchowsky.sh
 
 RUN adduser --disabled-password --gecos '' appuser
-RUN chown -R appuser ./db/
-
+RUN chown -R appuser /app_escuchowsky/db
 USER appuser
 
 
