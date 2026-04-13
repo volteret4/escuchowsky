@@ -5,6 +5,7 @@ WORKDIR /app_escuchowsky
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY db .
 COPY .collections_ignore .
 COPY app_genres.py .
 COPY app_genre_mermaid.py .
