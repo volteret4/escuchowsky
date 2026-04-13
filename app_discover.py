@@ -822,6 +822,7 @@ input::placeholder { color: var(--ink3); }
 .fr-add { font-size: 0.65rem; padding: 0.2rem 0.5rem; flex-shrink: 0; }
 .fr-add:disabled { opacity: .45; cursor: default; }
 /* header badge button */
+#badge-inline { display: none !important; }
 #btn-usuario {
   font-family: var(--mono);
   font-size: 0.65rem;
@@ -1074,7 +1075,7 @@ input::placeholder { color: var(--ink3); }
 }
 #detail-overlay.open { display: block; }
 #detail-panel {
-  position: fixed; right: 0; top: 0; height: 100vh;
+  position: fixed; right: 0; top: 52px; height: calc(100dvh - 52px);
   width: min(440px, 100vw);
   background: var(--bg2); border-left: 1px solid var(--border2);
   transform: translateX(100%);
@@ -1284,7 +1285,7 @@ input::placeholder { color: var(--ink3); }
 /* ── App shell ─────────────────────────────────────────────────────── */
 .app-shell {
   display: flex;
-  height: calc(100vh - 0px);
+  height: calc(100dvh - 52px);
   overflow: hidden;
 }
 
@@ -1614,11 +1615,12 @@ input::placeholder { color: var(--ink3); }
 /* ── Responsive ────────────────────────────────────────────────────── */
 @media (max-width: 800px) {
   #sidebar {
-    position: fixed; top: 52px; left: 0; bottom: 0;
-    width: 280px; z-index: 200;
+    position: fixed; top: 52px; left: 0;
+    width: 100vw; height: calc(100dvh - 52px);
+    z-index: 200;
     transform: translateX(-100%);
     transition: transform 0.25s ease;
-    border-right: 1px solid var(--border2);
+    border-right: none;
   }
   #sidebar.mobile-open { transform: translateX(0); }
   #sidebar-overlay.visible { display: block; }
@@ -1632,6 +1634,7 @@ input::placeholder { color: var(--ink3); }
 @media (max-width: 600px) {
   #user-modal-bg {
     padding: 0;
+    top: 52px;
     align-items: flex-end;
     overflow: hidden;
   }
@@ -1640,16 +1643,14 @@ input::placeholder { color: var(--ink3); }
     max-width: 100vw;
     box-sizing: border-box;
     border-radius: 12px 12px 0 0;
-    height: 92dvh;
+    height: calc(100dvh - 52px);
     overflow-y: auto;
     overflow-x: hidden;
     padding-bottom: env(safe-area-inset-bottom, 0.5rem);
   }
   .um-section { padding: 0.85rem 1rem 0.9rem; }
   .modal-close { top: 0.6rem; right: 0.6rem; }
-  /* Limitar la lista de secundarios para que los amigos sean siempre accesibles */
   #secondary-users-list { max-height: 190px; overflow-y: auto; }
-  /* Botones más compactos */
   .sec-user-btns .btn-sm { font-size: 0.58rem; padding: 0.18rem 0.32rem; }
   .um-row input { min-width: 0; }
 }
@@ -1699,7 +1700,7 @@ input::placeholder { color: var(--ink3); }
 </div>
 
 <!-- ── Header ─────────────────────────────────────────────────────────── -->
-<header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:relative;z-index:10;">
+<header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:sticky;top:0;z-index:100;">
   <div class="logo" style="font-family:var(--serif);font-size:1.3rem;font-weight:800">tumtum<em style="color:var(--accent);font-style:normal">pa</em></div>
   <div style="flex:1"></div>
   <div id="badge-inline" style="display:none;align-items:center;gap:0.45rem;cursor:pointer;" onclick="openUserModal()">
