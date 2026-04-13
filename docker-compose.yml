@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
     environment:
       - LASTFM_API_KEY=${LASTFM_API_KEY}
-    read_only: true
+    # read_only: true
     # tmpfs:
     #   - /tmp
     # user: "1000:1000"
