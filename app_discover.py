@@ -93,6 +93,7 @@ def api_scrobbles():
     def generate():
         # (norm_a, norm_t) -> [orig_a, orig_t, count]
         heard_counts    = {}
+        heard_artists   = set()   # norm_a para TODOS los tracks (con o sin álbum)
         page            = 1
         total_pages     = None
         last_scrobble_ts     = 0
@@ -145,6 +146,8 @@ def api_scrobbles():
                         last_scrobble_ts = 0
                     last_scrobble_artist = artist
                     last_scrobble_track  = t.get("name", "")
+                if artist:
+                    heard_artists.add(_norm(artist))
                 if artist and album:
                     key = (_norm(artist), _norm(album))
                     if key not in heard_counts:
@@ -159,7 +162,7 @@ def api_scrobbles():
             page += 1
 
         heard_pairs = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
-        yield f"data: {json.dumps({'done': True, 'user': username, 'count': len(heard_pairs), 'fetched_at': int(time.time()), 'heard': heard_pairs, 'last_scrobble_ts': last_scrobble_ts, 'last_scrobble_artist': last_scrobble_artist, 'last_scrobble_track': last_scrobble_track, 'total_pages': total_pages or 0})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'user': username, 'count': len(heard_pairs), 'fetched_at': int(time.time()), 'heard': heard_pairs, 'heard_artists': list(heard_artists), 'last_scrobble_ts': last_scrobble_ts, 'last_scrobble_artist': last_scrobble_artist, 'last_scrobble_track': last_scrobble_track, 'total_pages': total_pages or 0})}\n\n"
 
     return Response(
         stream_with_context(generate()),
@@ -501,6 +504,25 @@ def api_album_info():
 
     resp = jsonify(result)
     resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@app.route("/api/artist_info")
+def api_artist_info():
+    """Imagen y bio del artista desde Last.fm artist.getInfo."""
+    artist = request.args.get("artist", "").strip()
+    if not artist:
+        return jsonify({"error": "artist requerido"}), 400
+    ar_data = lfm_get("artist.getInfo", {"artist": artist, "autocorrect": 1})
+    if "artist" not in ar_data:
+        return jsonify({}), 200
+    ar = ar_data["artist"]
+    image = next((i["#text"] for i in ar.get("image", []) if i.get("size") == "extralarge"), "")
+    bio   = (ar.get("bio", {}).get("summary", "") or "").split("<a ")[0].strip()[:300]
+    resp  = jsonify({"image": image, "bio": bio,
+                     "listeners": ar.get("stats", {}).get("listeners", ""),
+                     "playcount":  ar.get("stats", {}).get("playcount",  "")})
+    resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
 
 
@@ -1611,15 +1633,25 @@ input::placeholder { color: var(--ink3); }
   #user-modal-bg {
     padding: 0;
     align-items: flex-end;
+    overflow: hidden;
   }
   #user-modal {
-    max-width: 100%;
+    width: 100vw;
+    max-width: 100vw;
+    box-sizing: border-box;
     border-radius: 12px 12px 0 0;
-    max-height: 90dvh;
+    height: 92dvh;
     overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: env(safe-area-inset-bottom, 0.5rem);
   }
   .um-section { padding: 0.85rem 1rem 0.9rem; }
   .modal-close { top: 0.6rem; right: 0.6rem; }
+  /* Limitar la lista de secundarios para que los amigos sean siempre accesibles */
+  #secondary-users-list { max-height: 190px; overflow-y: auto; }
+  /* Botones más compactos */
+  .sec-user-btns .btn-sm { font-size: 0.58rem; padding: 0.18rem 0.32rem; }
+  .um-row input { min-width: 0; }
 }
 </style>
 </head>
@@ -2072,7 +2104,7 @@ async function addExtraUser() {
     const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
     extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
     saveExtraUsersLS();
-    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, complete: true, total_pages: lfmResult.total_pages || 0 });
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, complete: true, total_pages: lfmResult.total_pages || 0, heard_artists: lfmResult.heard_artists || [] });
     await renderIdbExtraList();
     buildExtraUsersList();
     inp.value = '';
@@ -2299,12 +2331,17 @@ function discoverCardHTML(a, i) {
         ? `<img class="rc-avatar" src="${escH(u.image)}" title="${escH(u.user)}: ${u.count} plays" alt="">`
         : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`
     ).join('');
+    const coverEl = a.cover_url
+      ? `<img class="card-cover disc-artist-img" src="${escH(a.cover_url)}" loading="lazy" alt="">`
+      : `<img class="card-cover disc-artist-img" src="" loading="lazy" alt="" style="display:none">
+         <div class="disc-artist-icon">
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+             <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+           </svg>
+         </div>`;
     return `<div class="card rec-card disc-artist-card" data-disc="${i}" style="cursor:pointer">
-      <div class="disc-artist-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
-          <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
-        </svg>
-      </div>
+      ${coverEl}
+      <div class="card-overlay"></div>
       <div class="card-info">
         <div class="card-title">${escH(a.orig_a)}</div>
         <div class="card-artist" style="opacity:0.6">${a.album_count} álbum${a.album_count !== 1 ? 'es' : ''}</div>
@@ -2401,8 +2438,10 @@ function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
   const primaryPairs = heardCache ? new Set(heardCache.pairs.map(p => p[0] + '|' + p[1])) : new Set();
 
   if (mode === 'artists') {
-    // ── Artists mode: group by artist, exclude artists with any heard album ──
-    const primaryArtists = heardCache ? new Set(heardCache.pairs.map(p => p[0])) : new Set();
+    // ── Artists mode: exclude artists heard by primary (uses full artist set if available) ──
+    const primaryArtists = heardCache
+      ? (heardCache.artist_set || new Set(heardCache.pairs.map(p => p[0])))
+      : new Set();
     const amap = {};
     for (const p of u.pairs) {
       const normA = p[0];
@@ -2474,6 +2513,21 @@ function _loadDiscoverPage() {
     document.getElementById('discover-footer').style.display = '';
     document.getElementById('discover-progress').textContent =
       `${discoverAlbums.length} artistas de ${uName} (pág. ${discoverPage + 1})`;
+    // Carga de imágenes de artistas en background
+    discoverAlbums.forEach((a, i) => {
+      fetch(`/api/artist_info?artist=${encodeURIComponent(a.orig_a)}`)
+        .then(r => r.json())
+        .then(info => {
+          if (!info?.image) return;
+          discoverAlbums[i].cover_url = info.image;
+          const card = document.querySelector(`.card[data-disc="${i}"]`);
+          if (!card) return;
+          const img  = card.querySelector('.disc-artist-img');
+          const icon = card.querySelector('.disc-artist-icon');
+          if (img)  { img.src = info.image; img.style.display = ''; }
+          if (icon) icon.style.display = 'none';
+        }).catch(() => {});
+    });
   } else {
     document.getElementById('discover-footer').style.display = '';
     document.getElementById('discover-progress').textContent =
@@ -3052,6 +3106,10 @@ function loadHeardCache(data) {
     last_scrobble_track: data.last_scrobble_track  || '',
     complete:            data.complete !== undefined ? data.complete : true,
     total_pages:         data.total_pages          || 0,
+    // Set de artistas normalizados para filtro en modo Descubrir artistas
+    artist_set:          data.heard_artists
+                           ? new Set(data.heard_artists)
+                           : new Set((data.heard || []).map(p => p[0])),
   };
   loadedUser    = data.user.toLowerCase();
   inpUser.value = data.user;
@@ -3066,6 +3124,7 @@ function loadHeardCache(data) {
     last_scrobble_track: heardCache.last_scrobble_track,
     complete:            heardCache.complete,
     total_pages:         heardCache.total_pages,
+    heard_artists:       [...heardCache.artist_set],
   }).then(() => { renderIdbList(); renderIdbExtraList(); }).catch(() => {});
   dismissWelcome();
 }
@@ -3198,7 +3257,8 @@ async function doLoadUser() {
         last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
         last_scrobble_artist: lfmResult.last_scrobble_artist || '',
         last_scrobble_track: lfmResult.last_scrobble_track || '',
-        complete: true, total_pages: lfmResult.total_pages || 0 });
+        complete: true, total_pages: lfmResult.total_pages || 0,
+        heard_artists: lfmResult.heard_artists || [] });
       buildExtraUsersList();
       prog.textContent = `✓ ${realUser} añadido — ${heard.length.toLocaleString()} álbumes`;
       inpUser.value = '';
@@ -3216,6 +3276,7 @@ async function doLoadUser() {
         last_scrobble_track:  result.last_scrobble_track  || '',
         complete:             true,
         total_pages:          result.total_pages          || 0,
+        heard_artists:        result.heard_artists         || [],
       });
       prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados`;
       closeUserModal();
