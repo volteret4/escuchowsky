@@ -961,6 +961,7 @@ input::placeholder { color: var(--ink3); }
 .fr-name { flex: 1; font-family: var(--mono); font-size: 0.75rem; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fr-add { font-size: 0.65rem; padding: 0.2rem 0.5rem; flex-shrink: 0; }
 .fr-add:disabled { opacity: .45; cursor: default; }
+#badge-inline { display: none !important; }
 /* header badge button */
 #btn-usuario {
   font-family: var(--mono);
@@ -1214,7 +1215,7 @@ input::placeholder { color: var(--ink3); }
 }
 #detail-overlay.open { display: block; }
 #detail-panel {
-  position: fixed; right: 0; top: 0; height: 100vh;
+  position: fixed; right: 0; top: 52px; height: calc(100dvh - 52px);
   width: min(440px, 100vw);
   background: var(--bg2); border-left: 1px solid var(--border2);
   transform: translateX(100%);
@@ -1348,7 +1349,7 @@ input::placeholder { color: var(--ink3); }
 /* ── App shell ─────────────────────────────────────────────────────── */
 .app-shell {
   display: flex;
-  height: calc(100vh - 0px);
+  height: calc(100dvh - 52px);
   overflow: hidden;
 }
 
@@ -1618,11 +1619,12 @@ input::placeholder { color: var(--ink3); }
 /* ── Responsive ────────────────────────────────────────────────────── */
 @media (max-width: 800px) {
   #sidebar {
-    position: fixed; top: 52px; left: 0; bottom: 0;
-    width: 280px; z-index: 200;
+    position: fixed; top: 52px; left: 0;
+    width: 100vw; height: calc(100dvh - 52px);
+    z-index: 200;
     transform: translateX(-100%);
     transition: transform 0.25s ease;
-    border-right: 1px solid var(--border2);
+    border-right: none;
   }
   #sidebar.mobile-open { transform: translateX(0); }
   #sidebar-overlay.visible { display: block; }
@@ -1638,7 +1640,7 @@ input::placeholder { color: var(--ink3); }
 <body>
 
 <!-- ── Header ─────────────────────────────────────────────────────────── -->
-<header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:relative;z-index:10;">
+<header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:sticky;top:0;z-index:100;">
   <div class="logo" style="font-size:1.3rem">must<em>listen</em></div>
   <div style="flex:1"></div>
   <div id="badge-inline" style="display:none;align-items:center;gap:0.45rem;cursor:pointer;" onclick="openUserModal()">

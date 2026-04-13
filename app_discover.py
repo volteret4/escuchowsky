@@ -1653,6 +1653,10 @@ input::placeholder { color: var(--ink3); }
   #secondary-users-list { max-height: 190px; overflow-y: auto; }
   .sec-user-btns .btn-sm { font-size: 0.58rem; padding: 0.18rem 0.32rem; }
   .um-row input { min-width: 0; }
+  /* La sección de amigos ocupa el espacio restante hasta el borde inferior */
+  #user-modal { display: flex; flex-direction: column; }
+  #user-modal .um-section:last-child { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #user-modal .um-section:last-child #friends-list { flex: 1; max-height: none; overflow-y: auto; }
 }
 </style>
 </head>

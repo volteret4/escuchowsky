@@ -16,7 +16,6 @@ services:
       - no-new-privileges:true
     volumes:
       - ./db:/app/db
-      - ./logs/escuchowsky:/app/logs
     networks:
       - musica
 
@@ -34,8 +33,6 @@ services:
     user: "1000:1000"
     security_opt:
       - no-new-privileges:true
-    volumes:
-      - ./logs/tumtumpa:/app/logs
     networks:
       - musica
 
