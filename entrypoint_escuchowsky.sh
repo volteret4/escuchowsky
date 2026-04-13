@@ -17,7 +17,7 @@ if [ -f "$DB" ] && [ -f "$GENRES_JSON" ]; then
     --mh-db "$DB" \
     --genres-json "$GENRES_JSON" \
     --output "$OUT" \
-    --yt-videos 15 \
+    --yt-videos 20 \
     && echo "✅ rym_genre_tree.html generado" \
     || echo "⚠  Error generando árbol de géneros (la app seguirá sin /genres)"
 else
