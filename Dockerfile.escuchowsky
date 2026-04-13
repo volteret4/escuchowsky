@@ -18,7 +18,7 @@ RUN chmod +x entrypoint_escuchowsky.sh
 RUN adduser --disabled-password --gecos '' appuser
 USER appuser
 
-RUN chown -R appuser db/
+RUN chown -R appuser ./db/
 
 # La DB y rym_genres.json se montan como volumen en runtime
 ENV PYTHONUNBUFFERED=1
