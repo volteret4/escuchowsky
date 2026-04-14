@@ -1,0 +1,12 @@
+[Unit]
+Description=Scrape CrowdSec metrics to node_exporter textfile
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/crowdsec-metrics.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
