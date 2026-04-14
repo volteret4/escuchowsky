@@ -1783,11 +1783,6 @@ input::placeholder { color: var(--ink3); }
       <li>Usa los filtros de la barra superior para ver solo los escuchados, los pendientes o los recomendados.</li>
     </ul>
 
-    <h3>Filtros y ordenación</h3>
-    <ul>
-      <li>Filtra por <b>género</b> o por <b>década</b> en el panel lateral.</li>
-      <li>Ordena por posición en la lista, año o artista.</li>
-    </ul>
 
     <h3>Panel de detalles</h3>
     <ul>
