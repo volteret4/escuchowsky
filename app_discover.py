@@ -1793,9 +1793,8 @@ input::placeholder { color: var(--ink3); }
     <h3>Usuarios secundarios</h3>
     <ul>
       <li>Añade amigos desde el botón <b>Usuario</b> → sección <i>Usuarios secundarios</i>.</li>
-      <li>Los puntos de colores en las portadas indican si ese usuario ha escuchado el álbum.</li>
-      <li>Usa el panel <b>Descubrir</b> para ver qué álbumes recomienda un usuario secundario que tú aún no has escuchado.</li>
       <li>Puedes cargar la lista de amigos de tu usuario principal para añadirlos rápidamente.</li>
+      <li>Obtén álbumes y artistas que ellos han escuchado y tu aun no.</li>
     </ul>
 
     <h3>Sesiones</h3>
