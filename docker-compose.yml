@@ -39,17 +39,6 @@ services:
     networks:
       - musica
 
-  nginx-exporter:
-    image: nginx/nginx-prometheus-exporter:latest
-    container_name: nginx-exporter
-    restart: unless-stopped
-    command:
-      - '--nginx.scrape-uri=http://nginx:8080/stub_status'
-    depends_on:
-      - nginx
-    networks:
-      - musica
-
   nginx:
     build:
       context: ./
@@ -62,7 +51,6 @@ services:
     environment:
       - CROWDSEC_ENABLE=true
       - CROWDSEC_LABELS_TYPE=nginx
-      - METRICS_ALLOWED_IP=${METRICS_ALLOWED_IP}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
