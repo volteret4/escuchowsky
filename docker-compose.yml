@@ -39,6 +39,26 @@ services:
     networks:
       - musica
 
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    volumes:
+      - ${HOME}/.local/share/node_exporter/textfiles:/textfiles:ro
+    command:
+      - '--collector.disable-defaults'
+      - '--collector.textfile'
+      - '--collector.textfile.directory=/textfiles'
+      - '--collector.cpu'
+      - '--collector.meminfo'
+      - '--collector.loadavg'
+      - '--collector.netdev'
+      - '--collector.diskstats'
+      - '--collector.filesystem'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|run)($$|/)'
+    networks:
+      - musica
+
   nginx:
     build:
       context: ./
