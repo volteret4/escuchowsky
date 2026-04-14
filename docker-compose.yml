@@ -51,6 +51,9 @@ services:
     environment:
       - CROWDSEC_ENABLE=true
       - CROWDSEC_LABELS_TYPE=nginx
+      - METRICS_ALLOWED_IP=${METRICS_ALLOWED_IP}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - escuchowsky
       - tumtumpa
