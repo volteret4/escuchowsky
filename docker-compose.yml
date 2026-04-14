@@ -57,8 +57,12 @@ services:
     volumes:
       - /home/docker_webs/contenedores/nginx/logs/nginx:/var/log/nginx
     networks:
-      - musica
+      musica:
+        ipv4_address: 172.20.0.10
 
 networks:
   musica:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
