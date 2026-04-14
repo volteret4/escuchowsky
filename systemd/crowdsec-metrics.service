@@ -1,0 +1,10 @@
+[Unit]
+Description=Scrape CrowdSec metrics to node_exporter textfile
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c '\
+  curl -sf http://127.0.0.1:6060/metrics \
+    > %h/.local/share/node_exporter/textfiles/crowdsec.prom.tmp \
+  && mv %h/.local/share/node_exporter/textfiles/crowdsec.prom.tmp \
+        %h/.local/share/node_exporter/textfiles/crowdsec.prom'
