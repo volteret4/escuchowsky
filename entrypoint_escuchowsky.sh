@@ -12,18 +12,18 @@ fi
 OUT="/app_escuchowsky/rym_genre_tree.html"
 
 if [ -f "$DB" ] && [ -f "$GENRES_JSON" ]; then
-  # echo "Generando árbol de géneros..."
+  echo "Generando árbol de géneros..."
   python3 app_genre_mermaid.py \
     --mh-db "$DB" \
     --genres-json "$GENRES_JSON" \
     --output "$OUT" \
     --yt-videos 20 \
-    && # echo "rym_genre_tree.html generado" \
-    || # echo "Error generando árbol de géneros (la app seguirá sin /genres)"
+    && echo "rym_genre_tree.html generado" \
+    || echo "Error generando árbol de géneros (la app seguirá sin /genres)"
 else
-  # echo "DB o rym_genres.json no encontrados — /genres no estará disponible"
-  # echo "   DB_PATH=$DB"
-  # echo "   GENRES_JSON=$GENRES_JSON"
+  echo "DB o rym_genres.json no encontrados — /genres no estará disponible"
+  echo "   DB_PATH=$DB"
+  echo "   GENRES_JSON=$GENRES_JSON"
 fi
 
 exec gunicorn \
