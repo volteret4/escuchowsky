@@ -54,6 +54,8 @@ services:
     depends_on:
       - escuchowsky
       - tumtumpa
+    volumes:
+      - /home/docker_webs/contenedores/nginx/logs/nginx:/var/log/nginx
     networks:
       - musica
 

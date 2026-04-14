@@ -2,162 +2,99 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-# mustlisten — app.py standalone
+## Server Infrastructure
 
-## Qué es
-Flask web app que cruza scrobbles de Last.fm con listas de álbumes "must hear"
-almacenadas en SQLite. El usuario introduce su nick de Last.fm, el servidor
-descarga su historial de la API y lo cruza localmente con la colección elegida.
+Corriendo en AWS EC2 con Docker rootless bajo un usuario sin acceso sudo:
 
-## Archivo principal
-`app.py` — todo en un solo fichero (~1500 líneas). Incluye:
-- Backend Flask con endpoints
-- HTML/CSS/JS embebido en `HTML_TEMPLATE`
+- Puertos abiertos (consola AWS):
+  - 80 → iptables → 8085 (0.0.0.0/0)
+  - 443 → iptables → 8443 (0.0.0.0/0)
+  - 2245 (SSH custom, solo mi IP, solo llave SSH)
+- CrowdSec con nginx-bouncer y firewall-bouncer leyendo logs de nginx y Flask
+- Servidores locales disponibles para heavy-lifting y evitar carga en EC2
 
-## Cómo arrancar
-```bash
-pip install -r requirements.txt
-python app.py --db /ruta/must_hear_rym_new.db --lastfm-api-key TU_KEY
-# O con variable de entorno: LASTFM_API_KEY=xxx python app.py --db ...
-# Por defecto: http://127.0.0.1:5000
-```
+## What This Is
 
-## Secretos — SOPS + age
-Las credenciales se almacenan cifradas en `.encrypted.env` (commiteable).
-`sops_env.py` actúa como sustituto de python-dotenv: descifra con `sops --decrypt`
-e inyecta las variables en `os.environ`. Requiere `sops` y `age` instalados
-y la clave age correspondiente al recipient en `.sops.yaml`.
+**Escuchowsky** es una app de descubrimiento musical que cruza el historial de Last.fm del usuario con colecciones curadas de RateYourMusic (RYM) para mostrar qué álbumes no ha escuchado aún.
+
+Dos aplicaciones Flask independientes, cada una con su propio dominio y contenedor:
+
+- **escuchowsky** (`app_genres.py`, port 5001) — mustlisten: colecciones y árbol de géneros de RYM
+- **tumtumpa** (`app_discover.py`, port 5001) — mustdiscover: comparar con amigos de Last.fm
+
+## Common Commands
 
 ```bash
-# Verificar que las variables se cargan correctamente:
-python sops_env.py
+# Build and start everything
+docker-compose up --build -d
 
-# Editar el archivo cifrado:
-sops .encrypted.env
+# Logs
+docker-compose logs -f escuchowsky
+docker-compose logs -f tumtumpa
+docker-compose logs -f nginx
+
+# Restart a single service
+docker-compose restart escuchowsky
+
+# Rebuild a single service
+docker-compose up --build -d escuchowsky
 ```
 
-## Pre-commit hooks
-El repo usa **gitleaks** para detectar secretos antes de cada commit.
-```bash
-pip install pre-commit
-pre-commit install
-```
+No test suite exists. Pre-commit hook runs `gitleaks protect --verbose --redact --staged` to catch secrets.
 
-## Endpoints
-- `GET /`                          → UI principal
-- `GET /api/collections`           → lista de colecciones de la DB
-- `GET /api/collection?slug=X`     → álbumes de una colección (con géneros)
-- `GET /api/scrobbles?user=X`      → descarga top albums + recientes de Last.fm
-- `GET /api/scrobbles/update`      → sync incremental (compara con known_count)
-- `GET /api/check_user?user=X`     → verifica usuario Last.fm
-- `GET /api/cover?mbid=X`          → proxy para CoverArtArchive (evita CORS)
+## Architecture
 
-## Base de datos: must_hear_rym_new.db
-Tablas relevantes:
-- `collections`      — id, slug, name, total_albums, source_type, source_url
-- `collection_albums`— collection_id, album_id, rank
-- `albums`           — id, name, year, release_group_mbid, cover_url, yt_id, artist_id
-- `artists`          — id, name
-- `genres`           — id, name, source
-- `album_genres`     — album_id, genre_id
-- `user_heard`       — (no usado por la web app, solo por html_must_hear.py)
+### Containers (`docker-compose.yml`)
 
-source_type values: musicbrainz | rateyourmusic | sputnikmusic | image_ocr | NULL
+| Container | Image | Port | App |
+|-----------|-------|------|-----|
+| `escuchowsky` | `Dockerfile.escuchowsky` | 5001 | `app_genres.py` |
+| `tumtumpa` | `Dockerfile.tumtumpa` | 5001 | `app_discover.py` |
+| `nginx` | `Dockerfile` (nginx-unprivileged) | 8085:80, 8443:443 | Reverse proxy |
 
-## UI (HTML_TEMPLATE)
-Layout 2 columnas: sidebar izquierdo + contenido principal
-- Sidebar: panel Colecciones (agrupadas por serie), panel Géneros, panel Fechas
-- Main: input usuario, stats bar, filtros heard/missing, grid de portadas
-- Modal al hacer click en una portada: cover + youtube embed + links
+All containers share the `musica` bridge network. Nginx resolves upstream services by Docker DNS name (`escuchowsky`, `tumtumpa`).
 
-El cliente recibe todos los scrobbles en un solo fetch (`/api/scrobbles`) y hace
-el cruce heard/missing localmente en JS — no hay llamadas al servidor al cambiar
-de colección.
+### Flask Apps
 
-## Hosting — AWS EC2 (free tier)
-Instancia **t2.micro** con Ubuntu 24.04. Free tier: 750h/mes durante 12 meses.
+Both apps follow the same pattern:
+1. Client sends username → Flask fetches full scrobble history from Last.fm API (paginated, 200/page) via SSE (`text/event-stream`)
+2. Albums matched against SQLite DB using fuzzy normalization (`_norm()` strips non-word chars, lowercases)
+3. Unheard albums highlighted against curated RYM collections
 
-### Crear la instancia
-1. AWS Console → EC2 → Launch Instance
-2. AMI: Ubuntu Server 24.04 LTS
-3. Tipo: t2.micro (Free tier eligible)
-4. Key pair: crear uno nuevo, descargar el `.pem`
-5. Security Group: abrir puertos 22 (SSH), 80 (HTTP), 443 (HTTPS)
-6. Storage: 8 GB gp3 (suficiente para la DB de ~200 MB)
+Key SSE endpoints (long-running, gunicorn 120s timeout):
+- `GET /api/scrobbles?user=...` — streams per-page progress
+- `GET /api/enrich_albums?albums=[...]` — MusicBrainz lookups with 1.1s rate limiting per result
 
-### Primer acceso
-```bash
-chmod 400 tu-key.pem
-ssh -i tu-key.pem ubuntu@<IP-PUBLICA>
-```
+### Database (`db/must_hear_rym_new.db`)
 
-### Setup del servidor
-```bash
-sudo apt update && sudo apt install -y python3-pip python3-venv git nginx
-git clone <repo> /home/ubuntu/escuchowsky
-cd /home/ubuntu/escuchowsky
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-```
+SQLite with four tables: `artists`, `albums`, `collections`, `collection_albums`. Schema in `db/lastfm_rym_normalized.sql`. Mounted as a volume from `./db`.
 
-### Subir la base de datos
-```bash
-# Desde tu máquina local:
-scp -i tu-key.pem must_hear_rym_new.db ubuntu@<IP>:/home/ubuntu/escuchowsky/
-```
+`app_genres.py` also reads `db/rym_genres.json` (hierarchical genre tree from RYM) at startup.
 
-### Arrancar con gunicorn como servicio (systemd)
-Crear `/etc/systemd/system/mustlisten.service`:
-```ini
-[Unit]
-Description=mustlisten Flask app
-After=network.target
+### Entrypoint
 
-[Service]
-User=ubuntu
-WorkingDirectory=/home/ubuntu/escuchowsky
-Environment="LASTFM_API_KEY=tu_key_aqui"
-ExecStart=/home/ubuntu/escuchowsky/venv/bin/gunicorn -w 2 -b 127.0.0.1:5000 "app:app" --preload -- --db /home/ubuntu/escuchowsky/must_hear_rym_new.db
-Restart=always
+`entrypoint_escuchowsky.sh` runs `app_genre_mermaid.py` first (generates `rym_genre_tree.html` from `rym_genres.json`), then starts gunicorn (2 workers × 4 threads).
 
-[Install]
-WantedBy=multi-user.target
-```
-```bash
-sudo systemctl enable --now mustlisten
-```
+### Nginx (`conf.d/`)
 
-### Nginx como proxy inverso
-```nginx
-# /etc/nginx/sites-available/mustlisten
-server {
-    listen 80;
-    server_name <IP-PUBLICA>;
-    location / {
-        proxy_pass http://127.0.0.1:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-```bash
-sudo ln -s /etc/nginx/sites-available/mustlisten /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-```
+- `00_zones.conf` — rate limit zones: heavy APIs 6/min, covers 60/min, pages 60/min
+- `server_params.conf` — TLS 1.2/1.3, security headers, Docker DNS resolver, proxy settings
+- `escuchowsky.conf` / `tumtumpa.conf` — virtual hosts per domain
 
-### Pasar el --db a gunicorn
-`app.py` lee `--db` vía `argparse` en `main()`, pero gunicorn no llama a `main()`.
-Hay que asegurarse de que `DB_PATH` y `LFM_API_KEY` se inicializan antes de que
-gunicorn levante los workers — revisar cómo está estructurado el arranque en `app.py`.
+### External APIs Used
 
-## Limitaciones conocidas
-- La DB acabará pesando 100-200MB (completa con todas las colecciones + portadas)
-- El scraping de Last.fm tarda 10-60s en usuarios con muchos scrobbles
-  (usa getTopAlbums paginado + getRecentTracks)
-- No hay autenticación — cualquiera con la URL puede usarla
+- **Last.fm** (`ws.audioscrobbler.com`) — scrobbles, top albums, user info, friends
+- **MusicBrainz** (`musicbrainz.org`) — release group search for MBID enrichment
+- **CoverArtArchive** (`coverartarchive.org`) — album covers proxied by MBID
 
-## Mejoras pendientes
-- Búsqueda de texto dentro de una colección
-- Modo offline completo (guardar colecciones en localStorage)
-- Comparar entre varios usuarios
-- Añadir colecciones nuevas desde la UI (requeriría html_must_hear.py integrado)
+### Secrets
+
+Managed with SOPS + age encryption (`.sops.yaml`, `.encrypted.env`). The required env var is `LASTFM_API_KEY`.
+
+### Client-Side
+
+The frontends are SPAs with:
+- IndexedDB for scrobble caching (persists across sessions)
+- LocalStorage for preferences and extra user lists
+- Service Worker in tumtumpa for offline support
+- `X-Accel-Buffering: no` header required on SSE responses to bypass nginx buffering
