@@ -39,6 +39,17 @@ services:
     networks:
       - musica
 
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:latest
+    container_name: nginx-exporter
+    restart: unless-stopped
+    command:
+      - --nginx.scrape-uri=http://nginx/nginx_status
+    depends_on:
+      - nginx
+    networks:
+      - musica
+
   node-exporter:
     image: prom/node-exporter:latest
     container_name: node-exporter
@@ -46,16 +57,18 @@ services:
     volumes:
       - ${HOME}/.local/share/node_exporter/textfiles:/textfiles:ro
     command:
-      - '--collector.disable-defaults'
-      - '--collector.textfile'
-      - '--collector.textfile.directory=/textfiles'
-      - '--collector.cpu'
-      - '--collector.meminfo'
-      - '--collector.loadavg'
-      - '--collector.netdev'
-      - '--collector.diskstats'
-      - '--collector.filesystem'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|run)($$|/)'
+      - "--collector.disable-defaults"
+      - "--collector.textfile"
+      - "--collector.textfile.directory=/textfiles"
+      - "--collector.cpu"
+      - "--collector.meminfo"
+      - "--collector.loadavg"
+      - "--collector.netdev"
+      - "--collector.diskstats"
+      - "--collector.filesystem"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|run)($$|/)"
+    ports:
+      - "9100:9100"
     networks:
       - musica
 
