@@ -55,7 +55,7 @@ services:
     container_name: node-exporter
     restart: unless-stopped
     volumes:
-      - /home/admin/.local/share/node_exporter/textfiles:/textfiles:ro
+      - ${HOME}/contenedores/nginx/crowdsec_textfiles:/textfiles:ro
     command:
       - "--collector.disable-defaults"
       - "--collector.textfile"
