@@ -56,7 +56,6 @@ services:
       - tumtumpa
     volumes:
       - /home/docker_webs/contenedores/nginx/logs/nginx:/var/log/nginx
-    user: 1003:1003
     networks:
       - musica
 
