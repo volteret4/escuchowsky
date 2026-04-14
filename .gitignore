@@ -11,3 +11,4 @@
 html_rym_genre_mermaid.py
 ssl/
 .local_prometheus/
+logs
