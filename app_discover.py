@@ -1773,8 +1773,8 @@ input::placeholder { color: var(--ink3); }
 <div id="about-overlay" onclick="if(event.target===this)closeAboutModal()">
   <div id="about-modal">
     <button class="about-close" onclick="closeAboutModal()">✕</button>
-    <h2>mustlisten</h2>
-    <p>Cruza tu historial de <b>Last.fm</b> con listas de álbumes imprescindibles para saber qué te falta escuchar.</p>
+    <h2>tumtumpa</h2>
+    <p>Cruza tu historial de <b>Last.fm</b> con otros usuarios para saber qué te falta escuchar de su colección.</p>
 
     <h3>Primeros pasos</h3>
     <ul>
