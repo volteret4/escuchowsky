@@ -538,8 +538,8 @@ def api_album_info():
             "url":       ar.get("url", ""),
         }
 
-    # MusicBrainz si no tenemos MBID
-    if not mbid:
+    # MusicBrainz si no tenemos MBID (solo si hay título de álbum)
+    if not mbid and album:
         mb = mb_search_release_group(artist, album)
         if mb.get("mbid"):
             mbid = mb["mbid"]
@@ -2959,13 +2959,10 @@ function _applyAlbumInfoToPanel(data, artist) {
   const dpCover = document.getElementById('dp-cover');
   const coverMissing = !dpCover.src || dpCover.src.endsWith('undefined') || dpCover.style.display === 'none';
 
-  // Better cover from MBID lookup
+  // Cover priority: MBID → Last.fm artist image (never both — avoids NS_BINDING_ABORTED)
   if (data.cover_url && coverMissing) {
     dpCover.src = data.cover_url; dpCover.style.display = '';
-  }
-
-  // Fall back to Last.fm artist image when there is no album cover
-  if (data.artist?.image && (coverMissing || (!data.cover_url && dpCover.style.display === 'none'))) {
+  } else if (data.artist?.image && coverMissing) {
     dpCover.src = data.artist.image; dpCover.style.display = '';
   }
 
@@ -3059,6 +3056,12 @@ function _patchDiscoverCard(idx, a) {
       card.insertBefore(img, card.firstChild);
     }
     if (img.src !== a.cover_url) {
+      // Wire up onerror (existing elements from HTML have none)
+      img.onerror = function() {
+        this.style.display = 'none';
+        if (ph) ph.style.display = 'flex';
+        if (artistIcon) artistIcon.style.display = 'flex';
+      };
       img.src = a.cover_url;
       img.style.display = '';
       if (ph) ph.style.display = 'none';
