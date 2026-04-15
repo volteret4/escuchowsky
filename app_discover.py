@@ -3370,7 +3370,7 @@ async function doLoadUserSb() {
     if (addAsSecondary) {
       const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
       const euIdx = extraUsers.findIndex(u => u.user.toLowerCase() === realUser.toLowerCase());
-      const eu = { user:realUser, pairs:heard, color:euIdx!==-1?extraUsers[euIdx].color:color,
+      const eu = { user:realUser, pairs:heard, songs:lfmResult.heard_songs||[], color:euIdx!==-1?extraUsers[euIdx].color:color,
         count:heard.length, fetched_at, image,
         last_scrobble_ts:lfmResult.last_scrobble_ts||0,
         last_scrobble_artist:lfmResult.last_scrobble_artist||'',
@@ -3378,6 +3378,7 @@ async function doLoadUserSb() {
       if (euIdx!==-1) extraUsers[euIdx]=eu; else extraUsers.push(eu);
       saveExtraUsersLS();
       await idbSave({ user:realUser, count:heard.length, fetched_at, heard,
+        songs:lfmResult.heard_songs||[],
         last_scrobble_ts:lfmResult.last_scrobble_ts||0,
         last_scrobble_artist:lfmResult.last_scrobble_artist||'',
         last_scrobble_track:lfmResult.last_scrobble_track||'',
@@ -3386,7 +3387,7 @@ async function doLoadUserSb() {
       buildExtraUsersList();
       prog.textContent = `✓ ${realUser} añadido — ${heard.length.toLocaleString()} álb.`;
     } else {
-      loadHeardCache({ user:realUser, heard, fetched_at,
+      loadHeardCache({ user:realUser, heard, heard_songs:lfmResult.heard_songs||[], fetched_at,
         last_scrobble_ts:lfmResult.last_scrobble_ts||0,
         last_scrobble_artist:lfmResult.last_scrobble_artist||'',
         last_scrobble_track:lfmResult.last_scrobble_track||'',
@@ -3464,16 +3465,17 @@ async function sbAddFriend(username, btn) {
       }),
     ]);
     const heard = lfmResult.heard;
+    const songs = lfmResult.heard_songs || [];
     const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
     const image = userInfo?.ok ? (userInfo.image||'') : '';
     const realUser = userInfo?.ok ? userInfo.username : username;
     const fetched_at = Math.floor(Date.now()/1000);
-    extraUsers.push({ user:realUser, pairs:heard, color, count:heard.length, fetched_at, image,
+    extraUsers.push({ user:realUser, pairs:heard, songs, color, count:heard.length, fetched_at, image,
       last_scrobble_ts:lfmResult.last_scrobble_ts||0,
       last_scrobble_artist:lfmResult.last_scrobble_artist||'',
       last_scrobble_track:lfmResult.last_scrobble_track||'' });
     saveExtraUsersLS();
-    await idbSave({ user:realUser, count:heard.length, fetched_at, heard,
+    await idbSave({ user:realUser, count:heard.length, fetched_at, heard, songs,
       last_scrobble_ts:lfmResult.last_scrobble_ts||0,
       last_scrobble_artist:lfmResult.last_scrobble_artist||'',
       last_scrobble_track:lfmResult.last_scrobble_track||'',
@@ -3695,7 +3697,7 @@ async function toggleSecondaryUser(username) {
   const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
   const userInfo = await fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null);
   const image = userInfo?.ok ? (userInfo.image || '') : '';
-  extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: data.fetched_at || 0, image });
+  extraUsers.push({ user: data.user, pairs: data.heard, songs: data.songs || [], color, count: data.heard.length, fetched_at: data.fetched_at || 0, image });
   saveExtraUsersLS();
   buildExtraUsersList();
   renderSecondaryUsers();
@@ -3715,14 +3717,15 @@ async function syncSecondaryIdb(username) {
         if (prog) prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
       });
       const heard = lfmResult.heard;
+      const songs = lfmResult.heard_songs || [];
       const newFetched = Math.floor(Date.now()/1000);
-      await idbSave({ user: username, count: heard.length, fetched_at: newFetched, heard,
+      await idbSave({ user: username, count: heard.length, fetched_at: newFetched, heard, songs,
         last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
         last_scrobble_artist: lfmResult.last_scrobble_artist || '',
         last_scrobble_track: lfmResult.last_scrobble_track || '',
         complete: true, total_pages: lfmResult.total_pages || 0 });
       const eu = extraUsers.find(u => u.user.toLowerCase() === username.toLowerCase());
-      if (eu) { eu.pairs = heard; eu.count = heard.length; eu.fetched_at = newFetched; saveExtraUsersLS(); }
+      if (eu) { eu.pairs = heard; eu.songs = songs; eu.count = heard.length; eu.fetched_at = newFetched; saveExtraUsersLS(); }
       renderSecondaryUsers();
       if (prog) prog.textContent = `✓ ${username}: ${heard.length.toLocaleString()} álbumes (descarga completa)`;
       return;
@@ -3737,8 +3740,13 @@ async function syncSecondaryIdb(username) {
     const existSet = new Set((existing?.heard || []).map(p => p[0] + '|' + p[1]));
     const added = (data.new_pairs || []).filter(p => !existSet.has(p[0] + '|' + p[1]));
     const merged = [...(existing?.heard || []), ...added];
+    // merge songs
+    const existSongSet = new Set((existing?.songs || []).map(s => s[0] + '|' + s[1]));
+    const addedSongs = (data.new_songs || []).filter(s => !existSongSet.has(s[0] + '|' + s[1]));
+    const mergedSongs = [...(existing?.songs || []), ...addedSongs];
     const newFetched = data.fetched_at || Math.floor(Date.now()/1000);
     await idbSave({ user: username, count: merged.length, fetched_at: newFetched, heard: merged,
+      songs: mergedSongs,
       last_scrobble_ts: data.last_scrobble_ts || existing?.last_scrobble_ts || 0,
       last_scrobble_artist: data.last_scrobble_artist || existing?.last_scrobble_artist || '',
       last_scrobble_track: data.last_scrobble_track || existing?.last_scrobble_track || '',
@@ -3746,7 +3754,7 @@ async function syncSecondaryIdb(username) {
     // update in-memory if in extraUsers
     const eu = extraUsers.find(u => u.user.toLowerCase() === username.toLowerCase());
     if (eu) {
-      eu.pairs = merged; eu.count = merged.length; eu.fetched_at = newFetched;
+      eu.pairs = merged; eu.songs = mergedSongs; eu.count = merged.length; eu.fetched_at = newFetched;
       saveExtraUsersLS();
     }
     renderSecondaryUsers();
@@ -3853,9 +3861,9 @@ inpSession.addEventListener('change', async e => {
       }
       const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
       const ft = data.fetched_at || 0;
-      extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: ft, image: '' });
+      extraUsers.push({ user: data.user, pairs: data.heard, songs: data.songs || [], color, count: data.heard.length, fetched_at: ft, image: '' });
       saveExtraUsersLS();
-      await idbSave({ user: data.user, count: data.heard.length, fetched_at: ft, heard: data.heard });
+      await idbSave({ user: data.user, count: data.heard.length, fetched_at: ft, heard: data.heard, songs: data.songs || [] });
       buildExtraUsersList();
       prog.textContent = `✓ ${data.user} importado como secundario — ${data.heard.length.toLocaleString()} álbumes`;
       // Fetch avatar in background
@@ -3940,7 +3948,7 @@ async function doLoadUser() {
       const fetched_at = Math.floor(Date.now()/1000);
       // Replace existing extraUsers entry if present, else push new
       const euIdx = extraUsers.findIndex(u => u.user.toLowerCase() === realUser.toLowerCase());
-      const eu = { user: realUser, pairs: heard, color: euIdx !== -1 ? extraUsers[euIdx].color : color,
+      const eu = { user: realUser, pairs: heard, songs: lfmResult.heard_songs||[], color: euIdx !== -1 ? extraUsers[euIdx].color : color,
         count: heard.length, fetched_at, image,
         last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
         last_scrobble_artist: lfmResult.last_scrobble_artist || '',
@@ -3948,6 +3956,7 @@ async function doLoadUser() {
       if (euIdx !== -1) extraUsers[euIdx] = eu; else extraUsers.push(eu);
       saveExtraUsersLS();
       await idbSave({ user: realUser, count: heard.length, fetched_at, heard,
+        songs: lfmResult.heard_songs || [],
         last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
         last_scrobble_artist: lfmResult.last_scrobble_artist || '',
         last_scrobble_track: lfmResult.last_scrobble_track || '',
@@ -3963,7 +3972,7 @@ async function doLoadUser() {
         prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes únicos`;
       });
       loadHeardCache({
-        user, heard: result.heard,
+        user, heard: result.heard, heard_songs: result.heard_songs || [],
         fetched_at:           Math.floor(Date.now()/1000),
         last_scrobble_ts:     result.last_scrobble_ts    || 0,
         last_scrobble_artist: result.last_scrobble_artist || '',
