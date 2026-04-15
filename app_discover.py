@@ -503,10 +503,12 @@ def api_album_info():
     al_data = lfm_get("album.getInfo", al_params)
     if "album" in al_data:
         al = al_data["album"]
+        _tags = al.get("tags", {}).get("tag", [])
+        if isinstance(_tags, dict): _tags = [_tags]
         result["lfm"] = {
             "listeners": al.get("listeners", ""),
             "playcount":  al.get("playcount",  ""),
-            "tags":  [t["name"] for t in al.get("tags",  {}).get("tag", [])[:6]],
+            "tags":  [t["name"] for t in _tags[:6]],
             "wiki":  (al.get("wiki", {}).get("summary", "") or "").split("<a ")[0].strip(),
             "image": next((i["#text"] for i in al.get("image", []) if i.get("size") == "extralarge"), ""),
         }

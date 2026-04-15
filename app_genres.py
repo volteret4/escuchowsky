@@ -684,10 +684,12 @@ def api_album_info():
     al_data = lfm_get("album.getInfo", al_params)
     if "album" in al_data:
         al = al_data["album"]
+        _tags = al.get("tags", {}).get("tag", [])
+        if isinstance(_tags, dict): _tags = [_tags]
         result["lfm"] = {
             "listeners": al.get("listeners", ""),
             "playcount":  al.get("playcount",  ""),
-            "tags":  [t["name"] for t in al.get("tags",  {}).get("tag", [])[:6]],
+            "tags":  [t["name"] for t in _tags[:6]],
             "wiki":  (al.get("wiki", {}).get("summary", "") or "").split("<a ")[0].strip(),
             "image": next((i["#text"] for i in al.get("image", []) if i.get("size") == "extralarge"), ""),
         }
@@ -3008,7 +3010,9 @@ function enrichMissingCovers() {
   if (_enrichEs) { _enrichEs.close(); _enrichEs = null; }
   const toEnrich = [];
   for (let i = 0; i < allAlbums.length && toEnrich.length < 50; i++) {
-    if (!allAlbums[i].cover) toEnrich.push({ idx: i, artist: allAlbums[i].artist, title: allAlbums[i].title });
+    // Skip albums already tried (no cover found) to avoid infinite retries
+    if (!allAlbums[i].cover && !allAlbums[i]._enrichTried)
+      toEnrich.push({ idx: i, artist: allAlbums[i].artist, title: allAlbums[i].title });
   }
   if (!toEnrich.length) return;
   const albumsParam = encodeURIComponent(JSON.stringify(toEnrich.map(a => [a.artist, a.title])));
@@ -3016,8 +3020,11 @@ function enrichMissingCovers() {
   _enrichEs.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.done) { _enrichEs.close(); _enrichEs = null; enrichMissingCovers(); return; }
-    if (typeof msg.i !== 'number' || !msg.cover_url) return;
+    if (typeof msg.i !== 'number') return;
     const albumIdx = toEnrich[msg.i].idx;
+    // Mark as tried regardless of result so we don't retry albums with no cover anywhere
+    allAlbums[albumIdx]._enrichTried = true;
+    if (!msg.cover_url) return;
     allAlbums[albumIdx].cover = msg.cover_url;
     if (msg.mbid) allAlbums[albumIdx].mbid = msg.mbid;
     if (activeSlug && collCache[activeSlug]?.[albumIdx]) {
