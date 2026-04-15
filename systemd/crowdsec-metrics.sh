@@ -7,10 +7,11 @@
 # collector de node_exporter solo acepta métricas sin timestamp.
 
 TEXTFILE_DIR="/home/docker_webs/contenedores/nginx/crowdsec_textfiles"
+umask 022  # archivos creados con permisos 644 (legibles por todos)
 
 while true; do
     curl -sf http://127.0.0.1:6060/metrics \
-        | sed '/^[^#]/s/ [0-9][0-9]*$//' \
+        | awk '/^#/{print; next} NF==3 && $3~/^[0-9]{10,}$/{print $1, $2; next} {print}' \
         > "${TEXTFILE_DIR}/crowdsec.prom.tmp" \
     && mv "${TEXTFILE_DIR}/crowdsec.prom.tmp" \
           "${TEXTFILE_DIR}/crowdsec.prom"
