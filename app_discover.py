@@ -1568,17 +1568,39 @@ input::placeholder { color: var(--ink3); }
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 #disc-play-btn:hover { background: var(--accent2); }
-#disc-user-indicator {
-  padding: 0 0.9rem 0.5rem;
-  font-family: var(--mono); font-size: 0.62rem; color: var(--ink3);
-  display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap;
+/* ── Discover user lines ─────────────────────────────────────────────────── */
+.disc-user-line {
+  display: flex; align-items: center; gap: 0.45rem;
+  padding: 0.26rem 0.9rem;
+  cursor: pointer; user-select: none;
+  font-family: var(--mono); font-size: 0.7rem; color: var(--ink2);
+  transition: color 0.1s;
+  border-left: 2px solid transparent;
 }
-#disc-user-indicator .disc-ind-user {
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: 1px 6px 1px 3px; border-radius: 10px;
-  border: 1px solid var(--border2); cursor: pointer;
-}
-#disc-user-indicator .disc-ind-user.active { border-color: var(--accent); color: var(--accent); }
+.disc-user-line:hover { color: var(--ink); }
+.disc-user-line.active { color: var(--accent); border-left-color: var(--accent); padding-left: calc(0.9rem - 2px); }
+.disc-user-line-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+
+/* ── Sidebar USUARIOS section ────────────────────────────────────────────── */
+.sb-search-area { padding: 0.45rem 0.75rem 0.2rem; }
+.sb-search-row { display: flex; gap: 0.3rem; align-items: center; }
+.sb-search-row input { flex: 1; min-width: 0; font-size: 0.72rem; padding: 0.35rem 0.5rem; }
+.sb-search-row .btn-sm { font-size: 0.6rem; padding: 0.28rem 0.45rem; white-space: nowrap; flex-shrink: 0; }
+.sb-progress-txt { font-family: var(--mono); font-size: 0.63rem; color: var(--ink3); min-height: 1.1em; padding: 0.18rem 0 0; }
+.sb-user-item { padding: 0.38rem 0.75rem; border-top: 1px solid var(--border); }
+.sb-user-item-primary { border-left: 2px solid var(--accent); padding-left: calc(0.75rem - 2px); background: rgba(124,111,255,0.04); }
+.sb-user-item-left { display: flex; align-items: center; gap: 0.4rem; }
+.sb-user-item-info { flex: 1; min-width: 0; overflow: hidden; }
+.sb-user-item-name { font-family: var(--mono); font-size: 0.7rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-user-item-primary .sb-user-item-name { color: var(--ink); }
+.sb-user-item:not(.sb-user-item-primary) .sb-user-item-name { color: var(--ink2); }
+.sb-user-item-meta { font-family: var(--mono); font-size: 0.58rem; color: var(--ink3); }
+.sb-user-item-btns { display: flex; gap: 0.22rem; flex-wrap: wrap; padding: 0.22rem 0 0.05rem; }
+.sb-user-item-btns .btn-sm { font-size: 0.58rem; padding: 0.16rem 0.38rem; }
+.sb-friends-section { padding: 0.35rem 0.75rem 0.45rem; border-top: 1px solid var(--border); }
+.sb-friends-btn { width: 100%; font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 0.28rem 0.7rem; background: var(--bg3); border: 1px solid var(--border2); color: var(--ink2); border-radius: var(--radius); cursor: pointer; transition: all 0.12s; }
+.sb-friends-btn:hover { border-color: var(--accent); color: var(--accent); }
+#sb-friends-list { max-height: 200px; overflow-y: auto; scrollbar-width: thin; margin-top: 0.35rem; }
 
 /* ── Per-user filter buttons ─────────────────────────────────────────────── */
 #filter-extra-users { display: contents; }
@@ -1791,12 +1813,10 @@ input::placeholder { color: var(--ink3); }
 <header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:sticky;top:0;z-index:100;">
   <div class="logo" style="font-family:var(--serif);font-size:1.3rem;font-weight:800">tumtum<em style="color:var(--accent);font-style:normal">pa</em></div>
   <div style="flex:1"></div>
-  <div id="badge-inline" style="display:none;align-items:center;gap:0.45rem;cursor:pointer;" onclick="openUserModal()">
-    <img id="badge-avatar" src="" alt="" style="width:26px;height:26px;border-radius:50%;object-fit:cover;background:var(--bg3);">
+  <div id="badge-inline" style="display:none;align-items:center;gap:0.5rem;">
+    <img id="badge-avatar" src="" alt="" style="width:24px;height:24px;border-radius:50%;object-fit:cover;background:var(--bg3);display:none">
     <span id="badge-name" style="font-family:var(--mono);font-size:0.75rem;color:var(--accent);"></span>
-    <span id="badge-plays" style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3);"></span>
   </div>
-  <button id="btn-usuario" onclick="openUserModal()">USUARIO</button>
 </header>
 
 <input type="file" id="inp-session" accept=".json" style="display:none">
@@ -1900,7 +1920,7 @@ input::placeholder { color: var(--ink3); }
   <aside id="sidebar">
     <div class="sb-scroll">
 
-      <!-- Descubrir (visible when secondary users loaded) -->
+      <!-- DESCUBRIR (visible when secondary users loaded) -->
       <div class="sb-panel open" id="panel-discover" style="display:none">
         <div class="sb-panel-hdr" onclick="togglePanel('panel-discover')">
           <span class="sb-panel-title">Descubrir</span>
@@ -1916,6 +1936,29 @@ input::placeholder { color: var(--ink3); }
             <button id="disc-play-btn" onclick="triggerDiscover()" title="Descubrir">▶</button>
           </div>
           <div id="disc-user-indicator"></div>
+        </div>
+      </div>
+
+      <!-- USUARIOS -->
+      <div class="sb-panel open" id="panel-usuarios">
+        <div class="sb-panel-hdr" onclick="togglePanel('panel-usuarios')">
+          <span class="sb-panel-title">Usuarios</span>
+          <span class="sb-panel-arrow">▶</span>
+        </div>
+        <div class="sb-panel-body">
+          <div class="sb-search-area">
+            <div class="sb-search-row">
+              <input id="sb-inp-user" type="text" placeholder="Usuario Last.fm" autocomplete="off" spellcheck="false">
+              <button class="btn-sm primary" id="sb-btn-go">LFM</button>
+              <button class="btn-sm" id="sb-btn-import">JSON</button>
+            </div>
+            <div id="sb-progress" class="sb-progress-txt"></div>
+          </div>
+          <div id="sb-users-list"></div>
+          <div class="sb-friends-section">
+            <button id="sb-btn-friends" class="sb-friends-btn">Amigos ▾</button>
+            <div id="sb-friends-list"></div>
+          </div>
         </div>
       </div>
 
@@ -2100,7 +2143,6 @@ function loadExtraUsersLS() {
 }
 
 function buildExtraUsersList() {
-  // Update sidebar Descubrir panel visibility
   const hasExtra = extraUsers.length > 0;
   const discPanel = document.getElementById('panel-discover');
   discPanel.style.display = hasExtra ? '' : 'none';
@@ -2108,8 +2150,8 @@ function buildExtraUsersList() {
     if (activeDiscoverUserIdx >= extraUsers.length) activeDiscoverUserIdx = 0;
     _updateDiscoverIndicator();
   }
-  // Refresh secondary list if modal is open
   renderSecondaryUsers();
+  renderSbUsersList();
 }
 
 function selectDiscoverUser(i) { setActiveDiscoverUser(i); }
@@ -2125,16 +2167,14 @@ function setActiveDiscoverUser(i) {
 function _updateDiscoverIndicator() {
   const el = document.getElementById('disc-user-indicator');
   if (!el) return;
-  const u = extraUsers[activeDiscoverUserIdx];
-  if (!u) { el.innerHTML = ''; return; }
-  const av = u.image
-    ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover">`
-    : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block"></span>`;
+  if (!extraUsers.length) { el.innerHTML = ''; return; }
   el.innerHTML = extraUsers.map((uu, i) =>
-    `<span class="disc-ind-user${i===activeDiscoverUserIdx?' active':''}" onclick="setActiveDiscoverUser(${i})">
-      ${uu.image ? `<img src="${escH(uu.image)}" style="width:12px;height:12px;border-radius:50%;object-fit:cover">` : `<span style="width:7px;height:7px;border-radius:50%;background:${uu.color};display:inline-block"></span>`}
-      ${escH(uu.user)}
-    </span>`
+    `<div class="disc-user-line${i===activeDiscoverUserIdx?' active':''}" onclick="setActiveDiscoverUser(${i})">
+      ${uu.image
+        ? `<img src="${escH(uu.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover;flex-shrink:0">`
+        : `<span style="width:8px;height:8px;border-radius:50%;background:${uu.color};display:inline-block;flex-shrink:0"></span>`}
+      <span class="disc-user-line-name">${escH(uu.user)}</span>
+    </div>`
   ).join('');
 }
 
@@ -2682,20 +2722,22 @@ function loadMoreDiscover() {
       discoverOffset += batch.length;
       discoverSearching = false;
       prog.textContent = `✓ ${discoverAlbums.length} álbumes encontrados`;
-      renderDiscoverGrid();
       return;
     }
-    if (typeof msg.i === 'number' && discoverAlbums[startIdx + msg.i]) {
-      Object.assign(discoverAlbums[startIdx + msg.i], {
+    if (typeof msg.i === 'number') {
+      const aIdx = startIdx + msg.i;
+      if (!discoverAlbums[aIdx]) return;
+      const cover_url = msg.cover_url || (msg.mbid ? `/api/cover?mbid=${encodeURIComponent(msg.mbid)}` : '');
+      Object.assign(discoverAlbums[aIdx], {
         mbid:      msg.mbid,
-        cover_url: msg.mbid ? `/api/cover?mbid=${encodeURIComponent(msg.mbid)}` : (msg.cover_url || ''),
-        mb_title:  msg.mb_title || discoverAlbums[startIdx + msg.i].orig_t,
-        mb_artist: msg.mb_artist || discoverAlbums[startIdx + msg.i].orig_a,
+        cover_url,
+        mb_title:  msg.mb_title  || discoverAlbums[aIdx].orig_t,
+        mb_artist: msg.mb_artist || discoverAlbums[aIdx].orig_a,
         date:      msg.date,
       });
-      renderDiscoverGrid();
+      _patchDiscoverCard(aIdx, discoverAlbums[aIdx]);
     }
-    prog.textContent = `Consultando MusicBrainz… (${msg.i + 1} / ${batch.length})`;
+    prog.textContent = `Buscando… (${msg.i + 1} / ${batch.length})`;
   };
 
   discoverEs.onerror = () => {
@@ -2703,7 +2745,6 @@ function loadMoreDiscover() {
     discoverOffset += batch.length;
     discoverSearching = false;
     prog.textContent = `✓ ${discoverAlbums.length} álbumes encontrados`;
-    renderDiscoverGrid();
   };
 }
 
@@ -2972,6 +3013,270 @@ async function fetchAlbumInfo(artist, album, mbid) {
   loading.style.display = 'none';
 }
 
+// ── _patchDiscoverCard: update single card without re-render ───────────────
+function _patchDiscoverCard(idx, a) {
+  const card = document.querySelector(`#discover-grid .card[data-disc="${idx}"]`);
+  if (!card) return;
+  if (a.cover_url) {
+    const img = card.querySelector('.card-cover');
+    const ph  = card.querySelector('.card-placeholder');
+    if (img && img.src !== a.cover_url) {
+      img.src = a.cover_url;
+      img.style.display = '';
+      if (ph) ph.style.display = 'none';
+    }
+  }
+  const titleEl  = card.querySelector('.card-title');
+  const artistEl = card.querySelector('.card-artist');
+  if (titleEl  && a.mb_title)  titleEl.textContent  = a.mb_title;
+  if (artistEl && a.mb_artist) artistEl.textContent = a.mb_artist;
+  if (a.date) {
+    let yearEl = card.querySelector('.card-year');
+    if (!yearEl) {
+      yearEl = document.createElement('div');
+      yearEl.className = 'card-year';
+      const rcUsers = card.querySelector('.rc-users');
+      const info = card.querySelector('.card-info');
+      if (info && rcUsers) info.insertBefore(yearEl, rcUsers);
+      else if (info) info.appendChild(yearEl);
+    }
+    yearEl.textContent = a.date.slice(0, 4);
+  }
+}
+
+// ── Sidebar USUARIOS panel ────────────────────────────────────────────────
+async function renderSbUsersList() {
+  const el = document.getElementById('sb-users-list');
+  if (!el) return;
+  const primaryUser = heardCache?.user?.toLowerCase();
+  const sessions = await idbList().catch(() => []);
+  let html = '';
+
+  if (heardCache) {
+    const avatarSrc = document.getElementById('badge-avatar')?.src || '';
+    const hasAvatar = avatarSrc && !avatarSrc.endsWith('#') && !avatarSrc.endsWith('/') && avatarSrc !== window.location.href;
+    const avatar = hasAvatar
+      ? `<img src="${escH(avatarSrc)}" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0">`
+      : `<div style="width:10px;height:10px;border-radius:50%;background:var(--accent);opacity:0.55;flex-shrink:0;margin:6px"></div>`;
+    const dateStr = heardCache.fetched_at ? new Date(heardCache.fetched_at*1000).toLocaleDateString() : '';
+    html += `<div class="sb-user-item sb-user-item-primary">
+      <div class="sb-user-item-left">
+        ${avatar}
+        <div class="sb-user-item-info">
+          <div class="sb-user-item-name">${escH(heardCache.user)}</div>
+          <div class="sb-user-item-meta">${heardCache.count.toLocaleString()} álb · ${escH(dateStr)}</div>
+        </div>
+      </div>
+      <div class="sb-user-item-btns">
+        <button class="btn-sm" onclick="sbSyncPrimary()">↻ Sync</button>
+        <button class="btn-sm" onclick="sbSavePrimaryJson()">↓ JSON</button>
+        <button class="btn-sm" onclick="unloadPrimaryUser()">✕</button>
+      </div>
+    </div>`;
+  }
+
+  sessions
+    .filter(s => s.user.toLowerCase() !== primaryUser)
+    .sort((a, b) => b.fetched_at - a.fetched_at)
+    .forEach(s => {
+      const eu = extraUsers.find(u => u.user.toLowerCase() === s.user.toLowerCase());
+      const isActive = !!eu;
+      const dateStr = new Date((s.fetched_at||0)*1000).toLocaleDateString();
+      const avatar = eu?.image
+        ? `<img src="${escH(eu.image)}" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0">`
+        : `<div style="width:10px;height:10px;border-radius:50%;background:${eu?.color||'var(--ink3)'};flex-shrink:0;margin:6px"></div>`;
+      const sn = escH(s.user);
+      html += `<div class="sb-user-item">
+        <div class="sb-user-item-left">
+          ${avatar}
+          <div class="sb-user-item-info">
+            <div class="sb-user-item-name">${sn}</div>
+            <div class="sb-user-item-meta">${(s.count||0).toLocaleString()} álb · ${escH(dateStr)}</div>
+          </div>
+          <button class="btn-sm${isActive?' act':''}" onclick="toggleSecondaryUser('${sn}')" style="flex-shrink:0;font-size:0.58rem;padding:0.15rem 0.38rem;margin-left:auto">${isActive?'ACTIVO':'CARGAR'}</button>
+        </div>
+        <div class="sb-user-item-btns">
+          <button class="btn-sm" onclick="syncSecondaryIdb('${sn}')">↻ Sync</button>
+          <button class="btn-sm" onclick="idbDownloadSession('${sn}')">↓ JSON</button>
+          <button class="btn-sm" onclick="idbDeleteSession('${sn}')">✕</button>
+        </div>
+      </div>`;
+    });
+
+  if (!html) html = '<div class="sb-empty">Sin usuarios guardados</div>';
+  el.innerHTML = html;
+}
+
+async function sbSyncPrimary() {
+  if (!heardCache) return;
+  const prog = document.getElementById('sb-progress');
+  if (prog) prog.textContent = 'Sincronizando...';
+  try {
+    const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${heardCache.count||0}`;
+    const data = await fetch(url).then(r => r.json());
+    if (data.error) { if (prog) prog.textContent = 'Error: ' + data.error; return; }
+    if (data.new_count === 0) { if (prog) prog.textContent = '✓ Al día'; return; }
+    if (data.full_replace) {
+      heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
+      showUserBadge(heardCache.user, document.getElementById('badge-avatar')?.src||'', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+      if (prog) prog.textContent = '✓ Al día';
+      await renderSbUsersList();
+    }
+  } catch(e) { if (prog) prog.textContent = 'Error: ' + e.message; }
+}
+
+function sbSavePrimaryJson() {
+  if (!heardCache) return;
+  const blob = new Blob([JSON.stringify({ version:1, user:heardCache.user, count:heardCache.count, fetched_at:heardCache.fetched_at, heard:heardCache.pairs }, null, 0)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `mustlisten_${heardCache.user}_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function doLoadUserSb() {
+  const inp = document.getElementById('sb-inp-user');
+  const prog = document.getElementById('sb-progress');
+  const btn = document.getElementById('sb-btn-go');
+  const user = inp.value.trim();
+  if (!user) return;
+  btn.disabled = true;
+  const addAsSecondary = !!heardCache && heardCache.user.toLowerCase() !== user.toLowerCase();
+  try {
+    prog.textContent = 'Conectando con Last.fm...';
+    const [userInfo, lfmResult] = await Promise.all([
+      fetch(`/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
+      fetchScrobblesSSE(user, msg => {
+        prog.textContent = `Pág ${msg.page}/${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
+      }),
+    ]);
+    const heard = lfmResult.heard;
+    const image = userInfo?.ok ? (userInfo.image||'') : '';
+    const realUser = userInfo?.ok ? userInfo.username : user;
+    const fetched_at = Math.floor(Date.now()/1000);
+    if (addAsSecondary) {
+      const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
+      const euIdx = extraUsers.findIndex(u => u.user.toLowerCase() === realUser.toLowerCase());
+      const eu = { user:realUser, pairs:heard, color:euIdx!==-1?extraUsers[euIdx].color:color,
+        count:heard.length, fetched_at, image,
+        last_scrobble_ts:lfmResult.last_scrobble_ts||0,
+        last_scrobble_artist:lfmResult.last_scrobble_artist||'',
+        last_scrobble_track:lfmResult.last_scrobble_track||'' };
+      if (euIdx!==-1) extraUsers[euIdx]=eu; else extraUsers.push(eu);
+      saveExtraUsersLS();
+      await idbSave({ user:realUser, count:heard.length, fetched_at, heard,
+        last_scrobble_ts:lfmResult.last_scrobble_ts||0,
+        last_scrobble_artist:lfmResult.last_scrobble_artist||'',
+        last_scrobble_track:lfmResult.last_scrobble_track||'',
+        complete:true, total_pages:lfmResult.total_pages||0,
+        heard_artists:lfmResult.heard_artists||[] });
+      buildExtraUsersList();
+      prog.textContent = `✓ ${realUser} añadido — ${heard.length.toLocaleString()} álb.`;
+    } else {
+      loadHeardCache({ user:realUser, heard, fetched_at,
+        last_scrobble_ts:lfmResult.last_scrobble_ts||0,
+        last_scrobble_artist:lfmResult.last_scrobble_artist||'',
+        last_scrobble_track:lfmResult.last_scrobble_track||'',
+        complete:true, total_pages:lfmResult.total_pages||0,
+        heard_artists:lfmResult.heard_artists||[] });
+      if (image) {
+        const av = document.getElementById('badge-avatar');
+        if (av) { av.src = image; av.style.display = ''; }
+      }
+      prog.textContent = `✓ ${heard.length.toLocaleString()} álbumes cargados`;
+    }
+    inp.value = '';
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    await renderSbUsersList();
+  }
+}
+
+document.getElementById('sb-btn-go').addEventListener('click', doLoadUserSb);
+document.getElementById('sb-inp-user').addEventListener('keydown', e => { if (e.key==='Enter') doLoadUserSb(); });
+document.getElementById('sb-btn-import').addEventListener('click', () => document.getElementById('inp-session').click());
+
+// Sidebar friends toggle
+let _sbFriendsLoaded = false;
+document.getElementById('sb-btn-friends').addEventListener('click', async () => {
+  const fl  = document.getElementById('sb-friends-list');
+  const btn = document.getElementById('sb-btn-friends');
+  const visible = fl.style.display === 'block';
+  fl.style.display = visible ? 'none' : 'block';
+  btn.textContent  = visible ? 'Amigos ▾' : 'Amigos ▴';
+  if (visible || _sbFriendsLoaded) return;
+  _sbFriendsLoaded = true;
+  fl.innerHTML = '<div class="sb-empty">Cargando…</div>';
+  const user = heardCache?.user;
+  if (!user) { fl.innerHTML = '<div class="sb-empty">Sin usuario principal cargado.</div>'; return; }
+  try {
+    const data = await fetch(`/api/friends?user=${encodeURIComponent(user)}`).then(r=>r.json());
+    if (!data.ok || !data.friends.length) {
+      fl.innerHTML = `<div class="sb-empty">${escH(data.error||'Sin amigos en Last.fm')}</div>`; return;
+    }
+    _renderSbFriendsList(data.friends);
+  } catch(e) { fl.innerHTML = `<div class="sb-empty">Error: ${escH(e.message)}</div>`; }
+});
+
+function _renderSbFriendsList(friends) {
+  const fl = document.getElementById('sb-friends-list');
+  if (!fl) return;
+  const added = new Set(extraUsers.map(u => u.user.toLowerCase()));
+  fl.innerHTML = friends.map(f => {
+    const isAdded = added.has(f.username.toLowerCase());
+    const av = f.image
+      ? `<img class="fr-avatar" src="${escH(f.image)}" alt="" onerror="this.style.display='none'">`
+      : `<span class="fr-avatar" style="background:var(--bg3);display:inline-block"></span>`;
+    return `<div class="fr-row">
+      ${av}
+      <span class="fr-name">${escH(f.username)}</span>
+      <button class="btn-sm fr-add" ${isAdded?'disabled':''} onclick="sbAddFriend('${escH(f.username)}',this)">
+        ${isAdded?'✓':'Añadir'}</button>
+    </div>`;
+  }).join('');
+}
+
+async function sbAddFriend(username, btn) {
+  if (!username) return;
+  btn.disabled = true; btn.textContent = '…';
+  const prog = document.getElementById('sb-progress');
+  if (prog) prog.textContent = `Cargando ${username}…`;
+  try {
+    const [userInfo, lfmResult] = await Promise.all([
+      fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null),
+      fetchScrobblesSSE(username, msg => {
+        if (prog) prog.textContent = `${username}: pág ${msg.page}/${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
+      }),
+    ]);
+    const heard = lfmResult.heard;
+    const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
+    const image = userInfo?.ok ? (userInfo.image||'') : '';
+    const realUser = userInfo?.ok ? userInfo.username : username;
+    const fetched_at = Math.floor(Date.now()/1000);
+    extraUsers.push({ user:realUser, pairs:heard, color, count:heard.length, fetched_at, image,
+      last_scrobble_ts:lfmResult.last_scrobble_ts||0,
+      last_scrobble_artist:lfmResult.last_scrobble_artist||'',
+      last_scrobble_track:lfmResult.last_scrobble_track||'' });
+    saveExtraUsersLS();
+    await idbSave({ user:realUser, count:heard.length, fetched_at, heard,
+      last_scrobble_ts:lfmResult.last_scrobble_ts||0,
+      last_scrobble_artist:lfmResult.last_scrobble_artist||'',
+      last_scrobble_track:lfmResult.last_scrobble_track||'',
+      complete:true, total_pages:lfmResult.total_pages||0,
+      heard_artists:lfmResult.heard_artists||[] });
+    buildExtraUsersList();
+    btn.textContent = '✓';
+    if (prog) prog.textContent = `✓ ${realUser} añadido`;
+  } catch(e) {
+    btn.disabled = false; btn.textContent = 'Añadir';
+    if (prog) prog.textContent = 'Error: ' + e.message;
+  }
+  await renderSbUsersList();
+}
+
 // ── UI helpers ─────────────────────────────────────────────────────────────
 function showLoading(msg) { loadTxt.textContent = msg || 'Cargando...'; loading.classList.add('visible'); }
 function hideLoading()    { loading.classList.remove('visible'); }
@@ -3038,6 +3343,7 @@ async function renderSecondaryUsers() {
 
   if (!visible.length) {
     el.innerHTML = '<div class="idb-empty">Sin sesiones guardadas</div>';
+    renderSbUsersList();
     return;
   }
   el.innerHTML = visible.map(s => {
@@ -3067,6 +3373,7 @@ async function renderSecondaryUsers() {
       </div>
     </div>`;
   }).join('');
+  renderSbUsersList();
 }
 
 async function idbLoadSession(username) {
@@ -3094,6 +3401,7 @@ async function idbDeleteSession(username) {
     buildExtraUsersList();
   }
   renderSecondaryUsers();
+  renderSbUsersList();
 }
 
 function idbDownloadSession(username) {
@@ -3110,43 +3418,49 @@ function idbDownloadSession(username) {
 
 // ── User badge (header) ────────────────────────────────────────────────────
 function showUserBadge(username, img, albumCount, lastTs, lastArtist, lastTrack) {
-  const setAvatar = (el, src) => { if (!el) return; el.src = src || ''; el.style.display = src ? '' : 'none'; };
-  setAvatar(document.getElementById('badge-avatar'), img);
-  setAvatar(document.getElementById('um-avatar'),    img);
+  if (img) {
+    const av = document.getElementById('badge-avatar');
+    if (av) { av.src = img; av.style.display = ''; }
+    const umAv = document.getElementById('um-avatar');
+    if (umAv) { umAv.src = img; umAv.style.display = ''; }
+  }
+  document.getElementById('badge-name').textContent = username;
+  document.getElementById('badge-inline').style.display = 'flex';
   const countStr = typeof albumCount === 'number' ? albumCount.toLocaleString() + ' álb.' : albumCount;
   const dateStr  = lastTs ? new Date(lastTs * 1000).toLocaleDateString() : '';
   const lastStr  = (lastArtist && lastTrack) ? `${lastArtist} — ${lastTrack}` : '';
   const metaStr  = [countStr, dateStr].filter(Boolean).join(' · ');
-  document.getElementById('badge-name').textContent  = username;
-  document.getElementById('badge-plays').textContent = metaStr;
-  document.getElementById('badge-inline').style.display = 'flex';
-  const btnU = document.getElementById('btn-usuario');
-  btnU.textContent = username;
-  btnU.classList.add('loaded');
-  document.getElementById('um-username').textContent = username;
-  document.getElementById('um-usermeta').textContent = lastStr
-    ? `${countStr} · ${dateStr} · ${lastStr}`
-    : metaStr;
-  document.getElementById('um-sec-primary').style.display = '';
-  document.getElementById('btn-save-session').style.display = '';
-  renderSecondaryUsers(); // re-render so primary is hidden from secondary list
+  const umUser = document.getElementById('um-username');
+  const umMeta = document.getElementById('um-usermeta');
+  if (umUser) umUser.textContent = username;
+  if (umMeta) umMeta.textContent = lastStr ? `${countStr} · ${dateStr} · ${lastStr}` : metaStr;
+  const secPrim = document.getElementById('um-sec-primary');
+  if (secPrim) secPrim.style.display = '';
+  const saveSess = document.getElementById('btn-save-session');
+  if (saveSess) saveSess.style.display = '';
+  renderSecondaryUsers();
 }
 function hideUserBadge() {
   document.getElementById('badge-inline').style.display = 'none';
-  const btnU = document.getElementById('btn-usuario');
-  btnU.textContent = 'USUARIO'; btnU.classList.remove('loaded');
-  document.getElementById('um-sec-primary').style.display = 'none';
-  document.getElementById('btn-save-session').style.display = 'none';
-  renderSecondaryUsers(); // re-render so former primary appears in secondary list
+  const secPrim = document.getElementById('um-sec-primary');
+  if (secPrim) secPrim.style.display = 'none';
+  const saveSess = document.getElementById('btn-save-session');
+  if (saveSess) saveSess.style.display = 'none';
+  renderSecondaryUsers();
 }
 
 // ── Unload primary user ────────────────────────────────────────────────────
 function unloadPrimaryUser() {
   heardCache = null; loadedUser = null;
   inpUser.value = '';
+  _sbFriendsLoaded = false;
+  document.getElementById('sb-friends-list').innerHTML = '';
+  document.getElementById('sb-friends-list').style.display = 'none';
+  document.getElementById('sb-btn-friends').textContent = 'Amigos ▾';
   hideUserBadge();
   hideResults();
   renderSecondaryUsers();
+  renderSbUsersList();
 }
 
 // ── Toggle secondary user active state (adds/removes from extraUsers) ──────
@@ -3270,7 +3584,7 @@ function loadHeardCache(data) {
     complete:            heardCache.complete,
     total_pages:         heardCache.total_pages,
     heard_artists:       [...heardCache.artist_set],
-  }).then(() => { renderIdbList(); renderIdbExtraList(); }).catch(() => {});
+  }).then(() => { renderIdbList(); renderIdbExtraList(); renderSbUsersList(); }).catch(() => {});
   dismissWelcome();
 }
 
@@ -3466,6 +3780,7 @@ if ('serviceWorker' in navigator) {
   }
   await renderSecondaryUsers();
   buildExtraUsersList();
+  renderSbUsersList();
 
   // Show welcome screen if no data at all and never seen before
   const welcomed = localStorage.getItem('tt_welcomed');
