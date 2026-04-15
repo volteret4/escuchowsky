@@ -575,7 +575,8 @@ def api_artist_info():
                      "listeners": ar.get("stats", {}).get("listeners", ""),
                      "playcount":  ar.get("stats", {}).get("playcount",  ""),
                      "url":        ar.get("url", "")})
-    resp.headers["Cache-Control"] = "public, max-age=86400"
+    # Cache longer when we have an image; short cache when empty so stale "no image" expires fast
+    resp.headers["Cache-Control"] = "public, max-age=86400" if image else "public, max-age=300"
     return resp
 
 
@@ -2636,11 +2637,11 @@ function _loadDiscoverPage() {
     document.getElementById('discover-footer').style.display = '';
     document.getElementById('discover-progress').textContent =
       `${discoverAlbums.length} artistas de ${uName} (pág. ${discoverPage + 1})`;
-    // Carga de imágenes de artistas en background (con cover cache)
+    // Carga de imágenes de artistas en background (con enrich cache)
     discoverAlbums.forEach((a, i) => {
-      const cached = coverCacheGet(a.orig_a, '');
-      if (cached) {
-        discoverAlbums[i].cover_url = cached;
+      const hit = enrichCacheGet(a.orig_a, '');
+      if (hit?.cover_url) {
+        discoverAlbums[i].cover_url = hit.cover_url;
         _patchDiscoverCard(i, discoverAlbums[i]);
         return;
       }
@@ -2649,7 +2650,7 @@ function _loadDiscoverPage() {
         .then(info => {
           if (!info?.image) return;
           discoverAlbums[i].cover_url = info.image;
-          coverCacheSet(a.orig_a, '', info.image);
+          enrichCacheSet(a.orig_a, '', { cover_url: info.image });
           _patchDiscoverCard(i, discoverAlbums[i]);
         }).catch(() => {});
     });
@@ -2703,54 +2704,73 @@ function loadMoreDiscover() {
 
   discoverSearching = true;
   const prog = document.getElementById('discover-progress');
-  prog.textContent = `Consultando MusicBrainz… (0 / ${batch.length})`;
   document.getElementById('discover-footer').style.display = '';
 
-  // Append placeholders immediately (pre-fill from cover cache)
-  const startIdx = discoverAlbums.length;
-  batch.forEach(c => {
-    const cached = coverCacheGet(c.orig_a, c.orig_t);
+  // Build placeholders, separating cached vs uncached items
+  const startIdx   = discoverAlbums.length;
+  const uncachedJs = [];  // batch indices that need SSE enrichment
+
+  batch.forEach((c, j) => {
+    const hit = enrichCacheGet(c.orig_a, c.orig_t);
     discoverAlbums.push({
-      ...c, mbid: '', cover_url: cached || '', mb_title: c.orig_t, mb_artist: c.orig_a, date: ''
+      ...c,
+      mbid:      hit?.mbid      || '',
+      cover_url: hit?.cover_url || '',
+      mb_title:  hit?.mb_title  || c.orig_t,
+      mb_artist: hit?.mb_artist || c.orig_a,
+      date:      hit?.date      || '',
     });
+    if (!hit) uncachedJs.push(j);
   });
   renderDiscoverGrid();
 
+  // If everything was cached, no SSE needed
+  if (!uncachedJs.length) {
+    discoverOffset  += batch.length;
+    discoverSearching = false;
+    prog.textContent  = `✓ ${discoverAlbums.length} álbumes`;
+    return;
+  }
+
+  prog.textContent = `Consultando… (0 / ${uncachedJs.length})`;
+
   if (discoverEs) { discoverEs.close(); discoverEs = null; }
-  const albumsParam = encodeURIComponent(JSON.stringify(batch.map(c => [c.orig_a, c.orig_t])));
+  const sseBatch    = uncachedJs.map(j => [batch[j].orig_a, batch[j].orig_t]);
+  const albumsParam = encodeURIComponent(JSON.stringify(sseBatch));
   discoverEs = new EventSource(`/api/enrich_albums?albums=${albumsParam}`);
 
   discoverEs.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.done) {
       discoverEs.close(); discoverEs = null;
-      discoverOffset += batch.length;
+      discoverOffset  += batch.length;
       discoverSearching = false;
-      prog.textContent = `✓ ${discoverAlbums.length} álbumes encontrados`;
+      prog.textContent  = `✓ ${discoverAlbums.length} álbumes encontrados`;
       return;
     }
     if (typeof msg.i === 'number') {
-      const aIdx = startIdx + msg.i;
+      const aIdx = startIdx + uncachedJs[msg.i];  // map SSE index → discoverAlbums index
       if (!discoverAlbums[aIdx]) return;
       const cover_url = msg.cover_url || (msg.mbid ? `/api/cover?mbid=${encodeURIComponent(msg.mbid)}` : '');
-      Object.assign(discoverAlbums[aIdx], {
-        mbid:      msg.mbid,
+      const enriched  = {
+        mbid:      msg.mbid      || '',
         cover_url,
         mb_title:  msg.mb_title  || discoverAlbums[aIdx].orig_t,
         mb_artist: msg.mb_artist || discoverAlbums[aIdx].orig_a,
-        date:      msg.date,
-      });
-      if (cover_url) coverCacheSet(discoverAlbums[aIdx].orig_a, discoverAlbums[aIdx].orig_t, cover_url);
+        date:      msg.date      || '',
+      };
+      Object.assign(discoverAlbums[aIdx], enriched);
+      enrichCacheSet(discoverAlbums[aIdx].orig_a, discoverAlbums[aIdx].orig_t, enriched);
       _patchDiscoverCard(aIdx, discoverAlbums[aIdx]);
     }
-    prog.textContent = `Buscando… (${msg.i + 1} / ${batch.length})`;
+    prog.textContent = `Buscando… (${msg.i + 1} / ${uncachedJs.length})`;
   };
 
   discoverEs.onerror = () => {
     discoverEs.close(); discoverEs = null;
-    discoverOffset += batch.length;
+    discoverOffset  += batch.length;
     discoverSearching = false;
-    prog.textContent = `✓ ${discoverAlbums.length} álbumes encontrados`;
+    prog.textContent  = `✓ ${discoverAlbums.length} álbumes encontrados`;
   };
 }
 
@@ -2762,22 +2782,22 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
   });
 });
 
-// ── Cover cache ───────────────────────────────────────────────────────────
+// ── Enrich cache ─────────────────────────────────────────────────────────
 // Key: "artist|||title" (title='' for artist-mode entries)
-const COVER_CACHE_KEY = 'cover_cache_v1';
-function coverCacheGet(artist, title) {
+// Value: {cover_url, mbid?, mb_title?, mb_artist?, date?}
+const ENRICH_CACHE_KEY = 'enrich_cache_v1';
+function enrichCacheGet(artist, title) {
   try {
-    const c = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
-    const v = c[artist + '|||' + title];
-    return v !== undefined ? v : null;
+    const c = JSON.parse(localStorage.getItem(ENRICH_CACHE_KEY) || '{}');
+    return c[artist + '|||' + title] || null;
   } catch(e) { return null; }
 }
-function coverCacheSet(artist, title, url) {
-  if (!url) return;
+function enrichCacheSet(artist, title, data) {
+  if (!data?.cover_url) return;
   try {
-    const c = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
-    c[artist + '|||' + title] = url;
-    localStorage.setItem(COVER_CACHE_KEY, JSON.stringify(c));
+    const c = JSON.parse(localStorage.getItem(ENRICH_CACHE_KEY) || '{}');
+    c[artist + '|||' + title] = data;
+    localStorage.setItem(ENRICH_CACHE_KEY, JSON.stringify(c));
   } catch(e) {}
 }
 
@@ -3171,7 +3191,7 @@ async function sbSyncPrimary() {
 function sbSavePrimaryJson() {
   if (!heardCache) return;
   const yt_ids = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || '{}');
-  const covers = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
+  const covers = JSON.parse(localStorage.getItem(ENRICH_CACHE_KEY) || '{}');
   const blob = new Blob([JSON.stringify({ version:1, user:heardCache.user, count:heardCache.count, fetched_at:heardCache.fetched_at, heard:heardCache.pairs, yt_ids, covers }, null, 0)], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -3453,7 +3473,7 @@ function idbDownloadSession(username) {
   idbLoad(username).then(data => {
     if (!data) return;
     const yt_ids = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || '{}');
-    const covers = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
+    const covers = JSON.parse(localStorage.getItem(ENRICH_CACHE_KEY) || '{}');
     const blob = new Blob([JSON.stringify({ version:1, user: data.user, count: data.count, fetched_at: data.fetched_at, heard: data.heard, yt_ids, covers }, null, 0)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -3639,7 +3659,7 @@ function loadHeardCache(data) {
 document.getElementById('btn-save-session').addEventListener('click', () => {
   if (!heardCache) return;
   const yt_ids = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || '{}');
-  const covers = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
+  const covers = JSON.parse(localStorage.getItem(ENRICH_CACHE_KEY) || '{}');
   const blob = new Blob([JSON.stringify({
     version: 1, user: heardCache.user, count: heardCache.count,
     fetched_at: heardCache.fetched_at, heard: heardCache.pairs,
@@ -3661,11 +3681,11 @@ inpSession.addEventListener('change', async e => {
   try {
     const data = JSON.parse(await file.text());
     if (!data.heard || !data.user) throw new Error('Formato inválido');
-    // Restore cover and YT caches (merge with existing; existing takes priority)
+    // Restore enrich and YT caches (merge; existing takes priority as it's more recent)
     if (data.covers && typeof data.covers === 'object') {
       try {
-        const existing = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
-        localStorage.setItem(COVER_CACHE_KEY, JSON.stringify({ ...data.covers, ...existing }));
+        const existing = JSON.parse(localStorage.getItem(ENRICH_CACHE_KEY) || '{}');
+        localStorage.setItem(ENRICH_CACHE_KEY, JSON.stringify({ ...data.covers, ...existing }));
       } catch(_) {}
     }
     if (data.yt_ids && typeof data.yt_ids === 'object') {
