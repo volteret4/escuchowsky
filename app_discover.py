@@ -2474,8 +2474,8 @@ function discoverCardHTML(a, i) {
         : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`
     ).join('');
     const coverEl = a.cover_url
-      ? `<img class="card-cover disc-artist-img" src="${escH(a.cover_url)}" loading="lazy" alt="">`
-      : `<img class="card-cover disc-artist-img" src="" loading="lazy" alt="" style="display:none">
+      ? `<img class="card-cover disc-artist-img" src="${escH(a.cover_url)}" alt="">`
+      : `<img class="card-cover disc-artist-img" src="data:," alt="" style="display:none">
          <div class="disc-artist-icon">
            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
              <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
@@ -3084,26 +3084,19 @@ function _patchDiscoverCard(idx, a) {
     if (!img) {
       img = document.createElement('img');
       img.className = 'card-cover';
-      img.loading = 'lazy';
       img.alt = '';
-      img.onerror = function() {
-        this.style.display = 'none';
-        if (ph) ph.style.display = 'flex';
-        if (artistIcon) artistIcon.style.display = 'flex';
-      };
       card.insertBefore(img, card.firstChild);
     }
     if (img.src !== a.cover_url) {
-      // Wire up onerror (existing elements from HTML have none)
       img.onerror = function() {
         this.style.display = 'none';
         if (ph) ph.style.display = 'flex';
         if (artistIcon) artistIcon.style.display = 'flex';
       };
-      img.src = a.cover_url;
-      img.style.display = '';
       if (ph) ph.style.display = 'none';
       if (artistIcon) artistIcon.style.display = 'none';
+      img.style.display = '';   // visible BEFORE src to avoid hidden-element load suppression
+      img.src = a.cover_url;
     }
   }
   const titleEl  = card.querySelector('.card-title');
