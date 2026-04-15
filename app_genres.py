@@ -3015,7 +3015,7 @@ function enrichMissingCovers() {
   _enrichEs = new EventSource(`/api/enrich_albums?albums=${albumsParam}`);
   _enrichEs.onmessage = (e) => {
     const msg = JSON.parse(e.data);
-    if (msg.done) { _enrichEs.close(); _enrichEs = null; return; }
+    if (msg.done) { _enrichEs.close(); _enrichEs = null; enrichMissingCovers(); return; }
     if (typeof msg.i !== 'number' || !msg.cover_url) return;
     const albumIdx = toEnrich[msg.i].idx;
     allAlbums[albumIdx].cover = msg.cover_url;
