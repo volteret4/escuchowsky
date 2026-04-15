@@ -2636,19 +2636,21 @@ function _loadDiscoverPage() {
     document.getElementById('discover-footer').style.display = '';
     document.getElementById('discover-progress').textContent =
       `${discoverAlbums.length} artistas de ${uName} (pág. ${discoverPage + 1})`;
-    // Carga de imágenes de artistas en background
+    // Carga de imágenes de artistas en background (con cover cache)
     discoverAlbums.forEach((a, i) => {
+      const cached = coverCacheGet(a.orig_a, '');
+      if (cached) {
+        discoverAlbums[i].cover_url = cached;
+        _patchDiscoverCard(i, discoverAlbums[i]);
+        return;
+      }
       fetch(`/api/artist_info?artist=${encodeURIComponent(a.orig_a)}`)
         .then(r => r.json())
         .then(info => {
           if (!info?.image) return;
           discoverAlbums[i].cover_url = info.image;
-          const card = document.querySelector(`.card[data-disc="${i}"]`);
-          if (!card) return;
-          const img  = card.querySelector('.disc-artist-img');
-          const icon = card.querySelector('.disc-artist-icon');
-          if (img)  { img.src = info.image; img.style.display = ''; }
-          if (icon) icon.style.display = 'none';
+          coverCacheSet(a.orig_a, '', info.image);
+          _patchDiscoverCard(i, discoverAlbums[i]);
         }).catch(() => {});
     });
   } else {
@@ -2704,11 +2706,14 @@ function loadMoreDiscover() {
   prog.textContent = `Consultando MusicBrainz… (0 / ${batch.length})`;
   document.getElementById('discover-footer').style.display = '';
 
-  // Append placeholders immediately
+  // Append placeholders immediately (pre-fill from cover cache)
   const startIdx = discoverAlbums.length;
-  batch.forEach(c => discoverAlbums.push({
-    ...c, mbid: '', cover_url: '', mb_title: c.orig_t, mb_artist: c.orig_a, date: ''
-  }));
+  batch.forEach(c => {
+    const cached = coverCacheGet(c.orig_a, c.orig_t);
+    discoverAlbums.push({
+      ...c, mbid: '', cover_url: cached || '', mb_title: c.orig_t, mb_artist: c.orig_a, date: ''
+    });
+  });
   renderDiscoverGrid();
 
   if (discoverEs) { discoverEs.close(); discoverEs = null; }
@@ -2735,6 +2740,7 @@ function loadMoreDiscover() {
         mb_artist: msg.mb_artist || discoverAlbums[aIdx].orig_a,
         date:      msg.date,
       });
+      if (cover_url) coverCacheSet(discoverAlbums[aIdx].orig_a, discoverAlbums[aIdx].orig_t, cover_url);
       _patchDiscoverCard(aIdx, discoverAlbums[aIdx]);
     }
     prog.textContent = `Buscando… (${msg.i + 1} / ${batch.length})`;
@@ -2755,6 +2761,25 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
     activeFilter = btn.dataset.filter;
   });
 });
+
+// ── Cover cache ───────────────────────────────────────────────────────────
+// Key: "artist|||title" (title='' for artist-mode entries)
+const COVER_CACHE_KEY = 'cover_cache_v1';
+function coverCacheGet(artist, title) {
+  try {
+    const c = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
+    const v = c[artist + '|||' + title];
+    return v !== undefined ? v : null;
+  } catch(e) { return null; }
+}
+function coverCacheSet(artist, title, url) {
+  if (!url) return;
+  try {
+    const c = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
+    c[artist + '|||' + title] = url;
+    localStorage.setItem(COVER_CACHE_KEY, JSON.stringify(c));
+  } catch(e) {}
+}
 
 // ── YouTube cache & embed ─────────────────────────────────────────────────
 const YT_CACHE_KEY = 'yt_ids_v1';
@@ -3020,6 +3045,7 @@ function _patchDiscoverCard(idx, a) {
   if (a.cover_url) {
     let img = card.querySelector('.card-cover');
     const ph = card.querySelector('.card-placeholder');
+    const artistIcon = card.querySelector('.disc-artist-icon');
     if (!img) {
       img = document.createElement('img');
       img.className = 'card-cover';
@@ -3028,6 +3054,7 @@ function _patchDiscoverCard(idx, a) {
       img.onerror = function() {
         this.style.display = 'none';
         if (ph) ph.style.display = 'flex';
+        if (artistIcon) artistIcon.style.display = 'flex';
       };
       card.insertBefore(img, card.firstChild);
     }
@@ -3035,6 +3062,7 @@ function _patchDiscoverCard(idx, a) {
       img.src = a.cover_url;
       img.style.display = '';
       if (ph) ph.style.display = 'none';
+      if (artistIcon) artistIcon.style.display = 'none';
     }
   }
   const titleEl  = card.querySelector('.card-title');
@@ -3139,7 +3167,9 @@ async function sbSyncPrimary() {
 
 function sbSavePrimaryJson() {
   if (!heardCache) return;
-  const blob = new Blob([JSON.stringify({ version:1, user:heardCache.user, count:heardCache.count, fetched_at:heardCache.fetched_at, heard:heardCache.pairs }, null, 0)], {type:'application/json'});
+  const yt_ids = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || '{}');
+  const covers = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
+  const blob = new Blob([JSON.stringify({ version:1, user:heardCache.user, count:heardCache.count, fetched_at:heardCache.fetched_at, heard:heardCache.pairs, yt_ids, covers }, null, 0)], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `mustlisten_${heardCache.user}_${new Date().toISOString().slice(0,10)}.json`;
@@ -3419,7 +3449,9 @@ async function idbDeleteSession(username) {
 function idbDownloadSession(username) {
   idbLoad(username).then(data => {
     if (!data) return;
-    const blob = new Blob([JSON.stringify({ version:1, user: data.user, count: data.count, fetched_at: data.fetched_at, heard: data.heard }, null, 0)], { type: 'application/json' });
+    const yt_ids = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || '{}');
+    const covers = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
+    const blob = new Blob([JSON.stringify({ version:1, user: data.user, count: data.count, fetched_at: data.fetched_at, heard: data.heard, yt_ids, covers }, null, 0)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `mustlisten_${data.user}_${new Date().toISOString().slice(0,10)}.json`;
@@ -3603,9 +3635,12 @@ function loadHeardCache(data) {
 // ── Session: guardar JSON ─────────────────────────────────────────────────
 document.getElementById('btn-save-session').addEventListener('click', () => {
   if (!heardCache) return;
+  const yt_ids = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || '{}');
+  const covers = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
   const blob = new Blob([JSON.stringify({
     version: 1, user: heardCache.user, count: heardCache.count,
     fetched_at: heardCache.fetched_at, heard: heardCache.pairs,
+    yt_ids, covers,
   }, null, 0)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -3623,6 +3658,19 @@ inpSession.addEventListener('change', async e => {
   try {
     const data = JSON.parse(await file.text());
     if (!data.heard || !data.user) throw new Error('Formato inválido');
+    // Restore cover and YT caches (merge with existing; existing takes priority)
+    if (data.covers && typeof data.covers === 'object') {
+      try {
+        const existing = JSON.parse(localStorage.getItem(COVER_CACHE_KEY) || '{}');
+        localStorage.setItem(COVER_CACHE_KEY, JSON.stringify({ ...data.covers, ...existing }));
+      } catch(_) {}
+    }
+    if (data.yt_ids && typeof data.yt_ids === 'object') {
+      try {
+        const existing = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || '{}');
+        localStorage.setItem(YT_CACHE_KEY, JSON.stringify({ ...data.yt_ids, ...existing }));
+      } catch(_) {}
+    }
     const addAsSecondary = !!heardCache && heardCache.user.toLowerCase() !== data.user.toLowerCase();
     if (addAsSecondary) {
       if (extraUsers.some(u => u.user.toLowerCase() === data.user.toLowerCase())) {
