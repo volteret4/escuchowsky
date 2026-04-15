@@ -44,7 +44,7 @@ services:
     container_name: nginx-exporter
     restart: unless-stopped
     command:
-      - --nginx.scrape-uri=http://nginx/nginx_status
+      - --nginx.scrape-uri=http://nginx:8080/nginx_status
     depends_on:
       - nginx
     networks:
@@ -79,11 +79,19 @@ services:
     container_name: nginx
     restart: unless-stopped
     ports:
-      - "8085:80"
-      - "8443:443"
+      - "8085:8080"
+      - "8443:8443"
     environment:
       - CROWDSEC_ENABLE=true
       - CROWDSEC_LABELS_TYPE=nginx
+      # ModSecurity / OWASP CRS
+      - MODSEC_RULE_ENGINE=DetectionOnly  # cambiar a On tras revisar falsos positivos
+      - PARANOIA=1                         # nivel 1-4, empezar conservador
+      - ANOMALY_INBOUND=5
+      - ANOMALY_OUTBOUND=4
+      - MODSEC_AUDIT_LOG=/var/log/nginx/modsec_audit.log
+      - MODSEC_AUDIT_LOG_TYPE=Serial
+      - MODSEC_AUDIT_STORAGE_DIR=/var/log/nginx/modsec_audit
     depends_on:
       - escuchowsky
       - tumtumpa
