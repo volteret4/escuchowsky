@@ -3018,9 +3018,20 @@ function _patchDiscoverCard(idx, a) {
   const card = document.querySelector(`#discover-grid .card[data-disc="${idx}"]`);
   if (!card) return;
   if (a.cover_url) {
-    const img = card.querySelector('.card-cover');
-    const ph  = card.querySelector('.card-placeholder');
-    if (img && img.src !== a.cover_url) {
+    let img = card.querySelector('.card-cover');
+    const ph = card.querySelector('.card-placeholder');
+    if (!img) {
+      img = document.createElement('img');
+      img.className = 'card-cover';
+      img.loading = 'lazy';
+      img.alt = '';
+      img.onerror = function() {
+        this.style.display = 'none';
+        if (ph) ph.style.display = 'flex';
+      };
+      card.insertBefore(img, card.firstChild);
+    }
+    if (img.src !== a.cover_url) {
       img.src = a.cover_url;
       img.style.display = '';
       if (ph) ph.style.display = 'none';
