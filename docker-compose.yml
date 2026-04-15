@@ -85,8 +85,8 @@ services:
       - CROWDSEC_ENABLE=true
       - CROWDSEC_LABELS_TYPE=nginx
       # ModSecurity / OWASP CRS
-      - MODSEC_RULE_ENGINE=DetectionOnly  # cambiar a On tras revisar falsos positivos
-      - PARANOIA=1                         # nivel 1-4, empezar conservador
+      - MODSEC_RULE_ENGINE=DetectionOnly # cambiar a On tras revisar falsos positivos
+      - PARANOIA=1 # nivel 1-4, empezar conservador
       - ANOMALY_INBOUND=5
       - ANOMALY_OUTBOUND=4
       - MODSEC_AUDIT_LOG=/var/log/nginx/modsec_audit.log
