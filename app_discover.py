@@ -112,17 +112,26 @@ def api_scrobbles():
         last_scrobble_track  = ""
 
         while True:
-            data = lfm_get("user.getRecentTracks", {
-                "user": username, "limit": 200, "page": page,
-            })
-            rt = data.get("recenttracks", {})
-            if "error" in data and not rt:
+            # Retry transient Last.fm errors (rate limits, timeouts) up to 3 times
+            last_error = None
+            for attempt in range(3):
+                data = lfm_get("user.getRecentTracks", {
+                    "user": username, "limit": 200, "page": page,
+                })
+                rt = data.get("recenttracks", {})
+                if "error" not in data or rt:
+                    last_error = None
+                    break
+                last_error = data.get("message", "Error Last.fm")
+                if attempt < 2:
+                    time.sleep(2)
+            if last_error:
                 if page == 1:
-                    msg = data.get("message", "Usuario no encontrado en Last.fm")
-                    yield f"data: {json.dumps({'error': msg})}\n\n"
-                    return
+                    yield f"data: {json.dumps({'error': last_error})}\n\n"
                 else:
-                    break  # last.fm error en página tardía → terminar normalmente
+                    # Partial fetch — report error so client discards incomplete data
+                    yield f"data: {json.dumps({'error': f'Descarga incompleta: error en página {page} de {total_pages} tras 3 intentos. Vuelve a intentarlo.'})}\n\n"
+                return
 
             # Update total_pages on every page — take the max in case LFM
             # undershoots on the first response.
@@ -1640,15 +1649,24 @@ input::placeholder { color: var(--ink3); }
   background: var(--surface2);
   min-height: 140px;
 }
+/* Cover image must be absolutely positioned — height:100% doesn't resolve
+   correctly on flex children in WebKit when parent height comes from aspect-ratio */
+.disc-artist-card .card-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
 .disc-artist-icon {
   width: 56px; height: 56px;
   border-radius: 50%;
   background: rgba(255,255,255,0.06);
   display: flex; align-items: center; justify-content: center;
-  margin-bottom: 0.5rem;
+  position: relative; z-index: 1;
 }
 .disc-artist-icon svg { width: 28px; height: 28px; stroke: var(--ink3); }
-.disc-artist-card .card-info { position: static; padding: 0; background: none; text-align: center; }
+/* card-info at bottom like album cards; icon stays in flex flow and stays centered */
+.disc-artist-card .card-info { position: absolute; bottom: 0; left: 0; right: 0; padding: 0.45rem 0.5rem 0.5rem; text-align: center; }
 .disc-artist-card .card-title { font-size: 0.72rem; }
 
 /* ── About button in sidebar ─────────────────────────────────────────── */
