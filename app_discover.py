@@ -3096,6 +3096,7 @@ async function renderSbUsersList() {
           <button class="btn-sm${isActive?' act':''}" onclick="toggleSecondaryUser('${sn}')" style="flex-shrink:0;font-size:0.58rem;padding:0.15rem 0.38rem;margin-left:auto">${isActive?'ACTIVO':'CARGAR'}</button>
         </div>
         <div class="sb-user-item-btns">
+          ${!heardCache ? `<button class="btn-sm primary" onclick="setPrimaryFromSecondary('${sn}');renderSbUsersList()">Principal</button>` : ''}
           <button class="btn-sm" onclick="syncSecondaryIdb('${sn}')">↻ Sync</button>
           <button class="btn-sm" onclick="idbDownloadSession('${sn}')">↓ JSON</button>
           <button class="btn-sm" onclick="idbDeleteSession('${sn}')">✕</button>
