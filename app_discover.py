@@ -102,8 +102,10 @@ def api_scrobbles():
         return jsonify({"error": "Last.fm API key no configurada"}), 500
 
     def generate():
-        # (norm_a, norm_t) -> [orig_a, orig_t, count]
+        # (norm_a, norm_album) -> [orig_a, orig_album, count]
         heard_counts    = {}
+        # (norm_a, norm_track) -> [orig_a, orig_album, orig_track, count]
+        heard_songs     = {}
         heard_artists   = set()   # norm_a para TODOS los tracks (con o sin álbum)
         page            = 1
         total_pages     = None
@@ -166,6 +168,7 @@ def api_scrobbles():
                         last_scrobble_ts = 0
                     last_scrobble_artist = artist
                     last_scrobble_track  = t.get("name", "")
+                track_name = t.get("name", "")
                 if artist:
                     heard_artists.add(_norm(artist))
                 if artist and album:
@@ -174,6 +177,12 @@ def api_scrobbles():
                         heard_counts[key] = [artist, album, 1]
                     else:
                         heard_counts[key][2] += 1
+                if artist and track_name:
+                    skey = (_norm(artist), _norm(track_name))
+                    if skey not in heard_songs:
+                        heard_songs[skey] = [artist, album, track_name, 1]
+                    else:
+                        heard_songs[skey][3] += 1
 
             yield f"data: {json.dumps({'page': page, 'total_pages': total_pages, 'count': len(heard_counts)})}\n\n"
 
@@ -181,8 +190,10 @@ def api_scrobbles():
                 break
             page += 1
 
-        heard_pairs = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
-        yield f"data: {json.dumps({'done': True, 'user': username, 'count': len(heard_pairs), 'fetched_at': int(time.time()), 'heard': heard_pairs, 'heard_artists': list(heard_artists), 'last_scrobble_ts': last_scrobble_ts, 'last_scrobble_artist': last_scrobble_artist, 'last_scrobble_track': last_scrobble_track, 'total_pages': total_pages or 0})}\n\n"
+        heard_pairs    = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
+        # heard_songs: [norm_a, norm_track, orig_a, orig_album, orig_track, count]
+        heard_song_list = [[k[0], k[1], v[0], v[1], v[2], v[3]] for k, v in heard_songs.items()]
+        yield f"data: {json.dumps({'done': True, 'user': username, 'count': len(heard_pairs), 'fetched_at': int(time.time()), 'heard': heard_pairs, 'heard_songs': heard_song_list, 'heard_artists': list(heard_artists), 'last_scrobble_ts': last_scrobble_ts, 'last_scrobble_artist': last_scrobble_artist, 'last_scrobble_track': last_scrobble_track, 'total_pages': total_pages or 0})}\n\n"
 
     return Response(
         stream_with_context(generate()),
@@ -208,8 +219,10 @@ def api_scrobbles_since():
     except ValueError:
         since = 0
 
-    # (norm_a, norm_t) -> [orig_a, orig_t, count]
+    # (norm_a, norm_album) -> [orig_a, orig_album, count]
     new_counts          = {}
+    # (norm_a, norm_track) -> [orig_a, orig_album, orig_track, count]
+    new_songs           = {}
     page                = 1
     total_pages         = 1
     last_scrobble_ts    = 0
@@ -244,6 +257,7 @@ def api_scrobbles_since():
             artist = artist.get("#text", "") if isinstance(artist, dict) else str(artist)
             album  = t.get("album", {})
             album  = album.get("#text", "") if isinstance(album, dict) else str(album)
+            track_name = t.get("name", "")
             if last_scrobble_ts == 0:
                 d = t.get("date", {})
                 try:
@@ -251,19 +265,27 @@ def api_scrobbles_since():
                 except (ValueError, TypeError):
                     last_scrobble_ts = 0
                 last_scrobble_artist = artist
-                last_scrobble_track  = t.get("name", "")
+                last_scrobble_track  = track_name
             if artist and album:
                 key = (_norm(artist), _norm(album))
                 if key not in new_counts:
                     new_counts[key] = [artist, album, 1]
                 else:
                     new_counts[key][2] += 1
+            if artist and track_name:
+                skey = (_norm(artist), _norm(track_name))
+                if skey not in new_songs:
+                    new_songs[skey] = [artist, album, track_name, 1]
+                else:
+                    new_songs[skey][3] += 1
         page += 1
 
-    new_pairs = [[k[0], k[1], v[0], v[1], v[2]] for k, v in new_counts.items()]
+    new_pairs    = [[k[0], k[1], v[0], v[1], v[2]] for k, v in new_counts.items()]
+    new_song_list = [[k[0], k[1], v[0], v[1], v[2], v[3]] for k, v in new_songs.items()]
     return jsonify({
         "user":                username,
         "new_pairs":           new_pairs,
+        "new_songs":           new_song_list,
         "count":               len(new_pairs),
         "fetched_at":          int(time.time()),
         "last_scrobble_ts":    last_scrobble_ts,
@@ -1669,6 +1691,24 @@ input::placeholder { color: var(--ink3); }
 .disc-artist-card .card-info { position: absolute; bottom: 0; left: 0; right: 0; padding: 0.45rem 0.5rem 0.5rem; text-align: center; }
 .disc-artist-card .card-title { font-size: 0.72rem; }
 
+/* ── Discover song card ──────────────────────────────────────────────── */
+.disc-song-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg2);
+  min-height: 140px;
+}
+.disc-song-icon {
+  font-size: 1.8rem; color: var(--ink3);
+  position: relative; z-index: 1;
+  user-select: none;
+}
+.disc-song-card .card-info { position: absolute; bottom: 0; left: 0; right: 0; padding: 0.45rem 0.5rem 0.5rem; text-align: center; }
+.disc-song-card .card-title { font-size: 0.72rem; }
+.disc-song-card .card-album-hint { font-size: 0.58rem; color: var(--ink3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* ── About button in sidebar ─────────────────────────────────────────── */
 .sb-about-btn {
   display: block;
@@ -1951,6 +1991,7 @@ input::placeholder { color: var(--ink3); }
             <select id="disc-mode-select">
               <option value="albums">Álbumes</option>
               <option value="artists">Artistas</option>
+              <option value="songs">Canciones</option>
             </select>
             <button id="disc-play-btn" onclick="triggerDiscover()" title="Descubrir">▶</button>
           </div>
@@ -2209,7 +2250,7 @@ function triggerDiscover() {
 function saveExtraUserJSON(idx) {
   const u = extraUsers[idx];
   if (!u) return;
-  const blob = new Blob([JSON.stringify({ version:1, user: u.user, count: u.count, fetched_at: u.fetched_at, heard: u.pairs }, null, 0)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ version:1, user: u.user, count: u.count, fetched_at: u.fetched_at, heard: u.pairs, songs: u.songs || [] }, null, 0)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `mustlisten_${u.user}_${new Date().toISOString().slice(0,10)}.json`;
@@ -2237,6 +2278,7 @@ async function addExtraUser() {
       }),
     ]);
     const heard     = lfmResult.heard;
+    const songs     = lfmResult.heard_songs || [];
     const color     = USER_COLORS[extraUsers.length % USER_COLORS.length];
     const image     = userInfo?.ok ? (userInfo.image || '') : '';
     const realUser  = userInfo?.ok ? userInfo.username : user;
@@ -2244,13 +2286,13 @@ async function addExtraUser() {
     const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
     const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
     const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
-    extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    extraUsers.push({ user: realUser, pairs: heard, songs, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
     saveExtraUsersLS();
-    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, complete: true, total_pages: lfmResult.total_pages || 0, heard_artists: lfmResult.heard_artists || [] });
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, songs, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, complete: true, total_pages: lfmResult.total_pages || 0, heard_artists: lfmResult.heard_artists || [] });
     await renderIdbExtraList();
     buildExtraUsersList();
     inp.value = '';
-    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes`;
+    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes, ${songs.length.toLocaleString()} canciones`;
   } catch(e) {
     prog.textContent = 'Error: ' + e.message;
   } finally {
@@ -2275,6 +2317,12 @@ async function syncExtraUser(idx) {
     extraUsers[idx].pairs      = [...u.pairs, ...added];
     extraUsers[idx].count      = extraUsers[idx].pairs.length;
     extraUsers[idx].fetched_at = data.fetched_at;
+    // Merge new songs
+    if (data.new_songs?.length) {
+      const existSongs = new Set((extraUsers[idx].songs || []).map(s => s[0] + '|' + s[1]));
+      const addedSongs = data.new_songs.filter(s => !existSongs.has(s[0] + '|' + s[1]));
+      extraUsers[idx].songs = [...(extraUsers[idx].songs || []), ...addedSongs];
+    }
     // Update last scrobble info if sync returned newer data
     if (data.last_scrobble_ts && data.last_scrobble_ts > (extraUsers[idx].last_scrobble_ts || 0)) {
       extraUsers[idx].last_scrobble_ts     = data.last_scrobble_ts;
@@ -2282,7 +2330,7 @@ async function syncExtraUser(idx) {
       extraUsers[idx].last_scrobble_track  = data.last_scrobble_track  || '';
     }
     saveExtraUsersLS();
-    await idbSave({ user: extraUsers[idx].user, count: extraUsers[idx].count, fetched_at: extraUsers[idx].fetched_at, heard: extraUsers[idx].pairs, last_scrobble_ts: extraUsers[idx].last_scrobble_ts || 0, last_scrobble_artist: extraUsers[idx].last_scrobble_artist || '', last_scrobble_track: extraUsers[idx].last_scrobble_track || '' });
+    await idbSave({ user: extraUsers[idx].user, count: extraUsers[idx].count, fetched_at: extraUsers[idx].fetched_at, heard: extraUsers[idx].pairs, songs: extraUsers[idx].songs || [], last_scrobble_ts: extraUsers[idx].last_scrobble_ts || 0, last_scrobble_artist: extraUsers[idx].last_scrobble_artist || '', last_scrobble_track: extraUsers[idx].last_scrobble_track || '' });
     await renderIdbExtraList();
     buildExtraUsersList();
     prog.textContent = `✓ ${u.user}: +${added.length} nuevos (total ${extraUsers[idx].count.toLocaleString()})`;
@@ -2353,6 +2401,7 @@ async function addExtraUserByName(username, btn) {
       }),
     ]);
     const heard      = lfmResult.heard;
+    const songs      = lfmResult.heard_songs || [];
     const color      = USER_COLORS[extraUsers.length % USER_COLORS.length];
     const image      = userInfo?.ok ? (userInfo.image || '') : '';
     const realUser   = userInfo?.ok ? userInfo.username : username;
@@ -2360,13 +2409,13 @@ async function addExtraUserByName(username, btn) {
     const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
     const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
     const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
-    extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    extraUsers.push({ user: realUser, pairs: heard, songs, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
     saveExtraUsersLS();
-    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, songs, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
     await renderIdbExtraList();
     buildExtraUsersList();
     btn.textContent = '✓';
-    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes`;
+    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes, ${songs.length.toLocaleString()} canciones`;
     // Refresh friends list so the newly added user shows as already added
     const frList = document.getElementById('friends-list');
     if (frList?.children.length) {
@@ -2399,9 +2448,10 @@ document.getElementById('inp-extra-json').addEventListener('change', async e => 
     }
     const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
     const ft = data.fetched_at || 0;
-    extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: ft, image: '' });
+    const importedSongs = data.songs || [];
+    extraUsers.push({ user: data.user, pairs: data.heard, songs: importedSongs, color, count: data.heard.length, fetched_at: ft, image: '' });
     saveExtraUsersLS();
-    await idbSave({ user: data.user, count: data.heard.length, fetched_at: ft, heard: data.heard });
+    await idbSave({ user: data.user, count: data.heard.length, fetched_at: ft, heard: data.heard, songs: importedSongs });
     buildExtraUsersList();
     prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
   } catch(err) {
@@ -2427,7 +2477,7 @@ async function idbAddAsExtra(username) {
   // try to get avatar
   const userInfo = await fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null);
   const image = userInfo?.ok ? (userInfo.image || '') : '';
-  extraUsers.push({ user: data.user, pairs: data.heard, color, count: data.heard.length, fetched_at: data.fetched_at || 0, image });
+  extraUsers.push({ user: data.user, pairs: data.heard, songs: data.songs || [], color, count: data.heard.length, fetched_at: data.fetched_at || 0, image });
   saveExtraUsersLS();
   buildExtraUsersList();
   renderIdbExtraList();
@@ -2467,6 +2517,23 @@ async function fetchScrobblesSSE(user, onProgress) {
 
 // ── Discover mode ─────────────────────────────────────────────────────────
 function discoverCardHTML(a, i) {
+  if (a.type === 'song') {
+    const userBadges = (a.users || []).map(u =>
+      u.image
+        ? `<img class="rc-avatar" src="${escH(u.image)}" title="${escH(u.user)}: ${u.count} plays" alt="">`
+        : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`
+    ).join('');
+    return `<div class="card rec-card disc-song-card" data-disc="${i}" style="cursor:pointer">
+      <div class="disc-song-icon">♪</div>
+      <div class="card-overlay"></div>
+      <div class="card-info">
+        <div class="card-title">${escH(a.orig_t)}</div>
+        <div class="card-artist">${escH(a.orig_a)}</div>
+        ${a.orig_album ? `<div class="card-album-hint">${escH(a.orig_album)}</div>` : ''}
+        <div class="rc-users">${userBadges}<span class="rc-count">${a.total} plays</span></div>
+      </div>
+    </div>`;
+  }
   if (a.type === 'artist') {
     const userBadges = (a.users || []).map(u =>
       u.image
@@ -2532,16 +2599,19 @@ function renderDiscoverGrid() {
     c.addEventListener('click', () => {
       const idx = parseInt(c.dataset.disc);
       const entry = discoverAlbums[idx];
-      if (entry && entry.type === 'artist') {
+      if (entry?.type === 'artist') {
         openDetailPanel({ type: 'discover_artist', idx });
+      } else if (entry?.type === 'song') {
+        openDetailPanel({ type: 'discover_song', idx });
       } else {
         openDetailPanel({ type: 'discover', idx });
       }
     });
   });
   // Update count label
+  const noun = discoverModeType === 'songs' ? 'canciones' : discoverModeType === 'artists' ? 'artistas' : 'álbumes';
   document.getElementById('discover-count').textContent =
-    `${filtered.length} álbumes${discoverCandidates.length > discoverAlbums.length ? ` de ${discoverCandidates.length} candidatos` : ''}`;
+    `${filtered.length} ${noun}${discoverCandidates.length > discoverAlbums.length ? ` de ${discoverCandidates.length} candidatos` : ''}`;
   // Decade pills
   const decades = new Set();
   discoverAlbums.forEach(a => {
@@ -2589,7 +2659,7 @@ function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
       const normA = p[0];
       if (primaryArtists.has(normA)) continue;
       const origA = p[2] || p[0];
-      if (!amap[normA]) amap[normA] = { orig_a: origA, orig_t: '', total: 0, album_count: 0, users: [], type: 'artist' };
+      if (!amap[normA]) amap[normA] = { norm_a: normA, orig_a: origA, orig_t: '', total: 0, album_count: 0, users: [], type: 'artist' };
       const count = p[4] || 1;
       amap[normA].total += count;
       amap[normA].album_count++;
@@ -2598,6 +2668,27 @@ function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
       amap[normA].users[0].count += count;
     }
     discoverAllCandidates = Object.values(amap).sort((a, b) => b.total - a.total);
+  } else if (mode === 'songs') {
+    // ── Songs mode: exclude songs heard by primary ───────────────────────────
+    const primarySongs = heardCache
+      ? (heardCache.song_set || new Set((heardCache.songs || []).map(s => s[0] + '|' + s[1])))
+      : new Set();
+    const smap = {};
+    for (const s of (u.songs || [])) {
+      // s = [norm_a, norm_track, orig_a, orig_album, orig_track, count]
+      const key = s[0] + '|' + s[1];
+      if (primarySongs.has(key)) continue;
+      if (!smap[key]) smap[key] = {
+        norm_a: s[0], norm_t: s[1],
+        orig_a: s[2] || s[0], orig_album: s[3] || '',
+        orig_t: s[4] || s[1],
+        total: 0, users: [], type: 'song',
+      };
+      const count = s[5] || 1;
+      smap[key].total += count;
+      smap[key].users.push({ user: u.user, count, color: u.color, image: u.image || '' });
+    }
+    discoverAllCandidates = Object.values(smap).sort((a, b) => b.total - a.total);
   } else {
     // ── Albums mode (default) ────────────────────────────────────────────────
     const cmap = {};
@@ -2655,23 +2746,43 @@ function _loadDiscoverPage() {
     document.getElementById('discover-footer').style.display = '';
     document.getElementById('discover-progress').textContent =
       `${discoverAlbums.length} artistas de ${uName} (pág. ${discoverPage + 1})`;
-    // Carga de imágenes de artistas en background (con enrich cache)
+    // Load artist images: try Last.fm first, fall back to album cover from enrichment cache
     discoverAlbums.forEach((a, i) => {
       const hit = enrichCacheGet(a.orig_a, '');
       if (hit?.cover_url) {
-        discoverAlbums[i].cover_url = hit.cover_url;
-        _patchDiscoverCard(i, discoverAlbums[i]);
+        _applyArtistCover(i, hit.cover_url);
         return;
+      }
+      // Fallback: look for any album cover from this artist in enrichment cache
+      const u2 = extraUsers[discoverUserIdx];
+      if (u2) {
+        for (const p of u2.pairs) {
+          if (p[0] === a.norm_a) {
+            const albumHit = enrichCacheGet(p[2] || p[0], p[3] || p[1]);
+            if (albumHit?.cover_url) {
+              enrichCacheSet(a.orig_a, '', { cover_url: albumHit.cover_url });
+              _applyArtistCover(i, albumHit.cover_url);
+              return;
+            }
+          }
+        }
       }
       fetch(`/api/artist_info?artist=${encodeURIComponent(a.orig_a)}`)
         .then(r => r.json())
         .then(info => {
-          if (!info?.image) return;
-          discoverAlbums[i].cover_url = info.image;
-          enrichCacheSet(a.orig_a, '', { cover_url: info.image });
-          _patchDiscoverCard(i, discoverAlbums[i]);
+          const imgUrl = info?.image || '';
+          if (!imgUrl) return;
+          discoverAlbums[i].cover_url = imgUrl;
+          enrichCacheSet(a.orig_a, '', { cover_url: imgUrl });
+          _applyArtistCover(i, imgUrl);
         }).catch(() => {});
     });
+  } else if (discoverModeType === 'songs') {
+    discoverAlbums = discoverCandidates.map(c => ({ ...c }));
+    renderDiscoverGrid();
+    document.getElementById('discover-footer').style.display = '';
+    document.getElementById('discover-progress').textContent =
+      `${discoverAlbums.length} canciones de ${uName} (pág. ${discoverPage + 1})`;
   } else {
     document.getElementById('discover-footer').style.display = '';
     document.getElementById('discover-progress').textContent =
@@ -2871,7 +2982,7 @@ async function fetchAndEmbedYT(artist, album) {
 // ── Modal ──────────────────────────────────────────────────────────────────
 // ── Detail side panel ──────────────────────────────────────────────────────
 function openDetailPanel(ref) {
-  // ref: {type:'discover', idx} | {type:'discover_artist', idx}
+  // ref: {type:'discover'|'discover_artist'|'discover_song', idx}
   let title, artist, year, cover, mbid, yt_id, heard, extraHeard, descCached;
   if (ref.type === 'discover_artist') {
     const a = discoverAlbums[ref.idx];
@@ -2880,6 +2991,12 @@ function openDetailPanel(ref) {
     year = ''; cover = ''; mbid = ''; yt_id = ''; heard = false; extraHeard = null;
     descCached = '';
     // title kept as artist name for display; album passed as '' to fetchAlbumInfo
+  } else if (ref.type === 'discover_song') {
+    const a = discoverAlbums[ref.idx];
+    if (!a) return;
+    title = a.orig_t; artist = a.orig_a;
+    year = ''; cover = ''; mbid = ''; yt_id = ''; heard = false; extraHeard = null;
+    descCached = '';
   } else {
     const a = discoverAlbums[ref.idx];
     if (!a) return;
@@ -2924,7 +3041,7 @@ function openDetailPanel(ref) {
         ${icon} ${escH(u.user)}: ${h ? '✓' : '—'}</span>`;
     }).join('');
     extraSt.style.display = 'flex';
-  } else if (ref.type === 'discover' || ref.type === 'discover_artist') {
+  } else if (['discover','discover_artist','discover_song'].includes(ref.type)) {
     const a = discoverAlbums[ref.idx];
     if (a?.users?.length) {
       const extraLabel = ref.type === 'discover_artist'
@@ -2969,12 +3086,12 @@ function openDetailPanel(ref) {
   document.body.style.overflow = 'hidden';
 
   // Fetch LFM + MB info asynchronously
-  // For artist-only entries pass album='' so only artist.getInfo is fetched
-  const fetchAlbum = ref.type === 'discover_artist' ? '' : (title || '');
+  // discover_artist: album=''; discover_song: album=''; discover: full album name
+  const fetchAlbum = (ref.type === 'discover_artist' || ref.type === 'discover_song') ? '' : (title || '');
   fetchAlbumInfo(artist || '', fetchAlbum, mbid || '');
 
-  // Fetch YouTube embed for album entries
-  if (ref.type === 'discover' && title) {
+  // Fetch YouTube embed for album and song entries
+  if ((ref.type === 'discover' || ref.type === 'discover_song') && title) {
     fetchAndEmbedYT(artist, title);
   }
 }
@@ -3071,6 +3188,25 @@ async function fetchAlbumInfo(artist, album, mbid) {
     _applyAlbumInfoToPanel(data, artist);
   } catch(e) {}
   loading.style.display = 'none';
+}
+
+// ── Artist cover: apply to card via background-image (most reliable approach) ──
+function _applyArtistCover(idx, url) {
+  if (!url) return;
+  discoverAlbums[idx] = discoverAlbums[idx] || {};
+  discoverAlbums[idx].cover_url = url;
+  const card = document.querySelector(`#discover-grid .card[data-disc="${idx}"]`);
+  if (!card) return;
+  // Use background-image directly on the card — avoids all img display/src timing issues
+  card.style.backgroundImage = `url('${url.replace(/'/g, "\\'")}')`;
+  card.style.backgroundSize = 'cover';
+  card.style.backgroundPosition = 'center';
+  // Hide the person icon placeholder
+  const icon = card.querySelector('.disc-artist-icon');
+  if (icon) icon.style.display = 'none';
+  // Hide the dummy img if present
+  const img = card.querySelector('.disc-artist-img');
+  if (img) img.style.display = 'none';
 }
 
 // ── _patchDiscoverCard: update single card without re-render ───────────────
@@ -3203,7 +3339,7 @@ function sbSavePrimaryJson() {
   if (!heardCache) return;
   const yt_ids = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || '{}');
   const covers = JSON.parse(localStorage.getItem(ENRICH_CACHE_KEY) || '{}');
-  const blob = new Blob([JSON.stringify({ version:1, user:heardCache.user, count:heardCache.count, fetched_at:heardCache.fetched_at, heard:heardCache.pairs, yt_ids, covers }, null, 0)], {type:'application/json'});
+  const blob = new Blob([JSON.stringify({ version:1, user:heardCache.user, count:heardCache.count, fetched_at:heardCache.fetched_at, heard:heardCache.pairs, songs: heardCache.songs||[], yt_ids, covers }, null, 0)], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `mustlisten_${heardCache.user}_${new Date().toISOString().slice(0,10)}.json`;
@@ -3636,6 +3772,7 @@ function loadHeardCache(data) {
   heardCache = {
     user:                data.user,
     pairs:               data.heard,
+    songs:               data.songs || data.heard_songs || [],
     count:               data.heard.length,
     fetched_at:          data.fetched_at          || 0,
     last_scrobble_ts:    data.last_scrobble_ts    || 0,
@@ -3648,6 +3785,8 @@ function loadHeardCache(data) {
                            ? new Set(data.heard_artists)
                            : new Set((data.heard || []).map(p => p[0])),
   };
+  // song_set: fast lookup for songs mode — key is norm_a + '|' + norm_track
+  heardCache.song_set = new Set(heardCache.songs.map(s => s[0] + '|' + s[1]));
   loadedUser    = data.user.toLowerCase();
   inpUser.value = data.user;
   showUserBadge(data.user, '', data.heard.length, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
@@ -3656,6 +3795,7 @@ function loadHeardCache(data) {
     count:               heardCache.count,
     fetched_at:          heardCache.fetched_at,
     heard:               heardCache.pairs,
+    songs:               heardCache.songs,
     last_scrobble_ts:    heardCache.last_scrobble_ts,
     last_scrobble_artist: heardCache.last_scrobble_artist,
     last_scrobble_track: heardCache.last_scrobble_track,
@@ -3674,6 +3814,7 @@ document.getElementById('btn-save-session').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify({
     version: 1, user: heardCache.user, count: heardCache.count,
     fetched_at: heardCache.fetched_at, heard: heardCache.pairs,
+    songs: heardCache.songs || [],
     yt_ids, covers,
   }, null, 0)], { type: 'application/json' });
   const a = document.createElement('a');
