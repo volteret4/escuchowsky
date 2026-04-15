@@ -521,7 +521,8 @@ def api_album_info():
             "playcount":  al.get("playcount",  ""),
             "tags":  [t["name"] for t in _tags[:6]],
             "wiki":  (al.get("wiki", {}).get("summary", "") or "").split("<a ")[0].strip(),
-            "image": next((i["#text"] for i in al.get("image", []) if i.get("size") == "extralarge"), ""),
+            "image": _lfm_image(al.get("image", [])),
+            "url":   al.get("url", ""),
         }
         if not mbid and al.get("mbid"):
             mbid = al["mbid"]
@@ -533,7 +534,8 @@ def api_album_info():
         result["artist"] = {
             "bio":       (ar.get("bio", {}).get("summary", "") or "").split("<a ")[0].strip(),
             "listeners": ar.get("stats", {}).get("listeners", ""),
-            "image":     next((i["#text"] for i in ar.get("image", []) if i.get("size") == "extralarge"), ""),
+            "image":     _lfm_image(ar.get("image", [])),
+            "url":       ar.get("url", ""),
         }
 
     # MusicBrainz si no tenemos MBID
@@ -567,13 +569,42 @@ def api_artist_info():
     if "artist" not in ar_data:
         return jsonify({}), 200
     ar = ar_data["artist"]
-    image = next((i["#text"] for i in ar.get("image", []) if i.get("size") == "extralarge"), "")
+    image = _lfm_image(ar.get("image", []))
     bio   = (ar.get("bio", {}).get("summary", "") or "").split("<a ")[0].strip()[:300]
     resp  = jsonify({"image": image, "bio": bio,
                      "listeners": ar.get("stats", {}).get("listeners", ""),
-                     "playcount":  ar.get("stats", {}).get("playcount",  "")})
+                     "playcount":  ar.get("stats", {}).get("playcount",  ""),
+                     "url":        ar.get("url", "")})
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
+
+
+@app.route("/api/yt_search")
+def api_yt_search():
+    """Busca en YouTube Data API v3 y devuelve el primer videoId."""
+    artist = request.args.get("artist", "").strip()
+    album  = request.args.get("album",  "").strip()
+    if not artist:
+        return jsonify({"error": "artist requerido"}), 400
+    if not YT_API_KEY:
+        return jsonify({"error": "YouTube API key no configurada"}), 503
+    q = f"{artist} {album}" if album else artist
+    url = ("https://www.googleapis.com/youtube/v3/search?"
+           + urllib.parse.urlencode({
+               "part": "id", "q": q, "type": "video",
+               "maxResults": "1", "key": YT_API_KEY,
+           }))
+    req = urllib.request.Request(url, headers={"User-Agent": "mustlisten/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read())
+        items = data.get("items", [])
+        vid_id = items[0].get("id", {}).get("videoId", "") if items else ""
+        resp = jsonify({"videoId": vid_id})
+        resp.headers["Cache-Control"] = "public, max-age=604800"
+        return resp
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
 
 @app.route("/")
@@ -2684,6 +2715,55 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
   });
 });
 
+// ── YouTube cache & embed ─────────────────────────────────────────────────
+const YT_CACHE_KEY = 'yt_ids_v1';
+function ytCacheGet(artist, album) {
+  try {
+    const c = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || '{}');
+    const v = c[artist + '|||' + album];
+    return v !== undefined ? v : null;
+  } catch(e) { return null; }
+}
+function ytCacheSet(artist, album, videoId) {
+  try {
+    const c = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || '{}');
+    c[artist + '|||' + album] = videoId;
+    localStorage.setItem(YT_CACHE_KEY, JSON.stringify(c));
+  } catch(e) {}
+}
+function embedYT(videoId) {
+  const ytDiv = document.getElementById('dp-yt');
+  if (!videoId) { ytDiv.style.display = 'none'; ytDiv.innerHTML = ''; return; }
+  ytDiv.style.display = '';
+  ytDiv.innerHTML = `<iframe src="https://www.youtube.com/embed/${escH(videoId)}?rel=0"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowfullscreen></iframe>`;
+  // Swap "Buscar YouTube" search link → direct watch link
+  const linksEl = document.getElementById('dp-links');
+  const searchA = linksEl.querySelector('a[href*="results?search_query"]');
+  if (searchA) {
+    searchA.href = `https://www.youtube.com/watch?v=${escH(videoId)}`;
+    searchA.textContent = 'YouTube ↗';
+  } else if (!linksEl.querySelector('a[href*="watch?v="]')) {
+    linksEl.insertAdjacentHTML('beforeend',
+      `<a class="dp-link" href="https://www.youtube.com/watch?v=${escH(videoId)}" target="_blank">YouTube ↗</a>`);
+  }
+}
+async function fetchAndEmbedYT(artist, album) {
+  if (!artist || !album) return;
+  const cached = ytCacheGet(artist, album);
+  if (cached !== null) { embedYT(cached); return; }
+  try {
+    const r = await fetch(`/api/yt_search?${new URLSearchParams({ artist, album })}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    if (typeof data.videoId === 'string') {
+      ytCacheSet(artist, album, data.videoId);
+      embedYT(data.videoId);
+    }
+  } catch(e) {}
+}
+
 // ── Modal ──────────────────────────────────────────────────────────────────
 // ── Detail side panel ──────────────────────────────────────────────────────
 function openDetailPanel(ref) {
@@ -2773,9 +2853,7 @@ function openDetailPanel(ref) {
   // Links
   const links = [];
   if (mbid)  links.push(`<a class="dp-link" href="https://musicbrainz.org/release-group/${mbid}" target="_blank">MusicBrainz</a>`);
-  if (yt_id) {
-    links.push(`<a class="dp-link" href="https://youtube.com/watch?v=${escH(yt_id)}" target="_blank">YouTube ↗</a>`);
-  } else if (artist && title) {
+  if (artist && title) {
     const ytQ = encodeURIComponent(`${artist} ${title}`);
     links.push(`<a class="dp-link" href="https://www.youtube.com/results?search_query=${ytQ}" target="_blank">Buscar YouTube ↗</a>`);
   }
@@ -2790,6 +2868,11 @@ function openDetailPanel(ref) {
   // For artist-only entries pass album='' so only artist.getInfo is fetched
   const fetchAlbum = ref.type === 'discover_artist' ? '' : (title || '');
   fetchAlbumInfo(artist || '', fetchAlbum, mbid || '');
+
+  // Fetch YouTube embed for album entries
+  if (ref.type === 'discover' && title) {
+    fetchAndEmbedYT(artist, title);
+  }
 }
 
 function closeDetailPanel() {
@@ -2820,11 +2903,13 @@ function _applyAlbumInfoToPanel(data, artist) {
     dpCover.src = data.artist.image; dpCover.style.display = '';
   }
 
-  // Stats
-  if (data.lfm?.listeners || data.lfm?.playcount) {
+  // Stats — album listeners first, fall back to artist listeners
+  const listeners = data.lfm?.listeners || data.artist?.listeners || '';
+  const playcount  = data.lfm?.playcount || '';
+  if (listeners || playcount) {
     const s = document.getElementById('dp-stats');
-    s.innerHTML = `<span><b>${parseInt(data.lfm.listeners||0).toLocaleString()}</b> oyentes</span>`
-                + `<span><b>${parseInt(data.lfm.playcount||0).toLocaleString()}</b> plays globales</span>`;
+    s.innerHTML = (listeners ? `<span><b>${parseInt(listeners||0).toLocaleString()}</b> oyentes</span>` : '')
+                + (playcount ? `<span><b>${parseInt(playcount||0).toLocaleString()}</b> plays globales</span>` : '');
     s.style.display = 'flex';
   }
 
@@ -2848,13 +2933,21 @@ function _applyAlbumInfoToPanel(data, artist) {
   }
 
   // Update links if we got a new MBID
-  if (data.mbid) {
-    const existing = document.getElementById('dp-links').innerHTML;
-    if (!existing.includes('musicbrainz')) {
-      document.getElementById('dp-links').innerHTML =
-        `<a class="dp-link" href="https://musicbrainz.org/release-group/${data.mbid}" target="_blank">MusicBrainz</a>`
-        + existing;
-    }
+  const linksEl = document.getElementById('dp-links');
+  if (data.mbid && !linksEl.innerHTML.includes('musicbrainz')) {
+    linksEl.innerHTML =
+      `<a class="dp-link" href="https://musicbrainz.org/release-group/${data.mbid}" target="_blank">MusicBrainz</a>`
+      + linksEl.innerHTML;
+  }
+  // Last.fm album link
+  if (data.lfm?.url && !linksEl.innerHTML.includes('last.fm')) {
+    linksEl.insertAdjacentHTML('beforeend',
+      `<a class="dp-link" href="${escH(data.lfm.url)}" target="_blank">Last.fm álbum</a>`);
+  }
+  // Last.fm artist link
+  if (data.artist?.url && !linksEl.innerHTML.includes('Last.fm artista')) {
+    linksEl.insertAdjacentHTML('beforeend',
+      `<a class="dp-link" href="${escH(data.artist.url)}" target="_blank">Last.fm artista</a>`);
   }
 }
 
