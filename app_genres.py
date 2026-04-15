@@ -2414,7 +2414,7 @@ async function renderIdbList() {
       <div class="idb-entry">
         <div class="idb-entry-info">
           <div class="idb-entry-user">${escH(s.user)}</div>
-          <div class="idb-entry-meta">${s.count.toLocaleString()} álb. · ${new Date(_ts*1000).toLocaleDateString()}${escH(_lbl)}</div>
+          <div class="idb-entry-meta">${(s.count||s.heard?.length||0).toLocaleString()} álb. · ${new Date(_ts*1000).toLocaleDateString()}${escH(_lbl)}</div>
         </div>
         <button class="btn-sm primary" onclick="idbLoadSession('${escH(s.user)}')">Cargar</button>
         <button class="btn-sm" onclick="idbDownloadSession('${escH(s.user)}')">↓ JSON</button>
