@@ -21,13 +21,24 @@ app = Flask(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 LFM_API_KEY  = os.environ.get("LASTFM_API_KEY") or None
+YT_API_KEY   = os.environ.get("YOUTUBE_API_KEY") or None
 CAA          = "https://coverartarchive.org/release-group"
+
+_LFM_NO_IMG  = "2a96cbd8b46e442fc41c2b86b821562f"  # Last.fm placeholder hash
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _norm(s: str) -> str:
     return re.sub(r"[^\w]", "", (s or "").lower())
+
+def _lfm_image(images: list, size: str = "extralarge") -> str:
+    """Return the best Last.fm image URL, skipping the placeholder star."""
+    for img in images:
+        url = img.get("#text", "")
+        if img.get("size") == size and url and _LFM_NO_IMG not in url:
+            return url
+    return ""
 
 
 # ── Last.fm API ────────────────────────────────────────────────────────────────
