@@ -588,9 +588,11 @@ def api_cover():
 @app.route("/api/enrich_albums")
 def api_enrich_albums():
     """
-    SSE: busca metadatos en MusicBrainz para una lista de [[artist, album], ...].
+    SSE: busca metadatos para una lista de [[artist, album], ...].
+    Estrategia: Last.fm album.getInfo primero (5 req/s) → si devuelve imagen o
+    mbid, se usa directamente y se salta MusicBrainz. Solo se consulta MB (1 req/s)
+    para álbumes que Last.fm no conoce.
     Devuelve un evento por álbum con {i, artist, album, mbid, cover_url, mb_title, mb_artist, date}.
-    Rate limit de MB: 1 req/seg.
     """
     raw = request.args.get("albums", "[]")
     try:
@@ -601,24 +603,59 @@ def api_enrich_albums():
         return jsonify({"error": "albums debe ser un array"}), 400
     albums = [a for a in albums if isinstance(a, list) and len(a) >= 2][:100]
 
+    LFM_DELAY = 0.22   # ~4.5 req/s, por debajo del límite de 5/s de Last.fm
+    MB_DELAY  = 1.1    # MusicBrainz: 1 req/s
+
     def generate():
         for i, pair in enumerate(albums):
             artist, album = str(pair[0]), str(pair[1])
-            mb = mb_search_release_group(artist, album)
-            mbid = mb.get("mbid", "")
+            mbid      = ""
+            cover_url = ""
+            mb_title  = album
+            mb_artist = artist
+            date      = ""
+            used_mb   = False
+
+            # ── 1. Last.fm album.getInfo ──────────────────────────────────────
+            lfm    = lfm_get("album.getInfo", {"artist": artist, "album": album, "autocorrect": 1})
+            lfm_al = lfm.get("album", {})
+            lfm_img = next(
+                (img["#text"] for img in lfm_al.get("image", [])
+                 if img.get("size") == "extralarge" and img.get("#text")),
+                ""
+            )
+            lfm_mbid = (lfm_al.get("mbid") or "").strip()
+
+            if lfm_img:
+                cover_url = lfm_img
+            elif lfm_mbid:
+                # mbid de Last.fm es de release (no release-group), usar endpoint /release/
+                cover_url = f"https://coverartarchive.org/release/{lfm_mbid}/front-500"
+
+            # ── 2. MusicBrainz solo si Last.fm no dio portada ─────────────────
+            if not cover_url:
+                mb        = mb_search_release_group(artist, album)
+                mbid      = mb.get("mbid", "")
+                mb_title  = mb.get("title", album)
+                mb_artist = mb.get("artist", artist)
+                date      = mb.get("date", "")
+                cover_url = f"{CAA}/{mbid}/front-500" if mbid else ""
+                used_mb   = True
+
             result = {
                 "i":         i,
                 "artist":    artist,
                 "album":     album,
                 "mbid":      mbid,
-                "cover_url": f"{CAA}/{mbid}/front-500" if mbid else "",
-                "mb_title":  mb.get("title", album),
-                "mb_artist": mb.get("artist", artist),
-                "date":      mb.get("date", ""),
+                "cover_url": cover_url,
+                "mb_title":  mb_title,
+                "mb_artist": mb_artist,
+                "date":      date,
             }
             yield f"data: {json.dumps(result)}\n\n"
             if i < len(albums) - 1:
-                time.sleep(1.1)  # MusicBrainz rate limit: 1 req/sec
+                time.sleep(MB_DELAY if used_mb else LFM_DELAY)
+
         yield f"data: {json.dumps({'done': True, 'total': len(albums)})}\n\n"
 
     return Response(
