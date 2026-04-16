@@ -97,6 +97,7 @@ services:
       - escuchowsky
       - tumtumpa
     volumes:
+      - ./conf.d:/etc/nginx/conf.d
       - /home/docker_webs/contenedores/nginx/logs/nginx:/var/log/nginx
     networks:
       musica:
