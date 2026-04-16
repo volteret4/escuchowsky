@@ -47,7 +47,7 @@ def lfm_get(method: str, params: dict) -> dict:
     base = "https://ws.audioscrobbler.com/2.0/"
     params = {**params, "method": method, "api_key": LFM_API_KEY, "format": "json"}
     url = base + "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": "mustlisten/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "tumtumpa/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return json.loads(r.read())
@@ -63,7 +63,7 @@ def mb_search_release_group(artist: str, album: str) -> dict:
     url = ("https://musicbrainz.org/ws/2/release-group?"
            + urllib.parse.urlencode({"query": q, "fmt": "json", "limit": "1"}))
     req = urllib.request.Request(url, headers={
-        "User-Agent": "mustlisten/1.0 (https://github.com/HuanPc/escuchowsky)",
+        "User-Agent": "tumtumpa/1.0 (https://github.com/volteret4/escuchowsky)",
         "Accept": "application/json",
     })
     try:
@@ -434,7 +434,7 @@ def api_cover():
         abort(400)
     url = f"{CAA}/{mbid}/front-500"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "mustlisten/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "tumtumpa/1.0"})
         with urllib.request.urlopen(req, timeout=8) as r:
             data     = r.read()
             ctype    = r.headers.get("Content-Type", "image/jpeg")
@@ -626,7 +626,7 @@ def api_yt_search():
                "part": "id", "q": q, "type": "video",
                "maxResults": "1", "key": YT_API_KEY,
            }))
-    req = urllib.request.Request(url, headers={"User-Agent": "mustlisten/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "tumtumpa/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=8) as r:
             data = json.loads(r.read())
@@ -1824,9 +1824,9 @@ input::placeholder { color: var(--ink3); }
   <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1.5rem;gap:2rem;max-width:480px;margin:0 auto">
     <div style="text-align:center">
       <div style="font-family:var(--serif);font-size:2.5rem;font-weight:800;letter-spacing:-0.02em;line-height:1.1;margin-bottom:0.5rem">
-        tumtum<span style="color:var(--accent)">pa</span>
+        <span style="color:var(--accent)">tumtum</span>pa
       </div>
-      <div style="font-family:var(--mono);font-size:0.72rem;color:var(--ink3);letter-spacing:.12em;text-transform:uppercase">by mustlisten</div>
+      <div style="font-family:var(--mono);font-size:0.72rem;color:var(--ink3);letter-spacing:.12em;text-transform:uppercase">by volteret4</div>
     </div>
 
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:1.5rem;display:flex;flex-direction:column;gap:1.2rem;width:100%">
@@ -2253,7 +2253,7 @@ function saveExtraUserJSON(idx) {
   const blob = new Blob([JSON.stringify({ version:1, user: u.user, count: u.count, fetched_at: u.fetched_at, heard: u.pairs, songs: u.songs || [] }, null, 0)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `mustlisten_${u.user}_${new Date().toISOString().slice(0,10)}.json`;
+  a.download = `tumtumpa_${u.user}_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -3421,7 +3421,7 @@ function sbSavePrimaryJson() {
   const blob = new Blob([JSON.stringify({ version:1, user:heardCache.user, count:heardCache.count, fetched_at:heardCache.fetched_at, heard:heardCache.pairs, songs: heardCache.songs||[], yt_ids, covers }, null, 0)], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `mustlisten_${heardCache.user}_${new Date().toISOString().slice(0,10)}.json`;
+  a.download = `tumtumpa_${heardCache.user}_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -3705,7 +3705,7 @@ function idbDownloadSession(username) {
     const blob = new Blob([JSON.stringify({ version:1, user: data.user, count: data.count, fetched_at: data.fetched_at, heard: data.heard, yt_ids, covers }, null, 0)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `mustlisten_${data.user}_${new Date().toISOString().slice(0,10)}.json`;
+    a.download = `tumtumpa_${data.user}_${new Date().toISOString().slice(0,10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   });
@@ -3906,7 +3906,7 @@ document.getElementById('btn-save-session').addEventListener('click', () => {
   }, null, 0)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `mustlisten_${heardCache.user}_${new Date().toISOString().slice(0,10)}.json`;
+  a.download = `tumtumpa_${heardCache.user}_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 });
