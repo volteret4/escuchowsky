@@ -294,6 +294,193 @@ def api_scrobbles_since():
     })
 
 
+def _lb_fetch_page(username: str, max_ts: int | None = None, min_ts: int = 0) -> dict:
+    """Fetch one page of ListenBrainz listens (up to 100). Returns raw payload dict."""
+    url = ("https://api.listenbrainz.org/1/user/"
+           + urllib.parse.quote(username, safe="") + "/listens?count=100")
+    if max_ts is not None:
+        url += f"&max_ts={max_ts}"
+    if min_ts:
+        url += f"&min_ts={min_ts}"
+    req = urllib.request.Request(url, headers={"User-Agent": "tumtumpa/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read()).get("payload", {})
+
+
+@app.route("/api/scrobbles/lb")
+def api_scrobbles_lb():
+    """
+    Descarga el historial completo de ListenBrainz en formato SSE idéntico a /api/scrobbles.
+    Pagina hacia atrás usando max_ts hasta agotar los scrobbles.
+    """
+    username = request.args.get("user", "").strip()
+    if not username:
+        return jsonify({"error": "Parámetro 'user' requerido"}), 400
+
+    def generate():
+        heard_counts         = {}
+        heard_songs          = {}
+        heard_artists        = set()
+        last_scrobble_ts     = 0
+        last_scrobble_artist = ""
+        last_scrobble_track  = ""
+        max_ts               = None
+        page                 = 0
+        total_pages          = None
+
+        # Estimate total pages from listen-count
+        try:
+            cnt_url = ("https://api.listenbrainz.org/1/user/"
+                       + urllib.parse.quote(username, safe="") + "/listen-count")
+            req = urllib.request.Request(cnt_url, headers={"User-Agent": "tumtumpa/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                total_listens = json.loads(r.read()).get("payload", {}).get("count", 0)
+            total_pages = max(1, (total_listens + 99) // 100)
+        except Exception:
+            total_pages = None
+
+        while True:
+            try:
+                payload = _lb_fetch_page(username, max_ts=max_ts)
+            except Exception as e:
+                if page == 0:
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    return
+                break
+
+            listens = payload.get("listens", [])
+            if not listens:
+                break
+
+            page += 1
+            for listen in listens:
+                tm     = listen.get("track_metadata", {})
+                artist = tm.get("artist_name", "")
+                album  = tm.get("release_name", "") or ""
+                track  = tm.get("track_name", "")
+                ts     = listen.get("listened_at", 0)
+                if last_scrobble_ts == 0 and ts:
+                    last_scrobble_ts     = ts
+                    last_scrobble_artist = artist
+                    last_scrobble_track  = track
+                if artist:
+                    heard_artists.add(_norm(artist))
+                if artist and album:
+                    key = (_norm(artist), _norm(album))
+                    if key not in heard_counts:
+                        heard_counts[key] = [artist, album, 1]
+                    else:
+                        heard_counts[key][2] += 1
+                if artist and track:
+                    skey = (_norm(artist), _norm(track))
+                    if skey not in heard_songs:
+                        heard_songs[skey] = [artist, album, track, 1]
+                    else:
+                        heard_songs[skey][3] += 1
+
+            oldest_ts = payload.get("oldest_listen_ts")
+            if oldest_ts:
+                max_ts = oldest_ts - 1
+            else:
+                try:
+                    max_ts = min(l.get("listened_at", 0) for l in listens) - 1
+                except Exception:
+                    break
+
+            tp = total_pages or page
+            yield f"data: {json.dumps({'page': page, 'total_pages': tp, 'count': len(heard_counts)})}\n\n"
+
+            if len(listens) < 100:
+                break
+            time.sleep(0.25)
+
+        heard_pairs     = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
+        heard_song_list = [[k[0], k[1], v[0], v[1], v[2], v[3]] for k, v in heard_songs.items()]
+        yield f"data: {json.dumps({'done': True, 'user': username, 'count': len(heard_pairs), 'fetched_at': int(time.time()), 'heard': heard_pairs, 'heard_songs': heard_song_list, 'heard_artists': list(heard_artists), 'last_scrobble_ts': last_scrobble_ts, 'last_scrobble_artist': last_scrobble_artist, 'last_scrobble_track': last_scrobble_track, 'total_pages': total_pages or page})}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+@app.route("/api/scrobbles/lb/since")
+def api_scrobbles_lb_since():
+    """Sync incremental de ListenBrainz: sólo scrobbles después de `since` (Unix ts)."""
+    username = request.args.get("user", "").strip()
+    since    = request.args.get("since", "0").strip()
+    if not username:
+        return jsonify({"error": "Parámetro 'user' requerido"}), 400
+    try:
+        since = int(since)
+    except ValueError:
+        since = 0
+
+    new_counts           = {}
+    new_songs            = {}
+    last_scrobble_ts     = 0
+    last_scrobble_artist = ""
+    last_scrobble_track  = ""
+    max_ts               = None
+
+    while True:
+        try:
+            payload = _lb_fetch_page(username, max_ts=max_ts, min_ts=since)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+        listens = payload.get("listens", [])
+        if not listens:
+            break
+
+        for listen in listens:
+            tm     = listen.get("track_metadata", {})
+            artist = tm.get("artist_name", "")
+            album  = tm.get("release_name", "") or ""
+            track  = tm.get("track_name", "")
+            ts     = listen.get("listened_at", 0)
+            if last_scrobble_ts == 0 and ts:
+                last_scrobble_ts     = ts
+                last_scrobble_artist = artist
+                last_scrobble_track  = track
+            if artist and album:
+                key = (_norm(artist), _norm(album))
+                if key not in new_counts:
+                    new_counts[key] = [artist, album, 1]
+                else:
+                    new_counts[key][2] += 1
+            if artist and track:
+                skey = (_norm(artist), _norm(track))
+                if skey not in new_songs:
+                    new_songs[skey] = [artist, album, track, 1]
+                else:
+                    new_songs[skey][3] += 1
+
+        oldest_ts = payload.get("oldest_listen_ts")
+        if oldest_ts and oldest_ts > since:
+            max_ts = oldest_ts - 1
+        else:
+            break
+
+        if len(listens) < 100:
+            break
+        time.sleep(0.25)
+
+    new_pairs     = [[k[0], k[1], v[0], v[1], v[2]] for k, v in new_counts.items()]
+    new_song_list = [[k[0], k[1], v[0], v[1], v[2], v[3]] for k, v in new_songs.items()]
+    return jsonify({
+        "user":                 username,
+        "new_pairs":            new_pairs,
+        "new_songs":            new_song_list,
+        "count":                len(new_pairs),
+        "fetched_at":           int(time.time()),
+        "last_scrobble_ts":     last_scrobble_ts,
+        "last_scrobble_artist": last_scrobble_artist,
+        "last_scrobble_track":  last_scrobble_track,
+    })
+
+
 @app.route("/api/scrobbles/update")
 def api_scrobbles_update():
     """
@@ -384,10 +571,28 @@ def api_scrobbles_update():
 
 @app.route("/api/check_user")
 def api_check_user():
-    """Verifica que el usuario de Last.fm existe."""
+    """Verifica que el usuario existe (Last.fm o ListenBrainz según ?source=)."""
     username = request.args.get("user", "").strip()
+    source   = request.args.get("source", "lfm").strip()
     if not username:
         return jsonify({"ok": False, "error": "Usuario vacío"}), 400
+
+    if source == "lb":
+        url = ("https://api.listenbrainz.org/1/user/"
+               + urllib.parse.quote(username, safe="") + "/listens?count=1")
+        req = urllib.request.Request(url, headers={"User-Agent": "tumtumpa/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read())
+            lb_user = data.get("payload", {}).get("user_id", username)
+            return jsonify({"ok": True, "username": lb_user, "realname": "", "playcount": 0, "image": ""})
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return jsonify({"ok": False, "error": "Usuario no encontrado en ListenBrainz"})
+            return jsonify({"ok": False, "error": f"HTTP {e.code}"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
     data = lfm_get("user.getInfo", {"user": username})
     if "error" in data:
         return jsonify({"ok": False, "error": data.get("message", "Usuario no encontrado")})
@@ -882,6 +1087,16 @@ input::placeholder { color: var(--ink3); }
 }
 .um-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.55rem; }
 .um-row input { flex: 1; }
+.source-radios {
+  display: flex; gap: 0.7rem; margin-bottom: 0.45rem;
+}
+.source-radios label {
+  display: flex; align-items: center; gap: 0.28rem;
+  font-family: var(--mono); font-size: 0.68rem; color: var(--ink3);
+  cursor: pointer; user-select: none;
+}
+.source-radios label:has(input:checked) { color: var(--ink); }
+.source-radios input[type=radio] { accent-color: var(--accent); cursor: pointer; }
 .um-progress {
   font-family: var(--mono);
   font-size: 0.72rem;
@@ -1619,6 +1834,8 @@ input::placeholder { color: var(--ink3); }
 .sb-search-row input { flex: 1; min-width: 0; font-size: 0.72rem; padding: 0.35rem 0.5rem; }
 .sb-search-row .btn-sm { font-size: 0.6rem; padding: 0.28rem 0.45rem; white-space: nowrap; flex-shrink: 0; }
 .sb-progress-txt { font-family: var(--mono); font-size: 0.63rem; color: var(--ink3); min-height: 1.1em; padding: 0.18rem 0 0; }
+.sb-search-area .source-radios { margin: 0.25rem 0 0; gap: 0.6rem; }
+.sb-search-area .source-radios label { font-size: 0.62rem; }
 .sb-user-item { padding: 0.38rem 0.75rem; border-top: 1px solid var(--border); }
 .sb-user-item-primary { border-left: 2px solid var(--accent); padding-left: calc(0.75rem - 2px); background: rgba(124,111,255,0.04); }
 .sb-user-item-left { display: flex; align-items: center; gap: 0.4rem; }
@@ -1882,8 +2099,12 @@ input::placeholder { color: var(--ink3); }
       <div class="um-section-title">Buscar usuario</div>
       <div class="um-row">
         <input id="inp-user" type="text" placeholder="Usuario Last.fm" autocomplete="off" spellcheck="false">
-        <button class="btn-sm primary" id="btn-go">Last.fm</button>
+        <button class="btn-sm primary" id="btn-go">Buscar</button>
         <button class="btn-sm" id="btn-import">↑ JSON</button>
+      </div>
+      <div class="source-radios">
+        <label><input type="radio" name="um-source" id="um-src-lfm" value="lfm" checked> Last.fm</label>
+        <label><input type="radio" name="um-source" id="um-src-lb"  value="lb"> ListenBrainz</label>
       </div>
       <div class="um-progress" id="um-progress"></div>
     </div>
@@ -2001,8 +2222,12 @@ input::placeholder { color: var(--ink3); }
           <div class="sb-search-area">
             <div class="sb-search-row">
               <input id="sb-inp-user" type="text" placeholder="Usuario Last.fm" autocomplete="off" spellcheck="false">
-              <button class="btn-sm primary" id="sb-btn-go">LFM</button>
+              <button class="btn-sm primary" id="sb-btn-go">Buscar</button>
               <button class="btn-sm" id="sb-btn-import">JSON</button>
+            </div>
+            <div class="source-radios">
+              <label><input type="radio" name="sb-source" id="sb-src-lfm" value="lfm" checked> Last.fm</label>
+              <label><input type="radio" name="sb-source" id="sb-src-lb"  value="lb"> ListenBrainz</label>
             </div>
             <div id="sb-progress" class="sb-progress-txt"></div>
           </div>
@@ -2181,7 +2406,7 @@ document.addEventListener('keydown', e => {
 // ── Extra users (recommendation) ──────────────────────────────────────────
 function saveExtraUsersLS() {
   localStorage.setItem('ml_extra_users', JSON.stringify(
-    extraUsers.map(u => ({ user: u.user, pairs: u.pairs, color: u.color, count: u.count, fetched_at: u.fetched_at, image: u.image || '' }))
+    extraUsers.map(u => ({ user: u.user, pairs: u.pairs, color: u.color, count: u.count, fetched_at: u.fetched_at, image: u.image || '', source: u.source || 'lfm' }))
   ));
 }
 
@@ -2269,13 +2494,14 @@ async function addExtraUser() {
   }
   const btn = document.getElementById('btn-extra-lfm');
   btn.disabled = true; inp.disabled = true;
-  prog.textContent = 'Conectando con Last.fm...';
+  const src = umSource();
+  prog.textContent = src === 'lb' ? 'Conectando con ListenBrainz...' : 'Conectando con Last.fm...';
   try {
     const [userInfo, lfmResult] = await Promise.all([
-      fetch(`/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
+      fetch(checkUserEndpoint(user, src)).then(r=>r.json()).catch(()=>null),
       fetchScrobblesSSE(user, msg => {
         prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
-      }),
+      }, src),
     ]);
     const heard     = lfmResult.heard;
     const songs     = lfmResult.heard_songs || [];
@@ -2286,9 +2512,9 @@ async function addExtraUser() {
     const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
     const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
     const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
-    extraUsers.push({ user: realUser, pairs: heard, songs, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    extraUsers.push({ user: realUser, pairs: heard, songs, color, count: heard.length, fetched_at, image, source: src, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
     saveExtraUsersLS();
-    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, songs, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, complete: true, total_pages: lfmResult.total_pages || 0, heard_artists: lfmResult.heard_artists || [] });
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, songs, source: src, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, complete: true, total_pages: lfmResult.total_pages || 0, heard_artists: lfmResult.heard_artists || [] });
     await renderIdbExtraList();
     buildExtraUsersList();
     inp.value = '';
@@ -2306,7 +2532,7 @@ async function syncExtraUser(idx) {
   const prog = document.getElementById('um-extra-progress');
   prog.textContent = `Sincronizando ${u.user}...`;
   try {
-    const url = `/api/scrobbles/since?user=${encodeURIComponent(u.user)}&since=${u.fetched_at || 0}`;
+    const url = sinceEndpoint(u.user, u.fetched_at || 0, u.source || 'lfm');
     const r = await fetch(url);
     if (!r.ok) { const t = await r.text(); throw new Error(`Error ${r.status}: ${t.slice(0, 120)}`); }
     const data = await r.json();
@@ -2393,12 +2619,13 @@ async function addExtraUserByName(username, btn) {
   btn.disabled = true;
   btn.textContent = '…';
   prog.textContent = `Cargando ${username}…`;
+  const src = umSource();
   try {
     const [userInfo, lfmResult] = await Promise.all([
-      fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null),
+      fetch(checkUserEndpoint(username, src)).then(r=>r.json()).catch(()=>null),
       fetchScrobblesSSE(username, msg => {
         prog.textContent = `${username}: página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
-      }),
+      }, src),
     ]);
     const heard      = lfmResult.heard;
     const songs      = lfmResult.heard_songs || [];
@@ -2409,9 +2636,9 @@ async function addExtraUserByName(username, btn) {
     const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
     const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
     const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
-    extraUsers.push({ user: realUser, pairs: heard, songs, color, count: heard.length, fetched_at, image, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    extraUsers.push({ user: realUser, pairs: heard, songs, color, count: heard.length, fetched_at, image, source: src, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
     saveExtraUsersLS();
-    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, songs, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, songs, source: src, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
     await renderIdbExtraList();
     buildExtraUsersList();
     btn.textContent = '✓';
@@ -2484,9 +2711,46 @@ async function idbAddAsExtra(username) {
   document.getElementById('um-extra-progress').textContent = `✓ ${data.user} añadido`;
 }
 
+/// ── Source helpers ────────────────────────────────────────────────────────
+function umSource() {
+  return document.getElementById('um-src-lb')?.checked ? 'lb' : 'lfm';
+}
+function sbSource() {
+  return document.getElementById('sb-src-lb')?.checked ? 'lb' : 'lfm';
+}
+function scrobblesEndpoint(user, source) {
+  const base = source === 'lb' ? '/api/scrobbles/lb' : '/api/scrobbles';
+  return `${base}?user=${encodeURIComponent(user)}`;
+}
+function sinceEndpoint(user, since, source) {
+  const base = source === 'lb' ? '/api/scrobbles/lb/since' : '/api/scrobbles/since';
+  return `${base}?user=${encodeURIComponent(user)}&since=${since}`;
+}
+function checkUserEndpoint(user, source) {
+  const suffix = source === 'lb' ? '&source=lb' : '';
+  return `/api/check_user?user=${encodeURIComponent(user)}${suffix}`;
+}
+
+// Sync placeholder text when source radio changes
+document.addEventListener('DOMContentLoaded', () => {
+  function syncPlaceholder(radioId, inputId, placeholder) {
+    const radio = document.getElementById(radioId);
+    const inp   = document.getElementById(inputId);
+    if (radio && inp) {
+      radio.addEventListener('change', () => {
+        if (radio.checked) inp.placeholder = placeholder;
+      });
+    }
+  }
+  syncPlaceholder('um-src-lb',  'inp-user',    'Usuario ListenBrainz');
+  syncPlaceholder('um-src-lfm', 'inp-user',    'Usuario Last.fm');
+  syncPlaceholder('sb-src-lb',  'sb-inp-user', 'Usuario ListenBrainz');
+  syncPlaceholder('sb-src-lfm', 'sb-inp-user', 'Usuario Last.fm');
+});
+
 // ── Helper: consume /api/scrobbles SSE stream ─────────────────────────────
-async function fetchScrobblesSSE(user, onProgress) {
-  const response = await fetch(`/api/scrobbles?user=${encodeURIComponent(user)}`);
+async function fetchScrobblesSSE(user, onProgress, source = 'lfm') {
+  const response = await fetch(scrobblesEndpoint(user, source));
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const reader   = response.body.getReader();
   const decoder  = new TextDecoder();
@@ -3434,13 +3698,14 @@ async function doLoadUserSb() {
   if (!user) return;
   btn.disabled = true;
   const addAsSecondary = !!heardCache && heardCache.user.toLowerCase() !== user.toLowerCase();
+  const src = sbSource();
   try {
-    prog.textContent = 'Conectando con Last.fm...';
+    prog.textContent = src === 'lb' ? 'Conectando con ListenBrainz...' : 'Conectando con Last.fm...';
     const [userInfo, lfmResult] = await Promise.all([
-      fetch(`/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
+      fetch(checkUserEndpoint(user, src)).then(r=>r.json()).catch(()=>null),
       fetchScrobblesSSE(user, msg => {
         prog.textContent = `Pág ${msg.page}/${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
-      }),
+      }, src),
     ]);
     const heard = lfmResult.heard;
     const image = userInfo?.ok ? (userInfo.image||'') : '';
@@ -3450,7 +3715,7 @@ async function doLoadUserSb() {
       const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
       const euIdx = extraUsers.findIndex(u => u.user.toLowerCase() === realUser.toLowerCase());
       const eu = { user:realUser, pairs:heard, songs:lfmResult.heard_songs||[], color:euIdx!==-1?extraUsers[euIdx].color:color,
-        count:heard.length, fetched_at, image,
+        count:heard.length, fetched_at, image, source:src,
         last_scrobble_ts:lfmResult.last_scrobble_ts||0,
         last_scrobble_artist:lfmResult.last_scrobble_artist||'',
         last_scrobble_track:lfmResult.last_scrobble_track||'' };
@@ -3462,7 +3727,7 @@ async function doLoadUserSb() {
         last_scrobble_artist:lfmResult.last_scrobble_artist||'',
         last_scrobble_track:lfmResult.last_scrobble_track||'',
         complete:true, total_pages:lfmResult.total_pages||0,
-        heard_artists:lfmResult.heard_artists||[] });
+        heard_artists:lfmResult.heard_artists||[], source:src });
       buildExtraUsersList();
       prog.textContent = `✓ ${realUser} añadido — ${heard.length.toLocaleString()} álb.`;
     } else {
@@ -3536,12 +3801,13 @@ async function sbAddFriend(username, btn) {
   btn.disabled = true; btn.textContent = '…';
   const prog = document.getElementById('sb-progress');
   if (prog) prog.textContent = `Cargando ${username}…`;
+  const src = sbSource();
   try {
     const [userInfo, lfmResult] = await Promise.all([
-      fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null),
+      fetch(checkUserEndpoint(username, src)).then(r=>r.json()).catch(()=>null),
       fetchScrobblesSSE(username, msg => {
         if (prog) prog.textContent = `${username}: pág ${msg.page}/${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
-      }),
+      }, src),
     ]);
     const heard = lfmResult.heard;
     const songs = lfmResult.heard_songs || [];
@@ -3549,7 +3815,7 @@ async function sbAddFriend(username, btn) {
     const image = userInfo?.ok ? (userInfo.image||'') : '';
     const realUser = userInfo?.ok ? userInfo.username : username;
     const fetched_at = Math.floor(Date.now()/1000);
-    extraUsers.push({ user:realUser, pairs:heard, songs, color, count:heard.length, fetched_at, image,
+    extraUsers.push({ user:realUser, pairs:heard, songs, color, count:heard.length, fetched_at, image, source:src,
       last_scrobble_ts:lfmResult.last_scrobble_ts||0,
       last_scrobble_artist:lfmResult.last_scrobble_artist||'',
       last_scrobble_track:lfmResult.last_scrobble_track||'' });
@@ -3559,7 +3825,7 @@ async function sbAddFriend(username, btn) {
       last_scrobble_artist:lfmResult.last_scrobble_artist||'',
       last_scrobble_track:lfmResult.last_scrobble_track||'',
       complete:true, total_pages:lfmResult.total_pages||0,
-      heard_artists:lfmResult.heard_artists||[] });
+      heard_artists:lfmResult.heard_artists||[], source:src });
     buildExtraUsersList();
     btn.textContent = '✓';
     if (prog) prog.textContent = `✓ ${realUser} añadido`;
@@ -3789,12 +4055,14 @@ async function syncSecondaryIdb(username) {
   if (prog) prog.textContent = `Sincronizando ${username}...`;
   try {
     const existing = await idbLoad(username);
+    const euSrc = extraUsers.find(u => u.user.toLowerCase() === username.toLowerCase())?.source
+                  || existing?.source || 'lfm';
     // Si la sesión no está marcada como completa, descargar todo desde cero
     if (existing && existing.complete === false) {
       if (prog) prog.textContent = `Sesión incompleta — descargando completo...`;
       const lfmResult = await fetchScrobblesSSE(username, msg => {
         if (prog) prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
-      });
+      }, euSrc);
       const heard = lfmResult.heard;
       const songs = lfmResult.heard_songs || [];
       const newFetched = Math.floor(Date.now()/1000);
@@ -3802,7 +4070,7 @@ async function syncSecondaryIdb(username) {
         last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
         last_scrobble_artist: lfmResult.last_scrobble_artist || '',
         last_scrobble_track: lfmResult.last_scrobble_track || '',
-        complete: true, total_pages: lfmResult.total_pages || 0 });
+        complete: true, total_pages: lfmResult.total_pages || 0, source: euSrc });
       const eu = extraUsers.find(u => u.user.toLowerCase() === username.toLowerCase());
       if (eu) { eu.pairs = heard; eu.songs = songs; eu.count = heard.length; eu.fetched_at = newFetched; saveExtraUsersLS(); }
       renderSecondaryUsers();
@@ -3810,7 +4078,7 @@ async function syncSecondaryIdb(username) {
       return;
     }
     const since = existing?.fetched_at || 0;
-    const url = `/api/scrobbles/since?user=${encodeURIComponent(username)}&since=${since}`;
+    const url = sinceEndpoint(username, since, euSrc);
     const r = await fetch(url);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
@@ -4007,18 +4275,19 @@ async function doLoadUser() {
 
   // If primary already loaded AND this user is not the primary → add as secondary
   const addAsSecondary = !!heardCache && heardCache.user.toLowerCase() !== user.toLowerCase();
+  const src = umSource();
 
   try {
     if (addAsSecondary) {
       // Always do a full fresh download via the search box — never short-circuit
       // from IDB here; the IDB may contain a truncated previous download.
       // Use the "CARGAR" button on the secondary list to load from IDB instead.
-      prog.textContent = 'Conectando con Last.fm...';
+      prog.textContent = src === 'lb' ? 'Conectando con ListenBrainz...' : 'Conectando con Last.fm...';
       const [userInfo, lfmResult] = await Promise.all([
-        fetch(`/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
+        fetch(checkUserEndpoint(user, src)).then(r=>r.json()).catch(()=>null),
         fetchScrobblesSSE(user, msg => {
           prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
-        }),
+        }, src),
       ]);
       const heard = lfmResult.heard;
       const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
@@ -4028,7 +4297,7 @@ async function doLoadUser() {
       // Replace existing extraUsers entry if present, else push new
       const euIdx = extraUsers.findIndex(u => u.user.toLowerCase() === realUser.toLowerCase());
       const eu = { user: realUser, pairs: heard, songs: lfmResult.heard_songs||[], color: euIdx !== -1 ? extraUsers[euIdx].color : color,
-        count: heard.length, fetched_at, image,
+        count: heard.length, fetched_at, image, source: src,
         last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
         last_scrobble_artist: lfmResult.last_scrobble_artist || '',
         last_scrobble_track: lfmResult.last_scrobble_track || '' };
@@ -4040,16 +4309,16 @@ async function doLoadUser() {
         last_scrobble_artist: lfmResult.last_scrobble_artist || '',
         last_scrobble_track: lfmResult.last_scrobble_track || '',
         complete: true, total_pages: lfmResult.total_pages || 0,
-        heard_artists: lfmResult.heard_artists || [] });
+        heard_artists: lfmResult.heard_artists || [], source: src });
       buildExtraUsersList();
       prog.textContent = `✓ ${realUser} añadido — ${heard.length.toLocaleString()} álbumes`;
       inpUser.value = '';
     } else {
       // Load as primary
-      prog.textContent = 'Conectando con Last.fm...';
+      prog.textContent = src === 'lb' ? 'Conectando con ListenBrainz...' : 'Conectando con Last.fm...';
       const result = await fetchScrobblesSSE(user, msg => {
         prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes únicos`;
-      });
+      }, src);
       loadHeardCache({
         user, heard: result.heard, heard_songs: result.heard_songs || [],
         fetched_at:           Math.floor(Date.now()/1000),
