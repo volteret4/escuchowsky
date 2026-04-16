@@ -1,4 +1,4 @@
-FROM owasp/modsecurity-crs:nginx
+FROM owasp/modsecurity-crs:openresty-alpine-fat
 
 USER root
 # Eliminar config de servidor por defecto de la imagen OWASP
