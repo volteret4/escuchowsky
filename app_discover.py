@@ -378,14 +378,12 @@ def api_scrobbles_lb():
                     else:
                         heard_songs[skey][3] += 1
 
-            oldest_ts = payload.get("oldest_listen_ts")
-            if oldest_ts:
-                max_ts = oldest_ts - 1
-            else:
-                try:
-                    max_ts = min(l.get("listened_at", 0) for l in listens) - 1
-                except Exception:
-                    break
+            # Compute next max_ts from valid timestamps in this page
+            ts_vals = [l["listened_at"] for l in listens if l.get("listened_at", 0) > 0]
+            if not ts_vals:
+                # No valid timestamps → can't paginate further; emit done
+                break
+            max_ts = min(ts_vals) - 1
 
             tp = total_pages or page
             yield f"data: {json.dumps({'page': page, 'total_pages': tp, 'count': len(heard_counts)})}\n\n"
@@ -455,13 +453,11 @@ def api_scrobbles_lb_since():
                 else:
                     new_songs[skey][3] += 1
 
-        oldest_ts = payload.get("oldest_listen_ts")
-        if oldest_ts and oldest_ts > since:
-            max_ts = oldest_ts - 1
-        else:
+        ts_vals = [l["listened_at"] for l in listens if l.get("listened_at", 0) > since]
+        if not ts_vals:
             break
-
-        if len(listens) < 100:
+        max_ts = min(ts_vals) - 1
+        if max_ts <= since:
             break
         time.sleep(0.25)
 
