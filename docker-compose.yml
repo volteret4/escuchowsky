@@ -166,6 +166,7 @@ services:
     volumes:
       - ./conf.d:/etc/nginx/conf.d
       - /home/docker_webs/contenedores/nginx/logs/nginx:/var/log/nginx
+      - ./modsec/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
     networks:
       musica:
         ipv4_address: 172.20.0.10
