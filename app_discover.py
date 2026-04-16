@@ -2230,12 +2230,20 @@ function _updateDiscoverIndicator() {
   ).join('');
 }
 
-function triggerDiscover() {
+async function triggerDiscover() {
   if (!extraUsers.length) return;
   const mode = document.getElementById('disc-mode-select')?.value || 'albums';
   const limit = Math.min(100, Math.max(1,
     parseInt(document.getElementById('disc-limit-global')?.value || '20')
   ));
+  // Songs data is too large for localStorage — load from IDB on demand
+  if (mode === 'songs') {
+    const u = extraUsers[activeDiscoverUserIdx];
+    if (u && u.songs === undefined) {
+      const data = await idbLoad(u.user).catch(() => null);
+      if (data) u.songs = data.songs || [];
+    }
+  }
   enterDiscoverMode(activeDiscoverUserIdx, limit, mode);
 }
 
