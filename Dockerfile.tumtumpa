@@ -15,12 +15,13 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 5001
 
 # gunicorn: 2 procesos x 4 threads = 8 requests concurrentes
-# --timeout 120 para scrobbles largos / SSE streams
+# --timeout 1800: SSE streams de scrobbles para usuarios con 2000+ páginas (400k tracks)
+# toman ~600-1000s; 1800 es el límite real, por encima del timeout de nginx (600s)
 CMD ["gunicorn", \
      "-w", "2", \
      "--threads", "4", \
      "-b", "0.0.0.0:5001", \
-     "--timeout", "120", \
+     "--timeout", "1800", \
      "--forwarded-allow-ips", "172.20.0.10", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \

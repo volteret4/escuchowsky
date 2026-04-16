@@ -1692,21 +1692,13 @@ input::placeholder { color: var(--ink3); }
 .disc-artist-card .card-title { font-size: 0.72rem; }
 
 /* ── Discover song card ──────────────────────────────────────────────── */
-.disc-song-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg2);
-  min-height: 140px;
+.disc-song-card { background: var(--bg2); }
+/* placeholder: ♪ icon, same look as card-placeholder but with a note */
+.disc-song-ph {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
 }
-.disc-song-icon {
-  font-size: 1.8rem; color: var(--ink3);
-  position: relative; z-index: 1;
-  user-select: none;
-}
-.disc-song-card .card-info { position: absolute; bottom: 0; left: 0; right: 0; padding: 0.45rem 0.5rem 0.5rem; text-align: center; }
-.disc-song-card .card-title { font-size: 0.72rem; }
+.disc-song-icon { font-size: 2rem; color: var(--ink3); user-select: none; }
 .disc-song-card .card-album-hint { font-size: 0.58rem; color: var(--ink3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── About button in sidebar ─────────────────────────────────────────── */
@@ -2523,8 +2515,15 @@ function discoverCardHTML(a, i) {
         ? `<img class="rc-avatar" src="${escH(u.image)}" title="${escH(u.user)}: ${u.count} plays" alt="">`
         : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`
     ).join('');
+    const cover = a.cover_url
+      ? `<img class="card-cover" src="${escH(a.cover_url)}" loading="lazy" alt=""
+            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+      : '';
     return `<div class="card rec-card disc-song-card" data-disc="${i}" style="cursor:pointer">
-      <div class="disc-song-icon">♪</div>
+      ${cover}
+      <div class="disc-song-ph"${a.cover_url ? ' style="display:none"' : ''}>
+        <div class="disc-song-icon">♪</div>
+      </div>
       <div class="card-overlay"></div>
       <div class="card-info">
         <div class="card-title">${escH(a.orig_t)}</div>
@@ -2714,6 +2713,59 @@ function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
   _loadDiscoverPage();
 }
 
+function _enrichSongCovers() {
+  // Collect unique (orig_a, orig_album) pairs that still need covers, keyed by "a|||album"
+  const needed = {};  // "a|||album" -> [idx, ...]
+  discoverAlbums.forEach((a, i) => {
+    if (a.type !== 'song' || a.cover_url || !a.orig_album) return;
+    const k = (a.orig_a || '') + '|||' + (a.orig_album || '');
+    if (!needed[k]) needed[k] = { orig_a: a.orig_a, orig_album: a.orig_album, idxs: [] };
+    needed[k].idxs.push(i);
+  });
+  const pairs = Object.values(needed);
+  if (!pairs.length) return;
+
+  // Use api_enrich_albums SSE to fetch missing covers
+  const url = '/api/enrich_albums?albums=' + encodeURIComponent(JSON.stringify(
+    pairs.map(p => [p.orig_a, p.orig_album])
+  ));
+  const es = new EventSource(url);
+  es.onmessage = e => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg.done || msg.error) { es.close(); return; }
+    if (!msg.artist || !msg.album || !msg.cover_url) return;
+    const k = msg.artist + '|||' + msg.album;
+    enrichCacheSet(msg.artist, msg.album, { cover_url: msg.cover_url, mbid: msg.mbid || '' });
+    const entry = needed[k];
+    if (!entry) return;
+    entry.idxs.forEach(idx => {
+      if (!discoverAlbums[idx]) return;
+      discoverAlbums[idx].cover_url = msg.cover_url;
+      // Patch the card in the DOM
+      const card = document.querySelector(`#discover-grid .card[data-disc="${idx}"]`);
+      if (!card) return;
+      let img = card.querySelector('.card-cover');
+      const ph = card.querySelector('.disc-song-ph');
+      if (!img) {
+        img = document.createElement('img');
+        img.className = 'card-cover';
+        img.alt = '';
+        img.loading = 'lazy';
+        img.onerror = function() {
+          this.style.display = 'none';
+          if (ph) ph.style.display = 'flex';
+        };
+        card.insertBefore(img, card.firstChild);
+      }
+      if (ph) ph.style.display = 'none';
+      img.style.display = '';
+      img.src = msg.cover_url;
+    });
+  };
+  es.onerror = () => es.close();
+}
+
 function _loadDiscoverPage() {
   discoverAlbums  = [];
   discoverOffset  = 0;
@@ -2778,11 +2830,20 @@ function _loadDiscoverPage() {
         }).catch(() => {});
     });
   } else if (discoverModeType === 'songs') {
-    discoverAlbums = discoverCandidates.map(c => ({ ...c }));
+    discoverAlbums = discoverCandidates.map(c => {
+      const entry = { ...c };
+      // Pre-fill cover from enrichment cache if we have an album name
+      if (!entry.cover_url && entry.orig_album) {
+        const hit = enrichCacheGet(entry.orig_a, entry.orig_album);
+        if (hit?.cover_url) entry.cover_url = hit.cover_url;
+      }
+      return entry;
+    });
     renderDiscoverGrid();
     document.getElementById('discover-footer').style.display = '';
     document.getElementById('discover-progress').textContent =
       `${discoverAlbums.length} canciones de ${uName} (pág. ${discoverPage + 1})`;
+    _enrichSongCovers();
   } else {
     document.getElementById('discover-footer').style.display = '';
     document.getElementById('discover-progress').textContent =
@@ -2988,14 +3049,17 @@ function openDetailPanel(ref) {
     const a = discoverAlbums[ref.idx];
     if (!a) return;
     title = a.orig_a; artist = a.orig_a;
-    year = ''; cover = ''; mbid = ''; yt_id = ''; heard = false; extraHeard = null;
+    year = ''; cover = a.cover_url || ''; mbid = ''; yt_id = ''; heard = false; extraHeard = null;
     descCached = '';
     // title kept as artist name for display; album passed as '' to fetchAlbumInfo
   } else if (ref.type === 'discover_song') {
     const a = discoverAlbums[ref.idx];
     if (!a) return;
     title = a.orig_t; artist = a.orig_a;
-    year = ''; cover = ''; mbid = ''; yt_id = ''; heard = false; extraHeard = null;
+    year = '';
+    const _songHit = a.orig_album ? enrichCacheGet(a.orig_a, a.orig_album) : null;
+    cover = a.cover_url || _songHit?.cover_url || '';
+    mbid = ''; yt_id = ''; heard = false; extraHeard = null;
     descCached = '';
   } else {
     const a = discoverAlbums[ref.idx];
@@ -3086,8 +3150,15 @@ function openDetailPanel(ref) {
   document.body.style.overflow = 'hidden';
 
   // Fetch LFM + MB info asynchronously
-  // discover_artist: album=''; discover_song: album=''; discover: full album name
-  const fetchAlbum = (ref.type === 'discover_artist' || ref.type === 'discover_song') ? '' : (title || '');
+  // discover_artist: album=''; discover_song: use orig_album if available; discover: full album name
+  let fetchAlbum;
+  if (ref.type === 'discover_artist') {
+    fetchAlbum = '';
+  } else if (ref.type === 'discover_song') {
+    fetchAlbum = discoverAlbums[ref.idx]?.orig_album || '';
+  } else {
+    fetchAlbum = title || '';
+  }
   fetchAlbumInfo(artist || '', fetchAlbum, mbid || '');
 
   // Fetch YouTube embed for album and song entries
