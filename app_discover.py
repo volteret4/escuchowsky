@@ -390,8 +390,6 @@ def api_scrobbles_lb():
             tp = total_pages or page
             yield f"data: {json.dumps({'page': page, 'total_pages': tp, 'count': len(heard_counts)})}\n\n"
 
-            if len(listens) < 100:
-                break
             time.sleep(0.25)
 
         heard_pairs     = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
@@ -1095,7 +1093,7 @@ input::placeholder { color: var(--ink3); }
   font-family: var(--mono); font-size: 0.68rem; color: var(--ink3);
   cursor: pointer; user-select: none;
 }
-.source-radios label:has(input:checked) { color: var(--ink); }
+.source-radios label.checked { color: var(--ink); }
 .source-radios input[type=radio] { accent-color: var(--accent); cursor: pointer; }
 .um-progress {
   font-family: var(--mono);
@@ -1185,8 +1183,8 @@ input::placeholder { color: var(--ink3); }
   color: var(--ink2);
 }
 .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
-.btn-sm.primary { background: var(--accent); border-color: var(--accent); color: #0d0d0d; }
-.btn-sm.primary:hover { background: var(--accent2); border-color: var(--accent2); }
+.btn-sm.primary { background: transparent; border-color: var(--accent); color: var(--accent); }
+.btn-sm.primary:hover { background: transparent; border-color: var(--accent2); color: var(--accent2); }
 #inp-session { display: none; }
 
 /* ── Stats bar ─────────────────────────────────────────────────────── */
@@ -1565,8 +1563,8 @@ input::placeholder { color: var(--ink3); }
 .sec-user-row:not(.active) .sec-user-name { color: var(--ink2); }
 .sec-user-meta { font-family: var(--mono); font-size: 0.62rem; color: var(--ink3); }
 .sec-user-btns { display: flex; gap: 0.3rem; flex-wrap: wrap; padding-left: 1.8rem; }
-.btn-sm.act { background: var(--accent); border-color: var(--accent); color: #0d0d0d; }
-.btn-sm.act:hover { background: var(--accent2); border-color: var(--accent2); }
+.btn-sm.act { background: transparent; border-color: var(--accent); color: var(--accent); }
+.btn-sm.act:hover { background: transparent; border-color: var(--accent2); color: var(--accent2); }
 
 @keyframes modalIn { from { opacity:0; transform: scale(0.96) translateY(8px); } }
 
@@ -2731,21 +2729,30 @@ function checkUserEndpoint(user, source) {
   return `/api/check_user?user=${encodeURIComponent(user)}${suffix}`;
 }
 
-// Sync placeholder text when source radio changes
-document.addEventListener('DOMContentLoaded', () => {
-  function syncPlaceholder(radioId, inputId, placeholder) {
-    const radio = document.getElementById(radioId);
-    const inp   = document.getElementById(inputId);
-    if (radio && inp) {
-      radio.addEventListener('change', () => {
-        if (radio.checked) inp.placeholder = placeholder;
-      });
-    }
+// Sync placeholder text and .checked label class when source radio changes
+function _syncSourceGroup(groupName, inputId, labels) {
+  // labels: [{radioId, placeholder}]
+  const radios = labels.map(l => document.getElementById(l.radioId));
+  const inp    = document.getElementById(inputId);
+  function update() {
+    radios.forEach((r, i) => {
+      if (!r) return;
+      r.closest('label')?.classList.toggle('checked', r.checked);
+      if (inp && r.checked) inp.placeholder = labels[i].placeholder;
+    });
   }
-  syncPlaceholder('um-src-lb',  'inp-user',    'Usuario ListenBrainz');
-  syncPlaceholder('um-src-lfm', 'inp-user',    'Usuario Last.fm');
-  syncPlaceholder('sb-src-lb',  'sb-inp-user', 'Usuario ListenBrainz');
-  syncPlaceholder('sb-src-lfm', 'sb-inp-user', 'Usuario Last.fm');
+  radios.forEach(r => r?.addEventListener('change', update));
+  update(); // set initial state
+}
+document.addEventListener('DOMContentLoaded', () => {
+  _syncSourceGroup('um-source', 'inp-user', [
+    { radioId: 'um-src-lfm', placeholder: 'Usuario Last.fm' },
+    { radioId: 'um-src-lb',  placeholder: 'Usuario ListenBrainz' },
+  ]);
+  _syncSourceGroup('sb-source', 'sb-inp-user', [
+    { radioId: 'sb-src-lfm', placeholder: 'Usuario Last.fm' },
+    { radioId: 'sb-src-lb',  placeholder: 'Usuario ListenBrainz' },
+  ]);
 });
 
 // ── Helper: consume /api/scrobbles SSE stream ─────────────────────────────
