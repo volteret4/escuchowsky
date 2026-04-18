@@ -12,6 +12,7 @@ import os
 import re
 import json
 import time
+import random
 import argparse
 import urllib.request
 import urllib.parse
@@ -121,7 +122,7 @@ def api_scrobbles():
         last_scrobble_track  = ""
 
         while True:
-            # Retry transient Last.fm errors (rate limits, timeouts) up to 3 times
+            # Retry transient Last.fm errors with exponential backoff
             last_error = None
             for attempt in range(3):
                 data = lfm_get("user.getRecentTracks", {
@@ -134,7 +135,8 @@ def api_scrobbles():
                 last_error = data.get("message") or data.get("error") or "Error Last.fm"
                 print(f"[lfm] error p{page} intento {attempt+1}: {last_error}", flush=True)
                 if attempt < 2:
-                    time.sleep(2)
+                    # Exponential backoff: 10s, 30s — da tiempo a que Last.fm levante el rate limit
+                    time.sleep(10 * (3 ** attempt))
             if last_error:
                 if page == 1:
                     yield f"data: {json.dumps({'error': last_error})}\n\n"
@@ -197,7 +199,7 @@ def api_scrobbles():
             if page >= total_pages:
                 break
             page += 1
-            time.sleep(0.25)
+            time.sleep(0.5 + random.random() * 0.4)
 
         heard_pairs    = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
         # heard_songs: [norm_a, norm_track, orig_a, orig_album, orig_track, count]
@@ -288,7 +290,7 @@ def api_scrobbles_since():
                 else:
                     new_songs[skey][3] += 1
         page += 1
-        time.sleep(0.25)
+        time.sleep(0.5 + random.random() * 0.4)
 
     new_pairs    = [[k[0], k[1], v[0], v[1], v[2]] for k, v in new_counts.items()]
     new_song_list = [[k[0], k[1], v[0], v[1], v[2], v[3]] for k, v in new_songs.items()]
@@ -547,6 +549,7 @@ def api_scrobbles_update():
         attrs = data.get("topalbums", {}).get("@attr", {})
         total_pages = int(attrs.get("totalPages", 1))
         page += 1
+        time.sleep(0.5 + random.random() * 0.4)
 
     # Recientes también
     for rpage in range(1, 4):
@@ -561,6 +564,7 @@ def api_scrobbles_update():
             album  = album.get("#text", "") if isinstance(album, dict) else str(album)
             if artist and album:
                 new_set.add((_norm(artist), _norm(album)))
+        time.sleep(0.5 + random.random() * 0.4)
 
     return jsonify({
         "user":       username,
@@ -673,7 +677,7 @@ def api_enrich_albums():
         return jsonify({"error": "albums debe ser un array"}), 400
     albums = [a for a in albums if isinstance(a, list) and len(a) >= 2][:100]
 
-    LFM_DELAY = 0.22   # ~4.5 req/s, por debajo del límite de 5/s de Last.fm
+    LFM_DELAY = 0.5    # ~2 req/s con jitter; combinado con scrobbles no supera 3 req/s
     MB_DELAY  = 1.1    # MusicBrainz: 1 req/s
 
     def generate():
@@ -724,7 +728,7 @@ def api_enrich_albums():
             }
             yield f"data: {json.dumps(result)}\n\n"
             if i < len(albums) - 1:
-                time.sleep(MB_DELAY if used_mb else LFM_DELAY)
+                time.sleep((MB_DELAY if used_mb else LFM_DELAY) + random.random() * 0.3)
 
         yield f"data: {json.dumps({'done': True, 'total': len(albums)})}\n\n"
 
@@ -767,6 +771,7 @@ def api_album_info():
         if not mbid and al.get("mbid"):
             mbid = al["mbid"]
 
+    time.sleep(0.3 + random.random() * 0.2)
     # Last.fm artist.getInfo
     ar_data = lfm_get("artist.getInfo", {"artist": artist, "autocorrect": 1})
     if "artist" in ar_data:
