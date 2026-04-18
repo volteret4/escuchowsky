@@ -15,6 +15,7 @@ import time
 import argparse
 import urllib.request
 import urllib.parse
+import urllib.error
 from flask import Flask, jsonify, request, render_template_string, abort, Response, stream_with_context
 
 app = Flask(__name__)
@@ -51,6 +52,12 @@ def lfm_get(method: str, params: dict) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        try:
+            return json.loads(body)
+        except Exception:
+            return {"error": f"HTTP {e.code}", "message": body[:300]}
     except Exception as e:
         return {"error": str(e)}
 
