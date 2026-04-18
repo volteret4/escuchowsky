@@ -124,7 +124,8 @@ def api_scrobbles():
                 if "error" not in data or rt:
                     last_error = None
                     break
-                last_error = data.get("message", "Error Last.fm")
+                last_error = data.get("message") or data.get("error") or "Error Last.fm"
+                print(f"[lfm] error p{page} intento {attempt+1}: {last_error}", flush=True)
                 if attempt < 2:
                     time.sleep(2)
             if last_error:
