@@ -48,7 +48,7 @@ def lfm_get(method: str, params: dict) -> dict:
     base = "https://ws.audioscrobbler.com/2.0/"
     params = {**params, "method": method, "api_key": LFM_API_KEY, "format": "json"}
     url = base + "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": "tumtumpa/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "tumtumpa/1.0 (viciosmusicales@gmail.com)"})
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return json.loads(r.read())
@@ -197,6 +197,7 @@ def api_scrobbles():
             if page >= total_pages:
                 break
             page += 1
+            time.sleep(0.25)
 
         heard_pairs    = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
         # heard_songs: [norm_a, norm_track, orig_a, orig_album, orig_track, count]
@@ -287,6 +288,7 @@ def api_scrobbles_since():
                 else:
                     new_songs[skey][3] += 1
         page += 1
+        time.sleep(0.25)
 
     new_pairs    = [[k[0], k[1], v[0], v[1], v[2]] for k, v in new_counts.items()]
     new_song_list = [[k[0], k[1], v[0], v[1], v[2], v[3]] for k, v in new_songs.items()]
