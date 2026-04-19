@@ -117,6 +117,33 @@ def lfm_get(method: str, params: dict) -> dict:
         return {"error": str(e)}
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
+
+_no_redirect_opener = urllib.request.build_opener(_NoRedirect())
+
+def _resolve_caa(mbid: str) -> str:
+    """Sigue el redirect de CAA release-group y devuelve la URL directa de archive.org."""
+    return _follow_caa_redirect(f"{CAA}/{mbid}/front-500")
+
+def _resolve_caa_release(mbid: str) -> str:
+    """Sigue el redirect de CAA release y devuelve la URL directa de archive.org."""
+    return _follow_caa_redirect(f"https://coverartarchive.org/release/{mbid}/front-500")
+
+def _follow_caa_redirect(url: str) -> str:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "mustlisten/1.0"}, method="HEAD")
+        _no_redirect_opener.open(req, timeout=8)
+        return url
+    except urllib.error.HTTPError as e:
+        loc = e.headers.get("Location", "")
+        return loc if loc else ""
+    except Exception:
+        return ""
+
+
+
 def mb_search_release_group(artist: str, album: str) -> dict:
     """Search MusicBrainz for a release group. Returns {mbid, title, artist, date}."""
     q = 'artist:"{}" AND release:"{}"'.format(
@@ -721,8 +748,16 @@ def api_enrich_albums():
                 mb_title  = mb.get("title", album)
                 mb_artist = mb.get("artist", artist)
                 date      = mb.get("date", "")
-                cover_url = f"{CAA}/{mbid}/front-500" if mbid else ""
-                used_mb   = True
+                if mbid:
+                    resolved = _resolve_caa(mbid)
+                    cover_url = resolved or f"{CAA}/{mbid}/front-500"
+                used_mb = True
+
+            # Resolver redirect de CAA para URLs de release (Last.fm mbid)
+            elif lfm_mbid and cover_url.startswith("https://coverartarchive.org/release/"):
+                resolved = _resolve_caa_release(lfm_mbid)
+                if resolved:
+                    cover_url = resolved
 
             result = {
                 "i":         i,
@@ -2095,23 +2130,6 @@ let _enrichEs = null;
 // album info cache (artist|||title → data)
 const albumInfoCache = new Map();
 
-// MBIDs para los que CAA falló: usar /api/cover proxy directamente
-const _coverProxyMbids = new Set(
-  JSON.parse(localStorage.getItem('coverProxyMbids') || '[]')
-);
-function _coverError(img, mbid) {
-  if (!mbid) { img.style.display='none'; const ph=img.nextElementSibling; if(ph) ph.style.display='flex'; return; }
-  const proxyUrl = `/api/cover?mbid=${encodeURIComponent(mbid)}`;
-  if (img.src === proxyUrl || img.src.endsWith(proxyUrl)) {
-    img.style.display='none'; const ph=img.nextElementSibling; if(ph) ph.style.display='flex'; return;
-  }
-  img.onerror = function() { this.style.display='none'; const ph=this.nextElementSibling; if(ph) ph.style.display='flex'; };
-  img.onload  = function() {
-    _coverProxyMbids.add(mbid);
-    try { localStorage.setItem('coverProxyMbids', JSON.stringify([..._coverProxyMbids])); } catch(e) {}
-  };
-  img.src = proxyUrl;
-}
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const inpUser    = document.getElementById('inp-user');
@@ -3168,20 +3186,15 @@ function enrichMissingCovers() {
     const card = document.querySelector(`.card[data-idx="${albumIdx}"]`);
     if (!card) return;
     const ph = card.querySelector('.card-placeholder');
-    const eMbid = msg.mbid || '';
-    const eSrc = eMbid && _coverProxyMbids.has(eMbid)
-      ? `/api/cover?mbid=${encodeURIComponent(eMbid)}`
-      : msg.cover_url;
     let img = card.querySelector('.card-cover');
     if (img) {
-      img.src = eSrc; img.style.display = '';
-      img.onerror = function() { _coverError(this, eMbid); };
+      img.src = msg.cover_url; img.style.display = '';
       if (ph) ph.style.display = 'none';
     } else if (ph) {
       img = document.createElement('img');
-      img.className = 'card-cover'; img.src = eSrc;
+      img.className = 'card-cover'; img.src = msg.cover_url;
       img.loading = 'lazy'; img.alt = '';
-      img.onerror = function() { _coverError(this, eMbid); };
+      img.onerror = function() { this.style.display='none'; if(ph) ph.style.display='flex'; };
       card.insertBefore(img, ph); ph.style.display = 'none';
     }
   };
@@ -3317,13 +3330,9 @@ function renderGrid() {
 function cardHTML(a) {
   const cls  = a.heard ? 'heard' : 'missing';
   const idx  = allAlbums.indexOf(a);
-  const mbid = a.mbid || '';
-  const coverSrc = a.cover
-    ? (mbid && _coverProxyMbids.has(mbid) ? `/api/cover?mbid=${encodeURIComponent(mbid)}` : a.cover)
-    : '';
-  const imgEl = coverSrc
-    ? `<img class="card-cover" src="${escH(coverSrc)}" loading="lazy" alt="${escH(a.title)}"
-          onerror="_coverError(this,'${escH(mbid)}')">`
+  const imgEl = a.cover
+    ? `<img class="card-cover" src="${escH(a.cover)}" loading="lazy" alt="${escH(a.title)}"
+          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
     : '';
   const ph = `<div class="card-placeholder" ${a.cover ? 'style="display:none"' : ''}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
