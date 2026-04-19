@@ -755,14 +755,17 @@ def api_album_info():
     al_params = {"artist": artist, "album": album, "autocorrect": 1}
     al_data = lfm_get("album.getInfo", al_params)
     if "album" in al_data:
-        al = al_data["album"]
-        _tags = al.get("tags", {}).get("tag", [])
+        al = al_data["album"] if isinstance(al_data.get("album"), dict) else {}
+        _tags_raw = al.get("tags", {})
+        _tags = (_tags_raw.get("tag", []) if isinstance(_tags_raw, dict) else [])
         if isinstance(_tags, dict): _tags = [_tags]
+        _wiki_raw = al.get("wiki", {})
+        _wiki = (_wiki_raw.get("summary", "") if isinstance(_wiki_raw, dict) else str(_wiki_raw or ""))
         result["lfm"] = {
             "listeners": al.get("listeners", ""),
             "playcount":  al.get("playcount",  ""),
-            "tags":  [t["name"] for t in _tags[:6]],
-            "wiki":  (al.get("wiki", {}).get("summary", "") or "").split("<a ")[0].strip(),
+            "tags":  [t["name"] for t in _tags[:6] if isinstance(t, dict)],
+            "wiki":  (_wiki or "").split("<a ")[0].strip(),
             "image": _lfm_image(al.get("image", [])),
         }
         if not mbid and al.get("mbid"):
@@ -771,11 +774,16 @@ def api_album_info():
     # Last.fm artist.getInfo
     ar_data = lfm_get("artist.getInfo", {"artist": artist, "autocorrect": 1})
     if "artist" in ar_data:
-        ar = ar_data["artist"]
+        ar = ar_data["artist"] if isinstance(ar_data.get("artist"), dict) else {}
+        _bio_raw   = ar.get("bio", {})
+        _bio       = (_bio_raw.get("summary", "") if isinstance(_bio_raw, dict) else str(_bio_raw or ""))
+        _stats_raw = ar.get("stats", {})
+        _listeners = (_stats_raw.get("listeners", "") if isinstance(_stats_raw, dict) else "")
+        _images    = ar.get("image", [])
         result["artist"] = {
-            "bio":       (ar.get("bio", {}).get("summary", "") or "").split("<a ")[0].strip(),
-            "listeners": ar.get("stats", {}).get("listeners", ""),
-            "image":     next((i["#text"] for i in ar.get("image", []) if i.get("size") == "extralarge"), ""),
+            "bio":       (_bio or "").split("<a ")[0].strip(),
+            "listeners": _listeners,
+            "image":     next((i["#text"] for i in _images if isinstance(i, dict) and i.get("size") == "extralarge"), ""),
         }
 
     # MusicBrainz si no tenemos MBID
