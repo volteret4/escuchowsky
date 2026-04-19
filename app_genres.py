@@ -29,6 +29,32 @@ CAA          = "https://coverartarchive.org/release-group"
 
 _LFM_NO_IMG  = "2a96cbd8b46e442fc41c2b86b821562f"  # Last.fm star placeholder hash
 
+# ── RYM genre hierarchy (rym_genres.json) ─────────────────────────────────────
+_RYM_GENRES:    list = []
+_RYM_SLUG_PATH: dict = {}   # json_slug → [ancestor_slug, ..., self_slug]
+_RYM_SLUG_NAME: dict = {}   # json_slug → display name
+
+def _rym_build_index(nodes: list, path: list) -> None:
+    for n in nodes:
+        p = path + [n["slug"]]
+        _RYM_SLUG_PATH[n["slug"]] = p
+        _RYM_SLUG_NAME[n["slug"]] = n["name"]
+        _rym_build_index(n.get("subgenres", []), p)
+
+def _rym_load() -> None:
+    global _RYM_GENRES
+    candidates = [
+        Path(__file__).parent / "db/rym_genres.json",
+        Path(__file__).parent / "docs/must_hear/rym_charts/rym_genres.json",
+    ]
+    for p in candidates:
+        if p.exists():
+            _RYM_GENRES = json.loads(p.read_text(encoding="utf-8"))
+            _rym_build_index(_RYM_GENRES, [])
+            break
+
+_rym_load()
+
 # CDNs que bloquean peticiones desde navegadores externos (ORB/CORS)
 # Se descartan para evitar imágenes rotas; se usa CAA por MBID como fallback
 _BLOCKED_COVER_DOMAINS = ("snmc.io", "albumoftheyear.org", "aoty.org")
@@ -170,30 +196,36 @@ def get_all_collections() -> list[dict]:
 
 
 def _get_album_chart_genres(conn, album_ids: list) -> dict:
-    """Para cada álbum devuelve los charts RYM en los que aparece, con depth."""
+    """Para cada álbum devuelve todos los géneros ancestros según rym_genres.json."""
     if not album_ids:
         return {}
     placeholders = ",".join("?" * len(album_ids))
     rows = conn.execute(f"""
-        SELECT ca.album_id, c.name, c.slug
+        SELECT ca.album_id, c.slug
         FROM collection_albums ca
         JOIN collections c ON c.id = ca.collection_id
         WHERE c.slug LIKE 'rym_chart_all_time_%'
         AND ca.album_id IN ({placeholders})
     """, album_ids).fetchall()
-    result: dict = {}
+    # album_id → {json_slug: {name, depth}} — using dict to deduplicate across multiple collections
+    tmp: dict[int, dict] = {}
     for r in rows:
-        tp = _rym_tree_path(r["name"])   # e.g. ['Dance'] or ['Dance','Electronica']
-        depth = len(tp) if tp else 1
-        label = tp[-1] if tp else r["name"]
-        result.setdefault(r["album_id"], []).append({
-            "name":  label,
-            "slug":  r["slug"],
-            "depth": depth,
-        })
-    for v in result.values():
-        v.sort(key=lambda x: x["depth"])
-    return result
+        aid = r["album_id"]
+        json_slug = r["slug"].replace("rym_chart_all_time_", "").replace("_", "-")
+        path = _RYM_SLUG_PATH.get(json_slug)
+        seen = tmp.setdefault(aid, {})
+        if path:
+            for depth, s in enumerate(path, 1):
+                if s not in seen:
+                    seen[s] = {"name": _RYM_SLUG_NAME.get(s, s), "depth": depth}
+        else:
+            # Fallback: use collection name path
+            tp = _rym_tree_path(r["slug"])
+            label = tp[-1] if tp else json_slug
+            if json_slug not in seen:
+                seen[json_slug] = {"name": label, "depth": len(tp) if tp else 1}
+    return {aid: sorted(genres.values(), key=lambda x: x["depth"])
+            for aid, genres in tmp.items()}
 
 
 def get_collection_albums(slug: str) -> list[dict]:
@@ -247,6 +279,32 @@ def api_collections():
     all_colls = get_all_collections()
     rym = [c for c in all_colls if c["slug"].startswith("rym_chart_all_time_")]
     return jsonify(rym)
+
+
+@app.route("/api/genre_tree")
+def api_genre_tree():
+    """Pruned RYM genre tree: only nodes that have a DB chart or a chart-descendant."""
+    if not _RYM_GENRES:
+        return jsonify([])
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT slug FROM collections WHERE slug LIKE 'rym_chart_all_time_%'"
+    ).fetchall()
+    conn.close()
+    db_slugs = frozenset(
+        r["slug"].replace("rym_chart_all_time_", "").replace("_", "-") for r in rows
+    )
+
+    def prune(nodes):
+        result = []
+        for n in nodes:
+            children = prune(n.get("subgenres", []))
+            in_db = n["slug"] in db_slugs
+            if in_db or children:
+                result.append({"s": n["slug"], "n": n["name"], "h": in_db, "c": children})
+        return result
+
+    return jsonify(prune(_RYM_GENRES))
 
 
 @app.route("/api/scrobbles")
@@ -2768,8 +2826,11 @@ async function fetchScrobblesSSE(user, onProgress) {
     } catch(e) {}
   }
   try {
-    const cols = await fetch('/api/collections').then(r => r.json());
-    renderCollsSidebar(cols);
+    const [cols, tree] = await Promise.all([
+      fetch('/api/collections').then(r => r.json()),
+      fetch('/api/genre_tree').then(r => r.json()).catch(() => null),
+    ]);
+    renderCollsSidebar(cols, tree);
   } catch(e) {
     document.getElementById('colls-body').innerHTML = '<div class="sb-empty">Error cargando</div>';
   }
@@ -2778,17 +2839,50 @@ async function fetchScrobblesSSE(user, onProgress) {
   buildExtraUsersList();
 })();
 
-function renderCollsSidebar(cols) {
-  document.getElementById('colls-body').innerHTML = buildRymTree(cols);
+function renderCollsSidebar(cols, tree) {
+  // Build lookup: json_slug → collection object (for album counts and DB slug)
+  const byJsonSlug = {};
+  for (const c of cols) {
+    const js = c.slug.replace('rym_chart_all_time_', '').replace(/_/g, '-');
+    byJsonSlug[js] = c;
+  }
+  const html = tree && tree.length
+    ? renderJsonTree(tree, byJsonSlug, 1, '')
+    : buildRymTreeFallback(cols);
+  document.getElementById('colls-body').innerHTML = html;
 }
 
-function buildRymTree(cols) {
-  // Build a fully recursive tree from flat collections with tree_path arrays
+function renderJsonTree(nodes, byJsonSlug, depth, pathPrefix) {
+  let html = '';
+  const indent = (0.5 + depth * 0.65) + 'rem';
+  const fontSize = Math.max(0.68, 0.74 - (depth - 1) * 0.02) + 'rem';
+  for (const node of nodes) {
+    const hasKids = node.c && node.c.length > 0;
+    const coll  = byJsonSlug[node.s];
+    const slug  = coll ? coll.slug : '';
+    const nid   = 'tree-' + (pathPrefix + node.s).replace(/[^a-z0-9]/gi, '_');
+    let onclick = '';
+    if (slug && hasKids) onclick = `toggleTree('${nid}');selectCollection('${escH(slug)}')`;
+    else if (slug)        onclick = `selectCollection('${escH(slug)}')`;
+    else if (hasKids)     onclick = `toggleTree('${nid}')`;
+    html += `<div class="tree-genre" id="${nid}">
+      <div class="tree-genre-hdr" style="padding-left:${indent}" onclick="${onclick}" data-slug="${escH(slug)}">
+        <span class="tree-genre-name" style="font-size:${fontSize}">${escH(node.n)}</span>
+        ${coll && coll.total_albums ? `<span class="sb-coll-count">${coll.total_albums}</span>` : ''}
+        ${hasKids ? `<span class="tree-genre-arrow">▶</span>` : ''}
+      </div>
+      ${hasKids ? `<div class="tree-sub">${renderJsonTree(node.c, byJsonSlug, depth + 1, pathPrefix + node.s + '_')}</div>` : ''}
+    </div>`;
+  }
+  return html;
+}
+
+function buildRymTreeFallback(cols) {
+  // Fallback: build 2-level tree from collection tree_path when JSON tree unavailable
   const root = { self: null, children: new Map() };
-  const legacy = [];
   for (const c of cols) {
     const tp = c.tree_path;
-    if (!tp || tp.length === 0) { legacy.push(c); continue; }
+    if (!tp || tp.length === 0) continue;
     let node = root;
     for (const seg of tp) {
       if (!node.children.has(seg)) node.children.set(seg, { self: null, children: new Map() });
@@ -2796,38 +2890,22 @@ function buildRymTree(cols) {
     }
     node.self = c;
   }
-  let html = renderRymNodes(root.children, 1, '');
-  if (legacy.length) {
-    html += `<div style="padding:0.3rem 0.9rem 0.1rem;font-family:var(--mono);font-size:0.55rem;color:var(--ink3);letter-spacing:.1em;text-transform:uppercase;border-top:1px solid var(--border);margin-top:0.3rem">Otros</div>`;
-    for (const c of legacy) {
-      html += `<div class="sb-coll-item" data-slug="${escH(c.slug)}" onclick="selectCollection('${escH(c.slug)}')">
-        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escH(c.name)}</span>
-        ${c.total_albums ? `<span class="sb-coll-count">${c.total_albums}</span>` : ''}
-      </div>`;
-    }
-  }
-  return html;
-}
-
-function renderRymNodes(children, depth, pathPrefix) {
   let html = '';
-  const indent = (0.5 + depth * 0.65) + 'rem';
-  const fontSize = Math.max(0.68, 0.74 - (depth - 1) * 0.02) + 'rem';
-  for (const [name, node] of [...children.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+  for (const [name, node] of [...root.children.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const hasKids = node.children.size > 0;
-    const slug    = node.self ? node.self.slug : '';
-    const nid     = 'tree-' + (pathPrefix + name).replace(/[^a-z0-9]/gi, '_');
-    let onclick   = '';
+    const slug = node.self ? node.self.slug : '';
+    const nid = 'tree-' + name.replace(/[^a-z0-9]/gi, '_');
+    let onclick = '';
     if (slug && hasKids) onclick = `toggleTree('${nid}');selectCollection('${escH(slug)}')`;
     else if (slug)        onclick = `selectCollection('${escH(slug)}')`;
     else if (hasKids)     onclick = `toggleTree('${nid}')`;
     html += `<div class="tree-genre" id="${nid}">
-      <div class="tree-genre-hdr" style="padding-left:${indent}" onclick="${onclick}" data-slug="${escH(slug)}">
-        <span class="tree-genre-name" style="font-size:${fontSize}">${escH(name)}</span>
+      <div class="tree-genre-hdr" style="padding-left:1.15rem" onclick="${onclick}" data-slug="${escH(slug)}">
+        <span class="tree-genre-name">${escH(name)}</span>
         ${node.self && node.self.total_albums ? `<span class="sb-coll-count">${node.self.total_albums}</span>` : ''}
         ${hasKids ? `<span class="tree-genre-arrow">▶</span>` : ''}
       </div>
-      ${hasKids ? `<div class="tree-sub">${renderRymNodes(node.children, depth + 1, pathPrefix + name + '_')}</div>` : ''}
+      ${hasKids ? `<div class="tree-sub">${[...node.children.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([n,c]) => `<div class="tree-sub-item" data-slug="${escH(c.self?.slug||'')}" onclick="selectCollection('${escH(c.self?.slug||'')}')">${escH(n)}${c.self?.total_albums?`<span class="sb-coll-count" style="margin-left:auto">${c.self.total_albums}</span>`:''}</div>`).join('')}</div>` : ''}
     </div>`;
   }
   return html;
@@ -3124,7 +3202,7 @@ function buildGenrePills() {
   const freq = {};
   for (const a of allAlbums)
     for (const g of (a.genres || []))
-      freq[g] = (freq[g] || 0) + 1;
+      freq[g.name] = (freq[g.name] || 0) + 1;
   const top = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,20).map(e=>e[0]);
   if (!top.length) {
     document.getElementById('genre-pills').innerHTML = '<div class="sb-empty">Sin géneros</div>';
@@ -3173,7 +3251,7 @@ function renderGrid() {
     const idx = parseInt(activeFilter.slice(6));
     f = f.filter(a => a.extraHeard && a.extraHeard[idx]);
   }
-  if (activeGenres.size)  f = f.filter(a => (a.genres||[]).some(g => activeGenres.has(g)));
+  if (activeGenres.size)  f = f.filter(a => (a.genres||[]).some(g => activeGenres.has(g.name)));
   if (activeDecades.size) f = f.filter(a => a.year && activeDecades.has(Math.floor(a.year/10)*10));
   if (activeSort === 'year_asc')  f.sort((a,b) => (a.year||0)-(b.year||0));
   if (activeSort === 'year_desc') f.sort((a,b) => (b.year||0)-(a.year||0));
