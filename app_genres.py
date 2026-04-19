@@ -27,6 +27,8 @@ DB_PATH      = os.environ.get("DB_PATH") or None
 LFM_API_KEY  = os.environ.get("LASTFM_API_KEY") or None
 CAA          = "https://coverartarchive.org/release-group"
 
+_LFM_NO_IMG  = "2a96cbd8b46e442fc41c2b86b821562f"  # Last.fm star placeholder hash
+
 # CDNs que bloquean peticiones desde navegadores externos (ORB/CORS)
 # Se descartan para evitar imágenes rotas; se usa CAA por MBID como fallback
 _BLOCKED_COVER_DOMAINS = ("snmc.io", "albumoftheyear.org", "aoty.org")
@@ -66,6 +68,15 @@ def get_db():
 
 
 # ── Last.fm API ────────────────────────────────────────────────────────────────
+
+def _lfm_image(images: list, size: str = "extralarge") -> str:
+    """Return the best Last.fm image URL, skipping the placeholder star."""
+    for img in images:
+        url = img.get("#text", "")
+        if img.get("size") == size and url and _LFM_NO_IMG not in url:
+            return url
+    return ""
+
 
 def lfm_get(method: str, params: dict) -> dict:
     base = "https://ws.audioscrobbler.com/2.0/"
@@ -603,7 +614,7 @@ def api_enrich_albums():
         return jsonify({"error": "albums debe ser un array"}), 400
     albums = [a for a in albums if isinstance(a, list) and len(a) >= 2][:100]
 
-    LFM_DELAY = 0.22   # ~4.5 req/s, por debajo del límite de 5/s de Last.fm
+    LFM_DELAY = 0.5    # ~2 req/s con jitter
     MB_DELAY  = 1.1    # MusicBrainz: 1 req/s
 
     def generate():
@@ -619,11 +630,7 @@ def api_enrich_albums():
             # ── 1. Last.fm album.getInfo ──────────────────────────────────────
             lfm    = lfm_get("album.getInfo", {"artist": artist, "album": album, "autocorrect": 1})
             lfm_al = lfm.get("album", {})
-            lfm_img = next(
-                (img["#text"] for img in lfm_al.get("image", [])
-                 if img.get("size") == "extralarge" and img.get("#text")),
-                ""
-            )
+            lfm_img  = _lfm_image(lfm_al.get("image", []))
             lfm_mbid = (lfm_al.get("mbid") or "").strip()
 
             if lfm_img:
@@ -691,7 +698,7 @@ def api_album_info():
             "playcount":  al.get("playcount",  ""),
             "tags":  [t["name"] for t in _tags[:6]],
             "wiki":  (al.get("wiki", {}).get("summary", "") or "").split("<a ")[0].strip(),
-            "image": next((i["#text"] for i in al.get("image", []) if i.get("size") == "extralarge"), ""),
+            "image": _lfm_image(al.get("image", [])),
         }
         if not mbid and al.get("mbid"):
             mbid = al["mbid"]
@@ -1501,7 +1508,7 @@ input::placeholder { color: var(--ink3); }
   gap: 0.35rem;
 }
 .tree-genre-hdr:hover { background: var(--bg3); }
-.tree-genre-hdr.active { background: rgba(232,193,74,0.08); border-left: 2px solid var(--accent); padding-left: calc(1.1rem - 2px); }
+.tree-genre-hdr.active { background: rgba(232,193,74,0.08); box-shadow: inset 2px 0 0 var(--accent); }
 .tree-genre-name {
   font-family: var(--sans);
   font-size: 0.74rem;
@@ -2770,44 +2777,20 @@ function renderCollsSidebar(cols) {
 }
 
 function buildRymTree(cols) {
-  const byTopGenre = {};
+  // Build a fully recursive tree from flat collections with tree_path arrays
+  const root = { self: null, children: new Map() };
   const legacy = [];
   for (const c of cols) {
     const tp = c.tree_path;
-    if (!tp) { legacy.push(c); continue; }
-    const top = tp[0];
-    if (!byTopGenre[top]) byTopGenre[top] = { self: null, subs: [] };
-    if (tp.length === 1) byTopGenre[top].self = c;
-    else byTopGenre[top].subs.push({ label: tp[tp.length-1], col: c });
-  }
-  let html = '';
-  const topGenres = Object.keys(byTopGenre).sort();
-  for (const top of topGenres) {
-    const node   = byTopGenre[top];
-    const nid    = 'tree-' + top.replace(/[^a-z0-9]/gi,'_');
-    const selfSlug = node.self ? escH(node.self.slug) : '';
-    const hasSubs  = node.subs.length > 0;
-    html += `<div class="tree-genre" id="${nid}">
-      <div class="tree-genre-hdr"
-           onclick="${hasSubs ? `toggleTree('${nid}');` : ''}${selfSlug ? `selectCollection('${selfSlug}')` : ''}"
-           data-slug="${selfSlug}">
-        <span class="tree-genre-name">${escH(top)}</span>
-        ${hasSubs ? `<span class="tree-genre-arrow">▶</span>` : ''}
-        ${node.self && node.self.total_albums ? `<span class="sb-coll-count">${node.self.total_albums}</span>` : ''}
-      </div>`;
-    if (hasSubs) {
-      html += `<div class="tree-sub">`;
-      for (const sub of node.subs.sort((a,b)=>a.label.localeCompare(b.label))) {
-        html += `<div class="tree-sub-item" data-slug="${escH(sub.col.slug)}"
-            onclick="selectCollection('${escH(sub.col.slug)}')">
-          ${escH(sub.label)}
-          ${sub.col.total_albums ? `<span class="sb-coll-count" style="margin-left:auto">${sub.col.total_albums}</span>` : ''}
-        </div>`;
-      }
-      html += `</div>`;
+    if (!tp || tp.length === 0) { legacy.push(c); continue; }
+    let node = root;
+    for (const seg of tp) {
+      if (!node.children.has(seg)) node.children.set(seg, { self: null, children: new Map() });
+      node = node.children.get(seg);
     }
-    html += `</div>`;
+    node.self = c;
   }
+  let html = renderRymNodes(root.children, 1, '');
   if (legacy.length) {
     html += `<div style="padding:0.3rem 0.9rem 0.1rem;font-family:var(--mono);font-size:0.55rem;color:var(--ink3);letter-spacing:.1em;text-transform:uppercase;border-top:1px solid var(--border);margin-top:0.3rem">Otros</div>`;
     for (const c of legacy) {
@@ -2816,6 +2799,30 @@ function buildRymTree(cols) {
         ${c.total_albums ? `<span class="sb-coll-count">${c.total_albums}</span>` : ''}
       </div>`;
     }
+  }
+  return html;
+}
+
+function renderRymNodes(children, depth, pathPrefix) {
+  let html = '';
+  const indent = (0.5 + depth * 0.65) + 'rem';
+  const fontSize = Math.max(0.68, 0.74 - (depth - 1) * 0.02) + 'rem';
+  for (const [name, node] of [...children.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const hasKids = node.children.size > 0;
+    const slug    = node.self ? node.self.slug : '';
+    const nid     = 'tree-' + (pathPrefix + name).replace(/[^a-z0-9]/gi, '_');
+    let onclick   = '';
+    if (slug && hasKids) onclick = `toggleTree('${nid}');selectCollection('${escH(slug)}')`;
+    else if (slug)        onclick = `selectCollection('${escH(slug)}')`;
+    else if (hasKids)     onclick = `toggleTree('${nid}')`;
+    html += `<div class="tree-genre" id="${nid}">
+      <div class="tree-genre-hdr" style="padding-left:${indent}" onclick="${onclick}" data-slug="${escH(slug)}">
+        <span class="tree-genre-name" style="font-size:${fontSize}">${escH(name)}</span>
+        ${node.self && node.self.total_albums ? `<span class="sb-coll-count">${node.self.total_albums}</span>` : ''}
+        ${hasKids ? `<span class="tree-genre-arrow">▶</span>` : ''}
+      </div>
+      ${hasKids ? `<div class="tree-sub">${renderRymNodes(node.children, depth + 1, pathPrefix + name + '_')}</div>` : ''}
+    </div>`;
   }
   return html;
 }
