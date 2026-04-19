@@ -670,7 +670,7 @@ def api_enrich_albums():
             albums = []
         else:
             try:
-                albums = json.loads(base64.b64decode(raw).decode("utf-8"))
+                albums = json.loads(base64.b64decode(raw.replace(' ', '+')).decode("utf-8"))
             except Exception:
                 albums = json.loads(raw)
     except Exception:
@@ -3113,7 +3113,7 @@ function enrichMissingCovers() {
       toEnrich.push({ idx: i, artist: allAlbums[i].artist, title: allAlbums[i].title });
   }
   if (!toEnrich.length) return;
-  const albumsParam = btoa(unescape(encodeURIComponent(JSON.stringify(toEnrich.map(a => [a.artist, a.title])))));
+  const albumsParam = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(toEnrich.map(a => [a.artist, a.title]))))));
   _enrichEs = new EventSource(`/api/enrich_albums?albums=${albumsParam}`);
   _enrichEs.onmessage = (e) => {
     const msg = JSON.parse(e.data);
