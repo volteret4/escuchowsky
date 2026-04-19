@@ -11,6 +11,7 @@ import os
 import re
 import json
 import time
+import base64
 import sqlite3
 import argparse
 import subprocess
@@ -663,10 +664,15 @@ def api_enrich_albums():
     para álbumes que Last.fm no conoce.
     Devuelve un evento por álbum con {i, artist, album, mbid, cover_url, mb_title, mb_artist, date}.
     """
-    import base64
     raw = request.args.get("albums", "")
     try:
-        albums = json.loads(base64.b64decode(raw).decode("utf-8") if raw else "[]")
+        if not raw:
+            albums = []
+        else:
+            try:
+                albums = json.loads(base64.b64decode(raw).decode("utf-8"))
+            except Exception:
+                albums = json.loads(raw)
     except Exception:
         return jsonify({"error": "albums param inválido"}), 400
     if not isinstance(albums, list):
