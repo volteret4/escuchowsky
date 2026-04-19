@@ -56,9 +56,13 @@ def _rym_load() -> None:
 
 _rym_load()
 
-# CDNs que bloquean peticiones desde navegadores externos (ORB/CORS)
-# Se descartan para evitar imágenes rotas; se usa CAA por MBID como fallback
-_BLOCKED_COVER_DOMAINS = ("snmc.io", "albumoftheyear.org", "aoty.org")
+# Solo se permiten portadas de CAA y Discogs; el resto se descarta
+_ALLOWED_COVER_DOMAINS = ("coverartarchive.org", "archive.org", "discogs.com", "discogs-images.com", "lastfm.freetls.fastly.net", "lastfm.freetls")
+
+def _is_allowed_cover(url: str) -> bool:
+    if not url or url.startswith("data:"):
+        return False
+    return any(d in url for d in _ALLOWED_COVER_DOMAINS)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -284,7 +288,7 @@ def get_collection_albums(slug: str) -> list[dict]:
         d = dict(r)
         d["number"] = d["rank"] or (i + 1)
         raw = d.get("cover_url") or ""
-        if raw.startswith("data:") or any(dom in raw for dom in _BLOCKED_COVER_DOMAINS):
+        if not _is_allowed_cover(raw):
             raw = ""
         d["cover"] = raw or (f"{CAA}/{d['mbid']}/front-500" if d.get("mbid") else "")
         d["genres"] = genres_map.get(d["id"], [])
@@ -2107,6 +2111,9 @@ input::placeholder { color: var(--ink3); }
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
+// Limpiar caché de proxy de versiones anteriores
+try { localStorage.removeItem('coverProxyMbids'); } catch(e) {}
+
 let allAlbums      = [];
 let heardCache     = null;     // { user, pairs:[[a,t],...], count, fetched_at }
 let collCache      = {};       // slug → albums[]
