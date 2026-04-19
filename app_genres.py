@@ -663,9 +663,10 @@ def api_enrich_albums():
     para álbumes que Last.fm no conoce.
     Devuelve un evento por álbum con {i, artist, album, mbid, cover_url, mb_title, mb_artist, date}.
     """
-    raw = request.args.get("albums", "[]")
+    import base64
+    raw = request.args.get("albums", "")
     try:
-        albums = json.loads(raw)
+        albums = json.loads(base64.b64decode(raw).decode("utf-8") if raw else "[]")
     except Exception:
         return jsonify({"error": "albums param inválido"}), 400
     if not isinstance(albums, list):
@@ -3106,7 +3107,7 @@ function enrichMissingCovers() {
       toEnrich.push({ idx: i, artist: allAlbums[i].artist, title: allAlbums[i].title });
   }
   if (!toEnrich.length) return;
-  const albumsParam = encodeURIComponent(JSON.stringify(toEnrich.map(a => [a.artist, a.title])));
+  const albumsParam = btoa(unescape(encodeURIComponent(JSON.stringify(toEnrich.map(a => [a.artist, a.title])))));
   _enrichEs = new EventSource(`/api/enrich_albums?albums=${albumsParam}`);
   _enrichEs.onmessage = (e) => {
     const msg = JSON.parse(e.data);
