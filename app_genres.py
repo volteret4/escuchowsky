@@ -743,8 +743,8 @@ def api_album_info():
     Obtiene info de un álbum desde Last.fm (album.getInfo + artist.getInfo).
     Si no se provee mbid, busca en MusicBrainz.
     """
-    artist = request.args.get("artist", "").strip()
-    album  = request.args.get("album",  "").strip()
+    artist = request.args.get("artist", "").replace('\n', ' ').replace('\r', '').strip()
+    album  = request.args.get("album",  "").replace('\n', ' ').replace('\r', '').strip()
     mbid   = request.args.get("mbid",   "").strip()
     if not artist and not album:
         return jsonify({"error": "artist/album requeridos"}), 400
@@ -2304,7 +2304,7 @@ function openDetailPanel(ref) {
   document.body.style.overflow = 'hidden';
 
   // Fetch LFM + MB info asynchronously
-  fetchAlbumInfo(artist || '', title || '', mbid || '');
+  fetchAlbumInfo((artist || '').replace(/[\n\r]/g, ' '), (title || '').replace(/[\n\r]/g, ' '), mbid || '');
 }
 
 function closeDetailPanel() {
