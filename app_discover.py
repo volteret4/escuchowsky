@@ -51,7 +51,7 @@ def lfm_get(method: str, params: dict) -> dict:
     url = base + "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"User-Agent": "tumtumpa/1.0 (viciosmusicales@gmail.com)"})
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=20) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
@@ -121,10 +121,12 @@ def api_scrobbles():
         last_scrobble_artist = ""
         last_scrobble_track  = ""
 
+        page_delay = 0.5 + random.random() * 0.4  # se incrementa si hay throttling
+
         while True:
-            # Retry transient Last.fm errors with exponential backoff
+            # Retry transient Last.fm errors con backoff adaptado al tipo de error
             last_error = None
-            for attempt in range(3):
+            for attempt in range(6):
                 data = lfm_get("user.getRecentTracks", {
                     "user": username, "limit": 200, "page": page,
                 })
@@ -132,17 +134,23 @@ def api_scrobbles():
                 if "error" not in data or rt:
                     last_error = None
                     break
-                last_error = data.get("message") or data.get("error") or "Error Last.fm"
-                print(f"[lfm] error p{page} intento {attempt+1}: {last_error}", flush=True)
-                if attempt < 2:
-                    # Exponential backoff: 10s, 30s — da tiempo a que Last.fm levante el rate limit
-                    time.sleep(10 * (3 ** attempt))
+                err_code   = data.get("error")
+                last_error = data.get("message") or str(err_code) or "Error Last.fm"
+                print(f"[lfm] error p{page} intento {attempt+1} (código {err_code}): {last_error}", flush=True)
+                if attempt < 5:
+                    if err_code == 29:
+                        # Quota exceeded — esperar más tiempo; también ralentizar el resto
+                        wait = 60 * (attempt + 1)   # 60s, 120s, 180s, 240s, 300s
+                        page_delay = max(page_delay, 1.5)
+                    else:
+                        wait = 10 * (3 ** min(attempt, 3))  # 10s, 30s, 90s, 270s, 270s
+                    yield f"data: {json.dumps({'waiting': wait, 'page': page, 'total_pages': total_pages, 'count': len(heard_counts)})}\n\n"
+                    time.sleep(wait)
             if last_error:
                 if page == 1:
                     yield f"data: {json.dumps({'error': last_error})}\n\n"
                 else:
-                    # Partial fetch — report error so client discards incomplete data
-                    yield f"data: {json.dumps({'error': f'Descarga incompleta: error en página {page} de {total_pages} tras 3 intentos. Vuelve a intentarlo.'})}\n\n"
+                    yield f"data: {json.dumps({'error': f'Descarga incompleta: error en página {page} de {total_pages} tras 6 intentos. Vuelve a intentarlo.'})}\n\n"
                 return
 
             # Update total_pages on every page — take the max in case LFM
@@ -199,7 +207,7 @@ def api_scrobbles():
             if page >= total_pages:
                 break
             page += 1
-            time.sleep(0.5 + random.random() * 0.4)
+            time.sleep(page_delay + random.random() * 0.4)
 
         heard_pairs    = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
         # heard_songs: [norm_a, norm_track, orig_a, orig_album, orig_track, count]
@@ -2547,7 +2555,8 @@ async function addExtraUser() {
     const [userInfo, lfmResult] = await Promise.all([
       fetch(checkUserEndpoint(user, src)).then(r=>r.json()).catch(()=>null),
       fetchScrobblesSSE(user, msg => {
-        prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+        if (msg._waiting) prog.textContent = `⏳ Límite Last.fm — esperando ${msg.waiting}s… (pág ${msg.page}/${msg.total_pages})`;
+        else prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
       }, src),
     ]);
     const heard     = lfmResult.heard;
@@ -2671,7 +2680,8 @@ async function addExtraUserByName(username, btn) {
     const [userInfo, lfmResult] = await Promise.all([
       fetch(checkUserEndpoint(username, src)).then(r=>r.json()).catch(()=>null),
       fetchScrobblesSSE(username, msg => {
-        prog.textContent = `${username}: página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+        if (msg._waiting) prog.textContent = `⏳ Límite Last.fm — esperando ${msg.waiting}s… (pág ${msg.page}/${msg.total_pages})`;
+        else prog.textContent = `${username}: página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
       }, src),
     ]);
     const heard      = lfmResult.heard;
@@ -2824,6 +2834,7 @@ async function fetchScrobblesSSE(user, onProgress, source = 'lfm') {
       const msg = JSON.parse(part.slice(6));
       if (msg.error) throw new Error(msg.error);
       if (msg.done) result = msg;
+      else if (msg.waiting) onProgress({ ...msg, _waiting: true });
       else onProgress(msg);
     }
   }
@@ -3760,7 +3771,8 @@ async function doLoadUserSb() {
     const [userInfo, lfmResult] = await Promise.all([
       fetch(checkUserEndpoint(user, src)).then(r=>r.json()).catch(()=>null),
       fetchScrobblesSSE(user, msg => {
-        prog.textContent = `Pág ${msg.page}/${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
+        if (msg._waiting) prog.textContent = `⏳ Límite Last.fm — esperando ${msg.waiting}s… (${msg.page}/${msg.total_pages})`;
+        else prog.textContent = `Pág ${msg.page}/${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
       }, src),
     ]);
     const heard = lfmResult.heard;
