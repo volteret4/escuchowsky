@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY .collections_ignore .
 COPY app_discover.py .
 COPY sops_env.py .
+COPY img ./img
 
 # La DB se monta como volumen en runtime
 ENV PYTHONUNBUFFERED=1
