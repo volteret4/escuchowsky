@@ -17,7 +17,7 @@ import argparse
 import urllib.request
 import urllib.parse
 import urllib.error
-from flask import Flask, jsonify, request, render_template_string, abort, Response, stream_with_context
+from flask import Flask, jsonify, request, render_template_string, abort, Response, stream_with_context, send_from_directory
 
 app = Flask(__name__)
 
@@ -93,6 +93,13 @@ def mb_search_release_group(artist: str, album: str) -> dict:
     return {}
 
 
+# ── Static assets ─────────────────────────────────────────────────────────────
+
+@app.route("/img/<path:filename>")
+def serve_img(filename):
+    return send_from_directory("img", filename)
+
+
 # ── API endpoints ──────────────────────────────────────────────────────────────
 
 
@@ -121,7 +128,7 @@ def api_scrobbles():
         last_scrobble_artist = ""
         last_scrobble_track  = ""
 
-        page_delay = 0.5 + random.random() * 0.4  # se incrementa si hay throttling
+        page_delay = 1.0  # segundos base entre páginas; sube a 2.0 si hay throttling
 
         while True:
             # Retry transient Last.fm errors con backoff adaptado al tipo de error
@@ -141,7 +148,7 @@ def api_scrobbles():
                     if err_code == 29:
                         # Quota exceeded — esperar más tiempo; también ralentizar el resto
                         wait = 60 * (attempt + 1)   # 60s, 120s, 180s, 240s, 300s
-                        page_delay = max(page_delay, 1.5)
+                        page_delay = 2.0
                     else:
                         wait = 10 * (3 ** min(attempt, 3))  # 10s, 30s, 90s, 270s, 270s
                     yield f"data: {json.dumps({'waiting': wait, 'page': page, 'total_pages': total_pages, 'count': len(heard_counts)})}\n\n"
@@ -207,7 +214,7 @@ def api_scrobbles():
             if page >= total_pages:
                 break
             page += 1
-            time.sleep(page_delay + random.random() * 0.4)
+            time.sleep(page_delay + random.random() * 0.5)
 
         heard_pairs    = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
         # heard_songs: [norm_a, norm_track, orig_a, orig_album, orig_track, count]
@@ -908,7 +915,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>tumtumpa</title>
-<link rel="icon" type="image/png" href="./img/little_chicken.png" />
+<link rel="icon" type="image/png" href="/img/little_chicken.png" />
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#7c6fff">
 <meta name="apple-mobile-web-app-capable" content="yes">
