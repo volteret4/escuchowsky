@@ -259,6 +259,7 @@ def render_html(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RYM Genre Tree</title>
+<link rel="icon" type="image/png" href="/img/boar.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="icon" type="image/png" href="/images/discount.png" />
 <script defer src="https://cloud.umami.is/script.js" data-website-id="c8ed5b67-0cf6-4b14-b498-a324fd4371ad"></script>

@@ -908,6 +908,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>tumtumpa</title>
+<link rel="icon" type="image/png" href="/img/little_chicken.png" />
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#7c6fff">
 <meta name="apple-mobile-web-app-capable" content="yes">
