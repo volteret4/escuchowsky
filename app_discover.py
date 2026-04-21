@@ -106,9 +106,9 @@ def serve_img(filename):
 @app.route("/api/scrobbles")
 def api_scrobbles():
     """
-    Descarga el historial completo via user.getRecentTracks paginado.
-    Responde en formato SSE (text/event-stream) enviando progreso por página
-    y al final el payload completo con todos los pares [norm_artist, norm_title].
+    Descarga el historial completo via user.getTopAlbums + user.getTopTracks (SSE).
+    Mucho más eficiente que getRecentTracks: ~50-200 req en vez de 2000+ para usuarios
+    con 400k+ scrobbles. Mismo formato de salida para compatibilidad con el cliente.
     """
     username = request.args.get("user", "").strip()
     if not username:
@@ -116,110 +116,142 @@ def api_scrobbles():
     if not LFM_API_KEY:
         return jsonify({"error": "Last.fm API key no configurada"}), 500
 
-    def generate():
-        # (norm_a, norm_album) -> [orig_a, orig_album, count]
-        heard_counts    = {}
-        # (norm_a, norm_track) -> [orig_a, orig_album, orig_track, count]
-        heard_songs     = {}
-        heard_artists   = set()   # norm_a para TODOS los tracks (con o sin álbum)
-        page            = 1
-        total_pages     = None
-        last_scrobble_ts     = 0
-        last_scrobble_artist = ""
-        last_scrobble_track  = ""
-
-        page_delay = 1.0  # segundos base entre páginas; sube a 2.0 si hay throttling
-
+    def _lfm_paged(method, result_key, username, extra_params=None):
+        """
+        Generador que pagina un método LFM y yielda (items_list, page, total_pages).
+        result_key: clave en la respuesta que contiene el dict con 'track'/'album'/@attr.
+        Incluye retry con backoff para error 29 (quota).
+        """
+        page_delay = 1.0
+        page = 1
+        total_pages = None
+        params = {"user": username, "limit": 200, "page": page, **(extra_params or {})}
         while True:
-            # Retry transient Last.fm errors con backoff adaptado al tipo de error
+            params["page"] = page
             last_error = None
             for attempt in range(6):
-                data = lfm_get("user.getRecentTracks", {
-                    "user": username, "limit": 200, "page": page,
-                })
-                rt = data.get("recenttracks", {})
-                if "error" not in data or rt:
+                data = lfm_get(method, params)
+                container = data.get(result_key, {})
+                if "error" not in data or container:
                     last_error = None
                     break
-                err_code   = data.get("error")
+                err_code = data.get("error")
                 last_error = data.get("message") or str(err_code) or "Error Last.fm"
-                print(f"[lfm] error p{page} intento {attempt+1} (código {err_code}): {last_error}", flush=True)
+                print(f"[lfm] {method} p{page} intento {attempt+1} (código {err_code}): {last_error}", flush=True)
                 if attempt < 5:
+                    wait = 60 * (attempt + 1) if err_code == 29 else 10 * (3 ** min(attempt, 3))
                     if err_code == 29:
-                        # Quota exceeded — esperar más tiempo; también ralentizar el resto
-                        wait = 60 * (attempt + 1)   # 60s, 120s, 180s, 240s, 300s
                         page_delay = 2.0
-                    else:
-                        wait = 10 * (3 ** min(attempt, 3))  # 10s, 30s, 90s, 270s, 270s
-                    yield f"data: {json.dumps({'waiting': wait, 'page': page, 'total_pages': total_pages, 'count': len(heard_counts)})}\n\n"
+                    yield None, page, total_pages, wait  # señal de espera al caller
                     time.sleep(wait)
             if last_error:
-                if page == 1:
-                    yield f"data: {json.dumps({'error': last_error})}\n\n"
-                else:
-                    yield f"data: {json.dumps({'error': f'Descarga incompleta: error en página {page} de {total_pages} tras 6 intentos. Vuelve a intentarlo.'})}\n\n"
+                yield None, page, total_pages, -1  # señal de error fatal al caller
                 return
-
-            # Update total_pages on every page — take the max in case LFM
-            # undershoots on the first response.
-            attrs = rt.get("@attr", {})
+            attrs = container.get("@attr", {})
             try:
                 tp = max(1, int(attrs.get("totalPages", 1)))
             except (ValueError, TypeError):
                 tp = 1
             if total_pages is None or tp > total_pages:
                 total_pages = tp
+            items_key = list(k for k in container if k != "@attr")
+            items = container.get(items_key[0], []) if items_key else []
+            if isinstance(items, dict):
+                items = [items]
+            yield items, page, total_pages, 0
+            if page >= total_pages:
+                return
+            page += 1
+            time.sleep(page_delay + random.random() * 0.4)
 
-            tracks = rt.get("track", [])
-            if isinstance(tracks, dict):
-                tracks = [tracks]
-            if not tracks:
-                break
+    def generate():
+        heard_counts = {}   # (norm_a, norm_album) -> [orig_a, orig_album, count]
+        heard_songs  = {}   # (norm_a, norm_track) -> [orig_a, orig_album, orig_track, count]
+        heard_artists = set()
+        last_scrobble_ts = 0
+        last_scrobble_artist = ""
+        last_scrobble_track = ""
+        total_album_pages = 0
 
-            for t in tracks:
-                # saltar la pista en reproducción actual (no tiene fecha)
-                if isinstance(t.get("@attr"), dict) and t["@attr"].get("nowplaying"):
-                    continue
-                artist = t.get("artist", {})
-                artist = artist.get("#text", "") if isinstance(artist, dict) else str(artist)
-                album  = t.get("album", {})
-                album  = album.get("#text", "") if isinstance(album, dict) else str(album)
-                # capturar el scrobble más reciente (primer track real de página 1)
-                if last_scrobble_ts == 0:
-                    d = t.get("date", {})
-                    try:
-                        last_scrobble_ts = int(d.get("uts", 0)) if isinstance(d, dict) else 0
-                    except (ValueError, TypeError):
-                        last_scrobble_ts = 0
-                    last_scrobble_artist = artist
-                    last_scrobble_track  = t.get("name", "")
-                track_name = t.get("name", "")
+        # ── Fase 1: álbumes (getTopAlbums) ──────────────────────────────────
+        for items, page, total_pages, signal in _lfm_paged(
+            "user.getTopAlbums", "topalbums", username, {"period": "overall"}
+        ):
+            if signal == -1:
+                yield f"data: {json.dumps({'error': 'Error descargando álbumes de Last.fm'})}\n\n"
+                return
+            if signal > 0:
+                yield f"data: {json.dumps({'waiting': signal, 'page': page, 'total_pages': total_pages, 'count': len(heard_counts)})}\n\n"
+                continue
+            if items is None:
+                continue
+            for a in items:
+                artist_obj = a.get("artist", {})
+                artist = artist_obj.get("name", "") if isinstance(artist_obj, dict) else str(artist_obj)
+                album = a.get("name", "")
+                try:
+                    count = int(a.get("playcount", 1) or 1)
+                except (ValueError, TypeError):
+                    count = 1
                 if artist:
                     heard_artists.add(_norm(artist))
                 if artist and album:
                     key = (_norm(artist), _norm(album))
-                    if key not in heard_counts:
-                        heard_counts[key] = [artist, album, 1]
-                    else:
-                        heard_counts[key][2] += 1
+                    heard_counts[key] = [artist, album, max(count, heard_counts.get(key, [0,0,0])[2])]
+            total_album_pages = total_pages or 0
+            yield f"data: {json.dumps({'page': page, 'total_pages': total_album_pages, 'count': len(heard_counts)})}\n\n"
+
+        # ── Fase 2: canciones (getTopTracks, todas las páginas) ─────────────
+        for items, page, total_pages, signal in _lfm_paged(
+            "user.getTopTracks", "toptracks", username, {"period": "overall"}
+        ):
+            if signal == -1:
+                break  # canciones son opcionales, no fallar
+            if signal > 0:
+                yield f"data: {json.dumps({'waiting': signal, 'page': page, 'total_pages': total_pages, 'count': len(heard_counts)})}\n\n"
+                continue
+            if items is None:
+                continue
+            for t in items:
+                artist_obj = t.get("artist", {})
+                artist = artist_obj.get("name", "") if isinstance(artist_obj, dict) else str(artist_obj)
+                track_name = t.get("name", "")
+                album_obj = t.get("album", {})
+                album = album_obj.get("#text", "") if isinstance(album_obj, dict) else ""
+                try:
+                    count = int(t.get("playcount", 1) or 1)
+                except (ValueError, TypeError):
+                    count = 1
                 if artist and track_name:
                     skey = (_norm(artist), _norm(track_name))
-                    if skey not in heard_songs:
-                        heard_songs[skey] = [artist, album, track_name, 1]
-                    else:
-                        heard_songs[skey][3] += 1
+                    heard_songs[skey] = [artist, album, track_name, max(count, heard_songs.get(skey, [0,0,0,0])[3])]
+            # progreso fase 2 — sumar páginas de álbumes para no resetear el contador
+            yield f"data: {json.dumps({'page': total_album_pages + page, 'total_pages': total_album_pages + (total_pages or 1), 'count': len(heard_counts)})}\n\n"
 
-            yield f"data: {json.dumps({'page': page, 'total_pages': total_pages, 'count': len(heard_counts)})}\n\n"
-
-            if page >= total_pages:
+        # ── Fase 3: 1 página de recentTracks para last_scrobble info ─────────
+        recent = lfm_get("user.getRecentTracks", {"user": username, "limit": 1, "page": 1})
+        rt = recent.get("recenttracks", {})
+        if rt:
+            tracks = rt.get("track", [])
+            if isinstance(tracks, dict):
+                tracks = [tracks]
+            for t in tracks:
+                if isinstance(t.get("@attr"), dict) and t["@attr"].get("nowplaying"):
+                    continue
+                artist_obj = t.get("artist", {})
+                artist = artist_obj.get("#text", "") if isinstance(artist_obj, dict) else str(artist_obj)
+                d = t.get("date", {})
+                try:
+                    last_scrobble_ts = int(d.get("uts", 0)) if isinstance(d, dict) else 0
+                except (ValueError, TypeError):
+                    last_scrobble_ts = 0
+                last_scrobble_artist = artist
+                last_scrobble_track = t.get("name", "")
                 break
-            page += 1
-            time.sleep(page_delay + random.random() * 0.5)
 
         heard_pairs    = [[k[0], k[1], v[0], v[1], v[2]] for k, v in heard_counts.items()]
-        # heard_songs: [norm_a, norm_track, orig_a, orig_album, orig_track, count]
         heard_song_list = [[k[0], k[1], v[0], v[1], v[2], v[3]] for k, v in heard_songs.items()]
-        yield f"data: {json.dumps({'done': True, 'user': username, 'count': len(heard_pairs), 'fetched_at': int(time.time()), 'heard': heard_pairs, 'heard_songs': heard_song_list, 'heard_artists': list(heard_artists), 'last_scrobble_ts': last_scrobble_ts, 'last_scrobble_artist': last_scrobble_artist, 'last_scrobble_track': last_scrobble_track, 'total_pages': total_pages or 0})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'user': username, 'count': len(heard_pairs), 'fetched_at': int(time.time()), 'heard': heard_pairs, 'heard_songs': heard_song_list, 'heard_artists': list(heard_artists), 'last_scrobble_ts': last_scrobble_ts, 'last_scrobble_artist': last_scrobble_artist, 'last_scrobble_track': last_scrobble_track, 'total_pages': total_album_pages})}\n\n"
 
     return Response(
         stream_with_context(generate()),
