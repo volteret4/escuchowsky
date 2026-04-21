@@ -122,7 +122,7 @@ def api_scrobbles():
         result_key: clave en la respuesta que contiene el dict con 'track'/'album'/@attr.
         Incluye retry con backoff para error 29 (quota).
         """
-        page_delay = 1.0
+        page_delay = 0.5
         page = 1
         total_pages = None
         params = {"user": username, "limit": 200, "page": page, **(extra_params or {})}
@@ -1891,6 +1891,10 @@ input::placeholder { color: var(--ink3); }
 .sb-search-row input { flex: 1; min-width: 0; font-size: 0.72rem; padding: 0.35rem 0.5rem; }
 .sb-search-row .btn-sm { font-size: 0.6rem; padding: 0.28rem 0.45rem; white-space: nowrap; flex-shrink: 0; }
 .sb-progress-txt { font-family: var(--mono); font-size: 0.63rem; color: var(--ink3); min-height: 1.1em; padding: 0.18rem 0 0; }
+#sb-cache-notice { margin: 0.4rem 0 0.2rem; padding: 0.45rem 0.6rem; background: color-mix(in srgb, var(--warn,#c8820a) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn,#c8820a) 40%, transparent); border-radius: var(--radius); font-size: 0.62rem; color: var(--ink2); line-height: 1.45; }
+#sb-cache-notice b { color: color-mix(in srgb, var(--warn,#c8820a) 80%, var(--ink)); }
+#sb-cache-notice .notice-btns { display: flex; gap: 0.4rem; margin-top: 0.35rem; flex-wrap: wrap; }
+#sb-cache-notice button { font-size: 0.6rem; padding: 0.2rem 0.5rem; }
 .sb-search-area .source-radios { margin: 0.25rem 0 0; gap: 0.6rem; }
 .sb-search-area .source-radios label { font-size: 0.62rem; }
 .sb-user-item { padding: 0.38rem 0.75rem; border-top: 1px solid var(--border); }
@@ -2326,6 +2330,7 @@ input::placeholder { color: var(--ink3); }
             </div>
             <div id="sb-progress" class="sb-progress-txt"></div>
           </div>
+          <div id="sb-cache-notice" style="display:none"></div>
           <div id="sb-users-list"></div>
           <div class="sb-friends-section">
             <button id="sb-btn-friends" class="sb-friends-btn">Amigos ▾</button>
@@ -3797,6 +3802,50 @@ function sbSavePrimaryJson() {
   URL.revokeObjectURL(a.href);
 }
 
+async function idbExportAll() {
+  const sessions = await idbList();
+  if (!sessions.length) return;
+  const yt_ids = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || '{}');
+  const covers = JSON.parse(localStorage.getItem(ENRICH_CACHE_KEY) || '{}');
+  const blob = new Blob([JSON.stringify({ version: 1, exported_at: Date.now(), sessions, yt_ids, covers }, null, 0)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `tumtumpa_backup_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function showCacheNotice() {
+  const notice = document.getElementById('sb-cache-notice');
+  if (!notice || notice.dataset.shown) return;
+  const sessions = await idbList();
+  const secondarySessions = sessions.filter(s => s.user.toLowerCase() !== (heardCache?.user||'').toLowerCase());
+  if (!secondarySessions.length) return;
+  const oldest = secondarySessions.sort((a,b) => a.fetched_at - b.fetched_at)[0];
+  const oldestDate = oldest ? new Date(oldest.fetched_at * 1000).toLocaleDateString() : '';
+  let storageInfo = '';
+  if (navigator.storage?.estimate) {
+    try {
+      const { usage, quota } = await navigator.storage.estimate();
+      const pct = Math.round(usage / quota * 100);
+      const usedMB = (usage / 1048576).toFixed(0);
+      storageInfo = ` (almacenamiento: ${pct}%, ${usedMB} MB usados)`;
+    } catch {}
+  }
+  notice.dataset.shown = '1';
+  notice.style.display = '';
+  notice.innerHTML = `
+    <b>⚠ Aviso de caché</b>${storageInfo}<br>
+    Tienes <b>${secondarySessions.length}</b> usuario${secondarySessions.length > 1 ? 's' : ''} secundario${secondarySessions.length > 1 ? 's' : ''} guardado${secondarySessions.length > 1 ? 's' : ''}.
+    Si se agota el espacio del navegador al añadir uno nuevo, el más antiguo
+    (<b>${escH(oldest?.user || '')}</b>, descargado el ${oldestDate}) podría eliminarse automáticamente.
+    <b>Se recomienda hacer una copia de seguridad antes de continuar.</b>
+    <div class="notice-btns">
+      <button class="btn-sm" onclick="idbExportAll()">↓ Exportar todo (backup)</button>
+      <button class="btn-sm" onclick="this.closest('#sb-cache-notice').style.display='none';delete this.closest('#sb-cache-notice').dataset.shown">✕ Cerrar</button>
+    </div>`;
+}
+
 async function doLoadUserSb() {
   const inp = document.getElementById('sb-inp-user');
   const prog = document.getElementById('sb-progress');
@@ -3806,6 +3855,7 @@ async function doLoadUserSb() {
   btn.disabled = true;
   const addAsSecondary = !!heardCache && heardCache.user.toLowerCase() !== user.toLowerCase();
   const src = sbSource();
+  if (addAsSecondary) await showCacheNotice();
   try {
     prog.textContent = src === 'lb' ? 'Conectando con ListenBrainz...' : 'Conectando con Last.fm...';
     const [userInfo, lfmResult] = await Promise.all([
@@ -3965,12 +4015,28 @@ function openIDB() {
 }
 async function idbSave(data) {
   const db = await openIDB();
-  return new Promise((resolve, reject) => {
+  const _put = payload => new Promise((resolve, reject) => {
     const tx = db.transaction(IDB_STORE, 'readwrite');
-    tx.objectStore(IDB_STORE).put({ ...data, user: data.user.toLowerCase() });
+    tx.objectStore(IDB_STORE).put({ ...payload, user: payload.user.toLowerCase() });
     tx.oncomplete = resolve;
     tx.onerror    = e => reject(e.target.error);
   });
+  try {
+    return await _put(data);
+  } catch(e) {
+    if (e.name !== 'QuotaExceededError') throw e;
+    // Sin canciones (songs pueden ser varios MB para usuarios grandes)
+    console.warn('[idb] QuotaExceededError — guardando sin canciones');
+    try {
+      return await _put({ ...data, songs: [] });
+    } catch(e2) {
+      if (e2.name !== 'QuotaExceededError') throw e2;
+      // Sin heard tampoco — solo metadatos para que el usuario aparezca en la lista
+      console.warn('[idb] QuotaExceededError — guardando solo metadatos');
+      const { heard, songs, ...meta } = data;
+      return await _put({ ...meta, heard: [], songs: [], partial: true }).catch(() => null);
+    }
+  }
 }
 async function idbLoad(username) {
   const db = await openIDB();
