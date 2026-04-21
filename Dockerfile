@@ -1,4 +1,4 @@
-FROM owasp/modsecurity-crs:nginx
+FROM owasp/modsecurity-crs:nginx@sha256:d5075e29201de332751b1a691186944ae0af1f4d9dda37275daa342d18117902
 
 USER root
 # Eliminar config de servidor por defecto de la imagen OWASP

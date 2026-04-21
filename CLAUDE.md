@@ -1,100 +1,177 @@
-# CLAUDE.md
+# CLAUDE.md / CLOUD.md — Security Mission
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Contexto del proyecto
 
-## Server Infrastructure
+Este proyecto no se ejecuta en el servidor local desde el que se gestiona, sino en un servidor externo alojado en Amazon.
 
-Corriendo en AWS EC2 con Docker rootless bajo un usuario sin acceso sudo:
+La arquitectura actual incluye:
 
-- Puertos abiertos (consola AWS):
-  - 80 → iptables → 8085 (0.0.0.0/0)
-  - 443 → iptables → 8443 (0.0.0.0/0)
-  - 2245 (SSH custom, solo mi IP, solo llave SSH)
-- CrowdSec con nginx-bouncer y firewall-bouncer leyendo logs de nginx y Flask
-- Servidores locales disponibles para heavy-lifting y evitar carga en EC2
+* Dos aplicaciones Python (Flask + Gunicorn) en contenedores separados
+* Un contenedor Nginx actuando como reverse proxy
+* ModSecurity (WAF) integrado en Nginx
+* Docker en modo rootless
+* CrowdSec analizando logs del sistema y aplicaciones
+* Monitorización externa mediante Prometheus y Grafana (en otro servidor independiente)
+* Exposición pública limitada a puertos 80 y 443, redirigidos mediante iptables hacia Nginx
+* Certificados ssl para las paginas, y uno que solo puede uasr prometheus renovados con acme.sh
 
-## What This Is
+---
 
-**Escuchowsky** es una app de descubrimiento musical que cruza el historial de Last.fm del usuario con colecciones curadas de RateYourMusic (RYM) para mostrar qué álbumes no ha escuchado aún.
+## Objetivo principal
 
-Dos aplicaciones Flask independientes, cada una con su propio dominio y contenedor:
+El objetivo de este proyecto es único y no debe desviarse:
 
-- **escuchowsky** (`app_genres.py`, port 5001) — mustlisten: colecciones y árbol de géneros de RYM
-- **tumtumpa** (`app_discover.py`, port 5001) — mustdiscover: comparar con amigos de Last.fm
+> **Asegurar completamente el servidor y todos los componentes que ejecuta.**
 
-## Common Commands
+No estamos desarrollando nuevas funcionalidades.
+No estamos optimizando rendimiento.
+No estamos añadiendo features.
 
-```bash
-# Build and start everything
-docker-compose up --build -d
+**Toda la tarea consiste en reducir superficie de ataque, prevenir intrusiones y limitar el impacto de cualquier posible compromiso.**
 
-# Logs
-docker-compose logs -f escuchowsky
-docker-compose logs -f tumtumpa
-docker-compose logs -f nginx
+---
 
-# Restart a single service
-docker-compose restart escuchowsky
+## Principios clave
 
-# Rebuild a single service
-docker-compose up --build -d escuchowsky
-```
+1. **Minimizar superficie de ataque**
 
-No test suite exists. Pre-commit hook runs `gitleaks protect --verbose --redact --staged` to catch secrets.
+   * Solo exponer lo estrictamente necesario (80/443)
+   * Aislar servicios entre sí
 
-## Architecture
+2. **Defensa en profundidad**
 
-### Containers (`docker-compose.yml`)
+   * Nginx + ModSecurity + CrowdSec + iptables
+   * Ninguna capa es suficiente por sí sola
 
-| Container | Image | Port | App |
-|-----------|-------|------|-----|
-| `escuchowsky` | `Dockerfile.escuchowsky` | 5001 | `app_genres.py` |
-| `tumtumpa` | `Dockerfile.tumtumpa` | 5001 | `app_discover.py` |
-| `nginx` | `Dockerfile` (nginx-unprivileged) | 8085:80, 8443:443 | Reverse proxy |
+3. **Asumir compromiso**
 
-All containers share the `musica` bridge network. Nginx resolves upstream services by Docker DNS name (`escuchowsky`, `tumtumpa`).
+   * Diseñar el sistema como si eventualmente fuese comprometido
+   * Limitar movimiento lateral y escalado
 
-### Flask Apps
+4. **Zero trust interno**
 
-Both apps follow the same pattern:
-1. Client sends username → Flask fetches full scrobble history from Last.fm API (paginated, 200/page) via SSE (`text/event-stream`)
-2. Albums matched against SQLite DB using fuzzy normalization (`_norm()` strips non-word chars, lowercases)
-3. Unheard albums highlighted against curated RYM collections
+   * No confiar en contenedores entre sí
+   * No confiar en tráfico interno
 
-Key SSE endpoints (long-running, gunicorn 120s timeout):
-- `GET /api/scrobbles?user=...` — streams per-page progress
-- `GET /api/enrich_albums?albums=[...]` — MusicBrainz lookups with 1.1s rate limiting per result
+---
 
-### Database (`db/must_hear_rym_new.db`)
+## Líneas de trabajo obligatorias
 
-SQLite with four tables: `artists`, `albums`, `collections`, `collection_albums`. Schema in `db/lastfm_rym_normalized.sql`. Mounted as a volume from `./db`.
+### 1. Endurecimiento de Nginx
 
-`app_genres.py` also reads `db/rym_genres.json` (hierarchical genre tree from RYM) at startup.
+* Añadir headers de seguridad estrictos
+* Configurar rate limiting
+* Limitar tamaño de requests
+* Reducir timeouts (anti slow attacks)
+* Forzar HTTPS + HSTS
 
-### Entrypoint
+---
 
-`entrypoint_escuchowsky.sh` runs `app_genre_mermaid.py` first (generates `rym_genre_tree.html` from `rym_genres.json`), then starts gunicorn (2 workers × 4 threads).
+### 2. Configuración avanzada de ModSecurity
 
-### Nginx (`conf.d/`)
+* Integrar OWASP CRS
+* Ajustar paranoia level (mínimo PL2)
+* Activar logs en formato JSON
+* Eliminar falsos positivos sin relajar reglas globales
 
-- `00_zones.conf` — rate limit zones: heavy APIs 6/min, covers 60/min, pages 60/min
-- `server_params.conf` — TLS 1.2/1.3, security headers, Docker DNS resolver, proxy settings
-- `escuchowsky.conf` / `tumtumpa.conf` — virtual hosts per domain
+---
 
-### External APIs Used
+### 3. CrowdSec (detección + respuesta)
 
-- **Last.fm** (`ws.audioscrobbler.com`) — scrobbles, top albums, user info, friends
-- **MusicBrainz** (`musicbrainz.org`) — release group search for MBID enrichment
-- **CoverArtArchive** (`coverartarchive.org`) — album covers proxied by MBID
+* Implementar bouncer en Nginx (bloqueo activo)
+* Crear escenarios personalizados:
 
-### Secrets
+  * exceso de 403
+  * escaneo de rutas (404)
+* Aprovechar listas de reputación comunitarias
 
-Managed with SOPS + age encryption (`.sops.yaml`, `.encrypted.env`). The required env var is `LASTFM_API_KEY`.
+---
 
-### Client-Side
+### 4. Aislamiento en Docker
 
-The frontends are SPAs with:
-- IndexedDB for scrobble caching (persists across sessions)
-- LocalStorage for preferences and extra user lists
-- Service Worker in tumtumpa for offline support
-- `X-Accel-Buffering: no` header required on SSE responses to bypass nginx buffering
+* Separar redes:
+
+  * frontend (Nginx)
+  * backend (Flask)
+* Flask NO accesible externamente
+* Aplicar:
+
+  * `cap_drop: ALL`
+  * filesystem read-only
+  * uso de `tmpfs`
+* Limitar CPU y memoria por contenedor
+
+---
+
+### 5. Seguridad en aplicaciones Python
+
+* Validación estricta de inputs
+* Evitar ejecución dinámica (`eval`, `exec`)
+* Uso de ORM para prevenir SQL injection
+* Configuración segura de Gunicorn:
+
+  * límites de requests
+  * timeouts controlados
+
+---
+
+### 6. Firewall (iptables)
+
+* Política por defecto: DROP
+* Permitir solo:
+
+  * conexiones establecidas
+  * puertos 80 y 443
+* Evitar tráfico lateral innecesario
+
+---
+
+### 7. TLS
+
+* Solo TLS 1.2 y 1.3
+* Cifrados modernos
+* OCSP stapling
+
+---
+
+### 8. Monitorización y alertas
+
+* No limitarse a dashboards
+* Definir alertas reales:
+
+  * picos de tráfico
+  * errores 5xx
+  * bloqueos de CrowdSec
+
+---
+
+## Riesgos identificados
+
+* Nginx como punto único de fallo
+* Dependencia total del reverse proxy
+* Posible mala configuración de ModSecurity
+* Falta de aislamiento entre contenedores
+* Seguridad delegada erróneamente al WAF
+
+---
+
+## Enfoque operativo
+
+Cada cambio debe responder a una de estas preguntas:
+
+* ¿Reduce superficie de ataque?
+* ¿Limita impacto de un compromiso?
+* ¿Evita acceso no autorizado?
+* ¿Mejora visibilidad o respuesta ante ataques?
+
+Si la respuesta es “no”, no se implementa.
+
+---
+
+## Regla fundamental
+
+> **Este proyecto no trata de construir, sino de defender.**
+
+Todo el esfuerzo debe centrarse en endurecer, aislar y monitorizar.
+
+Cualquier decisión que aumente complejidad sin mejorar seguridad debe descartarse.

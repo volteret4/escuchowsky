@@ -13,3 +13,4 @@ ssl/
 .local_prometheus/
 logs
 html_musthear_index.py
+trivy_reports/
