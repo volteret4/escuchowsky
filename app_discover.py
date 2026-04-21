@@ -1538,6 +1538,44 @@ input::placeholder { color: var(--ink3); }
 }
 .dp-link:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ── Empty state ───────────────────────────────────────────────────── */
+#empty-state {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 1.4rem;
+  min-height: calc(100dvh - 120px);
+  text-align: center; padding: 2rem 1.5rem;
+  max-width: 480px; margin: 0 auto;
+}
+/* hidden via JS when discover-view becomes visible */
+#empty-logo {
+  font-family: var(--serif); font-size: 2.8rem;
+  font-weight: 800; letter-spacing: -0.02em; line-height: 1;
+}
+#empty-tagline {
+  font-size: 0.95rem; color: var(--ink2); line-height: 1.55; margin: 0;
+}
+#empty-steps {
+  display: flex; flex-direction: column; gap: 0.9rem;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1.3rem 1.5rem; width: 100%;
+  box-sizing: border-box; text-align: left;
+}
+.empty-step {
+  display: flex; gap: 0.75rem; align-items: flex-start;
+  font-size: 0.85rem; color: var(--ink2); line-height: 1.5;
+}
+.empty-num {
+  font-family: var(--mono); font-size: 0.72rem; color: var(--accent);
+  background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: 3px; padding: 0.15rem 0.45rem;
+  flex-shrink: 0; margin-top: 0.1rem;
+}
+.empty-step b { color: var(--ink); }
+#empty-hint {
+  font-family: var(--mono); font-size: 0.62rem;
+  color: var(--ink3); line-height: 1.6; text-align: center;
+}
+
 /* ── Descubrir section ─────────────────────────────────────────────── */
 #discover-view { display: none; }
 #discover-view.visible { display: block; }
@@ -2286,6 +2324,18 @@ input::placeholder { color: var(--ink3); }
         <span id="loading-text">Cargando scrobbles...</span>
       </div>
 
+      <!-- Empty state — shown when no discover results yet -->
+      <div id="empty-state">
+        <div id="empty-logo"><span style="color:var(--accent)">tumtum</span><span style="color:var(--ink2)">pa!</span></div>
+        <p id="empty-tagline">Descubre qué escuchan tus amigos que a ti te falta.</p>
+        <div id="empty-steps">
+          <div class="empty-step"><span class="empty-num">01</span><span>Pulsa <b>👤</b> arriba a la derecha y carga tu usuario de <b>Last.fm</b>.</span></div>
+          <div class="empty-step"><span class="empty-num">02</span><span>Añade <b>usuarios secundarios</b> — amigos, artistas, críticos.</span></div>
+          <div class="empty-step"><span class="empty-num">03</span><span>Pulsa <b>▶</b> junto a un usuario para ver qué escucha que tú no has oído.</span></div>
+        </div>
+        <div id="empty-hint">Los datos se guardan en tu navegador (IndexedDB). Exporta / importa sesiones como JSON.</div>
+      </div>
+
       <!-- Discover view -->
       <div id="discover-view">
         <!-- Controles: selector de usuario, modo y límite -->
@@ -2449,7 +2499,6 @@ function buildExtraUsersList() {
     _updateDiscoverIndicator();
   }
   renderSecondaryUsers();
-  renderSbUsersList();
 }
 
 function selectDiscoverUser(i) { setActiveDiscoverUser(i); }
@@ -3009,6 +3058,7 @@ function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
 
   // Show discover view
   document.getElementById('discover-view').classList.add('visible');
+  const _es = document.getElementById('empty-state'); if (_es) _es.style.display = 'none';
   closeSidebar();
 
   _loadDiscoverPage();
@@ -3182,6 +3232,7 @@ function leaveDiscoverMode() {
   discoverMode = false;
   if (discoverEs) { discoverEs.close(); discoverEs = null; }
   document.getElementById('discover-view').classList.remove('visible');
+  const _es2 = document.getElementById('empty-state'); if (_es2) _es2.style.display = '';
 }
 
 function loadMoreDiscover() {
@@ -3626,70 +3677,8 @@ function _patchDiscoverCard(idx, a) {
 }
 
 // ── Sidebar USUARIOS panel ────────────────────────────────────────────────
-async function renderSbUsersList() {
-  // Sidebar eliminado — delegar al modal
-  return renderSecondaryUsers();
-  const el = document.getElementById('sb-users-list');
-  if (!el) return;
-  const primaryUser = heardCache?.user?.toLowerCase();
-  const sessions = await idbList().catch(() => []);
-  let html = '';
-
-  if (heardCache) {
-    const avatarSrc = document.getElementById('badge-avatar')?.src || '';
-    const hasAvatar = avatarSrc && !avatarSrc.endsWith('#') && !avatarSrc.endsWith('/') && avatarSrc !== window.location.href;
-    const avatar = hasAvatar
-      ? `<img src="${escH(avatarSrc)}" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0">`
-      : `<div style="width:10px;height:10px;border-radius:50%;background:var(--accent);opacity:0.55;flex-shrink:0;margin:6px"></div>`;
-    const dateStr = heardCache.fetched_at ? new Date(heardCache.fetched_at*1000).toLocaleDateString() : '';
-    html += `<div class="sb-user-item sb-user-item-primary">
-      <div class="sb-user-item-left">
-        ${avatar}
-        <div class="sb-user-item-info">
-          <div class="sb-user-item-name">${escH(heardCache.user)}</div>
-          <div class="sb-user-item-meta">${heardCache.count.toLocaleString()} álb · ${escH(dateStr)}</div>
-        </div>
-      </div>
-      <div class="sb-user-item-btns">
-        <button class="btn-sm" onclick="sbSyncPrimary()">↻ Sync</button>
-        <button class="btn-sm" onclick="sbSavePrimaryJson()">↓ JSON</button>
-        <button class="btn-sm" onclick="unloadPrimaryUser()">✕</button>
-      </div>
-    </div>`;
-  }
-
-  sessions
-    .filter(s => s.user.toLowerCase() !== primaryUser)
-    .sort((a, b) => b.fetched_at - a.fetched_at)
-    .forEach(s => {
-      const eu = extraUsers.find(u => u.user.toLowerCase() === s.user.toLowerCase());
-      const isActive = !!eu;
-      const dateStr = new Date((s.fetched_at||0)*1000).toLocaleDateString();
-      const avatar = eu?.image
-        ? `<img src="${escH(eu.image)}" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0">`
-        : `<div style="width:10px;height:10px;border-radius:50%;background:${eu?.color||'var(--ink3)'};flex-shrink:0;margin:6px"></div>`;
-      const sn = escH(s.user);
-      html += `<div class="sb-user-item">
-        <div class="sb-user-item-left">
-          ${avatar}
-          <div class="sb-user-item-info">
-            <div class="sb-user-item-name">${sn}</div>
-            <div class="sb-user-item-meta">${(s.count||0).toLocaleString()} álb · ${escH(dateStr)}</div>
-          </div>
-          <button class="btn-sm${isActive?' act':''}" onclick="toggleSecondaryUser('${sn}')" style="flex-shrink:0;font-size:0.58rem;padding:0.15rem 0.38rem;margin-left:auto">${isActive?'ACTIVO':'CARGAR'}</button>
-        </div>
-        <div class="sb-user-item-btns">
-          ${!heardCache ? `<button class="btn-sm primary" onclick="setPrimaryFromSecondary('${sn}');renderSbUsersList()">Principal</button>` : ''}
-          <button class="btn-sm" onclick="syncSecondaryIdb('${sn}')">↻ Sync</button>
-          <button class="btn-sm" onclick="idbDownloadSession('${sn}')">↓ JSON</button>
-          <button class="btn-sm" onclick="idbDeleteSession('${sn}')">✕</button>
-        </div>
-      </div>`;
-    });
-
-  if (!html) html = '<div class="sb-empty">Sin usuarios guardados</div>';
-  el.innerHTML = html;
-}
+// renderSbUsersList was the old sidebar renderer — now just an alias so old call sites work
+async function renderSbUsersList() { return renderSecondaryUsers(); }
 
 async function sbSyncPrimary() {
   if (!heardCache) return;
@@ -3704,7 +3693,7 @@ async function sbSyncPrimary() {
       heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
       showUserBadge(heardCache.user, document.getElementById('badge-avatar')?.src||'', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
       if (prog) prog.textContent = '✓ Al día';
-      await renderSbUsersList();
+      await renderSecondaryUsers();
     }
   } catch(e) { if (prog) prog.textContent = 'Error: ' + e.message; }
 }
@@ -3848,7 +3837,6 @@ async function renderSecondaryUsers() {
 
   if (!visible.length) {
     el.innerHTML = '<div class="idb-empty">Sin sesiones guardadas</div>';
-    renderSbUsersList();
     return;
   }
   el.innerHTML = visible.map(s => {
@@ -3878,7 +3866,6 @@ async function renderSecondaryUsers() {
       </div>
     </div>`;
   }).join('');
-  renderSbUsersList();
 }
 
 async function idbLoadSession(username) {
@@ -3906,7 +3893,6 @@ async function idbDeleteSession(username) {
     buildExtraUsersList();
   }
   renderSecondaryUsers();
-  renderSbUsersList();
 }
 
 function idbDownloadSession(username) {
@@ -4098,7 +4084,7 @@ function loadHeardCache(data) {
     complete:            heardCache.complete,
     total_pages:         heardCache.total_pages,
     heard_artists:       [...heardCache.artist_set],
-  }).then(() => { renderIdbList(); renderIdbExtraList(); renderSbUsersList(); }).catch(() => {});
+  }).then(() => { renderIdbList(); renderIdbExtraList(); }).catch(() => {});
   dismissWelcome();
 }
 
@@ -4313,7 +4299,6 @@ if ('serviceWorker' in navigator) {
   }
   await renderSecondaryUsers();
   buildExtraUsersList();
-  renderSbUsersList();
 
   // Show welcome screen if no data at all and never seen before
   const welcomed = localStorage.getItem('tt_welcomed');
