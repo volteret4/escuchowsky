@@ -1541,12 +1541,19 @@ input::placeholder { color: var(--ink3); }
 /* ── Descubrir section ─────────────────────────────────────────────── */
 #discover-view { display: none; }
 #discover-view.visible { display: block; }
-.discover-nav {
-  display: flex; align-items: center; gap: 1rem;
-  margin-bottom: 1.2rem; flex-wrap: wrap;
+#discover-ctrl-bar {
+  display: flex; align-items: center; gap: 0.5rem;
+  flex-wrap: wrap; margin-bottom: 0.7rem;
 }
-.discover-nav h2 {
-  font-family: var(--serif); font-size: 1.1rem; font-weight: 700; margin: 0;
+#discover-ctrl-bar #disc-user-indicator {
+  display: flex; flex-wrap: wrap; gap: 0.3rem; flex: 1; min-width: 0;
+}
+#discover-ctrl-bar .disc-controls {
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0; flex-shrink: 0;
+}
+.discover-nav {
+  display: none; /* eliminado */
 }
 .discover-filters {
   display: flex; gap: 0.4rem; flex-wrap: wrap;
@@ -1672,19 +1679,14 @@ input::placeholder { color: var(--ink3); }
 
 /* ── App shell ─────────────────────────────────────────────────────── */
 .app-shell {
-  display: flex;
   height: calc(100dvh - 52px);
   overflow: hidden;
+  display: flex;
 }
 
-/* ── Sidebar ───────────────────────────────────────────────────────── */
+/* ── Sidebar (eliminado — mantenido por si hay referencias residuales) ─ */
 #sidebar {
-  width: 240px;
-  flex-shrink: 0;
-  background: var(--bg2);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
+  display: none;
   overflow: hidden;
 }
 .sb-scroll {
@@ -1872,18 +1874,19 @@ input::placeholder { color: var(--ink3); }
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 #disc-play-btn:hover { background: var(--accent2); }
-/* ── Discover user lines ─────────────────────────────────────────────────── */
+/* ── Discover user pills (barra horizontal) ─────────────────────────────── */
 .disc-user-line {
-  display: flex; align-items: center; gap: 0.45rem;
-  padding: 0.26rem 0.9rem;
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.22rem 0.6rem; border-radius: 20px;
   cursor: pointer; user-select: none;
-  font-family: var(--mono); font-size: 0.7rem; color: var(--ink2);
-  transition: color 0.1s;
-  border-left: 2px solid transparent;
+  font-family: var(--mono); font-size: 0.68rem; color: var(--ink3);
+  background: var(--bg3); border: 1px solid var(--border2);
+  transition: border-color .15s, color .15s;
+  white-space: nowrap;
 }
-.disc-user-line:hover { color: var(--ink); }
-.disc-user-line.active { color: var(--accent); border-left-color: var(--accent); padding-left: calc(0.9rem - 2px); }
-.disc-user-line-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.disc-user-line:hover { border-color: var(--accent); color: var(--ink); }
+.disc-user-line.active { border-color: var(--accent); color: var(--accent); background: var(--bg2); }
+.disc-user-line-name { max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Sidebar USUARIOS section ────────────────────────────────────────────── */
 .sb-search-area { padding: 0.45rem 0.75rem 0.2rem; }
@@ -2066,22 +2069,7 @@ input::placeholder { color: var(--ink3); }
 
 /* ── Responsive ────────────────────────────────────────────────────── */
 @media (max-width: 800px) {
-  #sidebar {
-    position: fixed; top: 52px; left: 0;
-    width: 100vw; height: calc(100dvh - 52px);
-    z-index: 200;
-    transform: translateX(-100%);
-    transition: transform 0.25s ease;
-    border-right: none;
-  }
-  #sidebar.mobile-open { transform: translateX(0); }
-  #sidebar-overlay.visible { display: block; }
-  #sidebar-fab { display: flex; }
   #grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
-}
-@media (min-width: 801px) {
-  #sidebar-fab { display: none !important; }
-  #sidebar-overlay { display: none !important; }
 }
 @media (max-width: 600px) {
   #user-modal-bg {
@@ -2157,12 +2145,13 @@ input::placeholder { color: var(--ink3); }
 
 <!-- ── Header ─────────────────────────────────────────────────────────── -->
 <header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:sticky;top:0;z-index:100;">
-  <div class="logo" style="font-family:var(--serif);font-size:1.3rem;font-weight:800">tumtum<em style="color:var(--accent);font-style:normal">tumtum</em>pa</div>
+  <div class="logo" style="font-family:var(--serif);font-size:1.3rem;font-weight:800"><span style="color:var(--accent)">tumtum</span><span style="color:#fff">pa!</span></div>
   <div style="flex:1"></div>
   <div id="badge-inline" style="display:none;align-items:center;gap:0.5rem;">
     <img id="badge-avatar" src="" alt="" style="width:24px;height:24px;border-radius:50%;object-fit:cover;background:var(--bg3);display:none">
     <span id="badge-name" style="font-family:var(--mono);font-size:0.75rem;color:var(--accent);"></span>
   </div>
+  <button id="btn-open-users" onclick="openUserModal()" title="Gestionar usuarios" style="width:34px;height:34px;border-radius:50%;background:var(--bg3);border:1px solid var(--border2);color:var(--ink2);font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .15s,color .15s">👤</button>
 </header>
 
 <input type="file" id="inp-session" accept=".json" style="display:none">
@@ -2206,6 +2195,7 @@ input::placeholder { color: var(--ink3); }
     <div class="um-section" id="um-sec-secondary">
       <div class="um-section-title">Usuarios secundarios</div>
       <div id="secondary-users-list"></div>
+      <div id="sb-cache-notice" style="display:none"></div>
       <div class="um-progress" id="um-extra-progress"></div>
     </div>
 
@@ -2280,71 +2270,8 @@ input::placeholder { color: var(--ink3); }
   </div>
 </div>
 
-<!-- Mobile sidebar overlay + FAB -->
-<div id="sidebar-overlay" onclick="closeSidebar()"></div>
-<button id="sidebar-fab" onclick="toggleSidebar()">☰</button>
-
 <!-- ── App shell ───────────────────────────────────────────────────────── -->
 <div class="app-shell">
-
-  <!-- ── Sidebar ─────────────────────────────────────────────────────── -->
-  <aside id="sidebar">
-    <div class="sb-scroll">
-
-      <!-- DESCUBRIR (visible when secondary users loaded) -->
-      <div class="sb-panel open" id="panel-discover" style="display:none">
-        <div class="sb-panel-hdr" onclick="togglePanel('panel-discover')">
-          <span class="sb-panel-title">Descubrir</span>
-          <span class="sb-panel-arrow">▶</span>
-        </div>
-        <div class="sb-panel-body">
-          <div class="disc-controls">
-            <input type="number" id="disc-limit-global" min="5" max="100" value="20">
-            <select id="disc-mode-select">
-              <option value="albums">Álbumes</option>
-              <option value="artists">Artistas</option>
-              <option value="songs">Canciones</option>
-            </select>
-            <button id="disc-play-btn" onclick="triggerDiscover()" title="Descubrir">▶</button>
-          </div>
-          <div id="disc-user-indicator"></div>
-        </div>
-      </div>
-
-      <!-- USUARIOS -->
-      <div class="sb-panel open" id="panel-usuarios">
-        <div class="sb-panel-hdr" onclick="togglePanel('panel-usuarios')">
-          <span class="sb-panel-title">Usuarios</span>
-          <span class="sb-panel-arrow">▶</span>
-        </div>
-        <div class="sb-panel-body">
-          <div class="sb-search-area">
-            <div class="sb-search-row">
-              <input id="sb-inp-user" type="text" placeholder="Usuario Last.fm" autocomplete="off" spellcheck="false">
-              <button class="btn-sm primary" id="sb-btn-go">Buscar</button>
-              <button class="btn-sm" id="sb-btn-import">JSON</button>
-            </div>
-            <div class="source-radios">
-              <label><input type="radio" name="sb-source" id="sb-src-lfm" value="lfm" checked> Last.fm</label>
-              <label><input type="radio" name="sb-source" id="sb-src-lb"  value="lb"> ListenBrainz</label>
-            </div>
-            <div id="sb-progress" class="sb-progress-txt"></div>
-          </div>
-          <div id="sb-cache-notice" style="display:none"></div>
-          <div id="sb-users-list"></div>
-          <div class="sb-friends-section">
-            <button id="sb-btn-friends" class="sb-friends-btn">Amigos ▾</button>
-            <div id="sb-friends-list"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- About -->
-      <button class="sb-about-btn" onclick="openAboutModal()">about</button>
-
-    </div><!-- .sb-scroll -->
-
-  </aside>
 
   <!-- ── Main ──────────────────────────────────────────────────────────── -->
   <div id="main">
@@ -2361,10 +2288,18 @@ input::placeholder { color: var(--ink3); }
 
       <!-- Discover view -->
       <div id="discover-view">
-        <div class="discover-nav">
-          <button class="btn-sm" onclick="leaveDiscoverMode()">← Inicio</button>
-          <h2>Descubrir</h2>
-          <span id="discover-count" style="font-family:var(--mono);font-size:0.72rem;color:var(--ink3)"></span>
+        <!-- Controles: selector de usuario, modo y límite -->
+        <div id="discover-ctrl-bar">
+          <div id="disc-user-indicator"></div>
+          <div class="disc-controls">
+            <input type="number" id="disc-limit-global" min="5" max="100" value="20">
+            <select id="disc-mode-select">
+              <option value="albums">Álbumes</option>
+              <option value="artists">Artistas</option>
+              <option value="songs">Canciones</option>
+            </select>
+            <button id="disc-play-btn" onclick="triggerDiscover()" title="Descubrir">▶</button>
+          </div>
         </div>
         <div class="discover-filters" id="discover-decade-pills"></div>
         <div id="discover-grid"></div>
@@ -2454,21 +2389,7 @@ const errMsg     = document.getElementById('error-msg');
 const inpSession = document.getElementById('inp-session');
 
 // ── Sidebar panel toggle ───────────────────────────────────────────────────
-function togglePanel(id) {
-  document.getElementById(id).classList.toggle('open');
-}
-
-// ── Mobile sidebar ─────────────────────────────────────────────────────────
-function toggleSidebar() {
-  const sb = document.getElementById('sidebar');
-  const ov = document.getElementById('sidebar-overlay');
-  const isOpen = sb.classList.toggle('mobile-open');
-  ov.classList.toggle('visible', isOpen);
-}
-function closeSidebar() {
-  document.getElementById('sidebar').classList.remove('mobile-open');
-  document.getElementById('sidebar-overlay').classList.remove('visible');
-}
+function closeSidebar() {} // no-op (sidebar eliminado)
 
 // ── About modal ───────────────────────────────────────────────────────────
 function openAboutModal() {
@@ -2521,8 +2442,8 @@ function loadExtraUsersLS() {
 
 function buildExtraUsersList() {
   const hasExtra = extraUsers.length > 0;
-  const discPanel = document.getElementById('panel-discover');
-  discPanel.style.display = hasExtra ? '' : 'none';
+  const ctrlBar = document.getElementById('discover-ctrl-bar');
+  if (ctrlBar) ctrlBar.style.display = hasExtra ? '' : 'none';
   if (hasExtra) {
     if (activeDiscoverUserIdx >= extraUsers.length) activeDiscoverUserIdx = 0;
     _updateDiscoverIndicator();
@@ -2817,9 +2738,7 @@ async function idbAddAsExtra(username) {
 function umSource() {
   return document.getElementById('um-src-lb')?.checked ? 'lb' : 'lfm';
 }
-function sbSource() {
-  return document.getElementById('sb-src-lb')?.checked ? 'lb' : 'lfm';
-}
+function sbSource() { return umSource(); } // sidebar eliminado, usar modal
 function scrobblesEndpoint(user, source) {
   const base = source === 'lb' ? '/api/scrobbles/lb' : '/api/scrobbles';
   return `${base}?user=${encodeURIComponent(user)}`;
@@ -2853,10 +2772,7 @@ document.addEventListener('DOMContentLoaded', () => {
     { radioId: 'um-src-lfm', placeholder: 'Usuario Last.fm' },
     { radioId: 'um-src-lb',  placeholder: 'Usuario ListenBrainz' },
   ]);
-  _syncSourceGroup('sb-source', 'sb-inp-user', [
-    { radioId: 'sb-src-lfm', placeholder: 'Usuario Last.fm' },
-    { radioId: 'sb-src-lb',  placeholder: 'Usuario ListenBrainz' },
-  ]);
+  // sb-source (sidebar eliminado) — no sync needed
 });
 
 // ── Helper: consume /api/scrobbles SSE stream ─────────────────────────────
@@ -2991,9 +2907,10 @@ function renderDiscoverGrid() {
       }
     });
   });
-  // Update count label
+  // Update count label (element may not exist if removed from template)
   const noun = discoverModeType === 'songs' ? 'canciones' : discoverModeType === 'artists' ? 'artistas' : 'álbumes';
-  document.getElementById('discover-count').textContent =
+  const _countEl = document.getElementById('discover-count');
+  if (_countEl) _countEl.textContent =
     `${filtered.length} ${noun}${discoverCandidates.length > discoverAlbums.length ? ` de ${discoverCandidates.length} candidatos` : ''}`;
   // Decade pills
   const decades = new Set();
@@ -3710,6 +3627,8 @@ function _patchDiscoverCard(idx, a) {
 
 // ── Sidebar USUARIOS panel ────────────────────────────────────────────────
 async function renderSbUsersList() {
+  // Sidebar eliminado — delegar al modal
+  return renderSecondaryUsers();
   const el = document.getElementById('sb-users-list');
   if (!el) return;
   const primaryUser = heardCache?.user?.toLowerCase();
@@ -3774,7 +3693,7 @@ async function renderSbUsersList() {
 
 async function sbSyncPrimary() {
   if (!heardCache) return;
-  const prog = document.getElementById('sb-progress');
+  const prog = document.getElementById('um-extra-progress');
   if (prog) prog.textContent = 'Sincronizando...';
   try {
     const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${heardCache.count||0}`;
@@ -3846,153 +3765,6 @@ async function showCacheNotice() {
     </div>`;
 }
 
-async function doLoadUserSb() {
-  const inp = document.getElementById('sb-inp-user');
-  const prog = document.getElementById('sb-progress');
-  const btn = document.getElementById('sb-btn-go');
-  const user = inp.value.trim();
-  if (!user) return;
-  btn.disabled = true;
-  const addAsSecondary = !!heardCache && heardCache.user.toLowerCase() !== user.toLowerCase();
-  const src = sbSource();
-  if (addAsSecondary) await showCacheNotice();
-  try {
-    prog.textContent = src === 'lb' ? 'Conectando con ListenBrainz...' : 'Conectando con Last.fm...';
-    const [userInfo, lfmResult] = await Promise.all([
-      fetch(checkUserEndpoint(user, src)).then(r=>r.json()).catch(()=>null),
-      fetchScrobblesSSE(user, msg => {
-        if (msg._waiting) prog.textContent = `⏳ Límite Last.fm — esperando ${msg.waiting}s… (${msg.page}/${msg.total_pages})`;
-        else prog.textContent = `Pág ${msg.page}/${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
-      }, src),
-    ]);
-    const heard = lfmResult.heard;
-    const image = userInfo?.ok ? (userInfo.image||'') : '';
-    const realUser = userInfo?.ok ? userInfo.username : user;
-    const fetched_at = Math.floor(Date.now()/1000);
-    if (addAsSecondary) {
-      const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
-      const euIdx = extraUsers.findIndex(u => u.user.toLowerCase() === realUser.toLowerCase());
-      const eu = { user:realUser, pairs:heard, songs:lfmResult.heard_songs||[], color:euIdx!==-1?extraUsers[euIdx].color:color,
-        count:heard.length, fetched_at, image, source:src,
-        last_scrobble_ts:lfmResult.last_scrobble_ts||0,
-        last_scrobble_artist:lfmResult.last_scrobble_artist||'',
-        last_scrobble_track:lfmResult.last_scrobble_track||'' };
-      if (euIdx!==-1) extraUsers[euIdx]=eu; else extraUsers.push(eu);
-      saveExtraUsersLS();
-      await idbSave({ user:realUser, count:heard.length, fetched_at, heard,
-        songs:lfmResult.heard_songs||[],
-        last_scrobble_ts:lfmResult.last_scrobble_ts||0,
-        last_scrobble_artist:lfmResult.last_scrobble_artist||'',
-        last_scrobble_track:lfmResult.last_scrobble_track||'',
-        complete:true, total_pages:lfmResult.total_pages||0,
-        heard_artists:lfmResult.heard_artists||[], source:src });
-      buildExtraUsersList();
-      prog.textContent = `✓ ${realUser} añadido — ${heard.length.toLocaleString()} álb.`;
-    } else {
-      loadHeardCache({ user:realUser, heard, heard_songs:lfmResult.heard_songs||[], fetched_at,
-        last_scrobble_ts:lfmResult.last_scrobble_ts||0,
-        last_scrobble_artist:lfmResult.last_scrobble_artist||'',
-        last_scrobble_track:lfmResult.last_scrobble_track||'',
-        complete:true, total_pages:lfmResult.total_pages||0,
-        heard_artists:lfmResult.heard_artists||[] });
-      if (image) {
-        const av = document.getElementById('badge-avatar');
-        if (av) { av.src = image; av.style.display = ''; }
-      }
-      prog.textContent = `✓ ${heard.length.toLocaleString()} álbumes cargados`;
-    }
-    inp.value = '';
-  } catch(e) {
-    prog.textContent = 'Error: ' + e.message;
-  } finally {
-    btn.disabled = false;
-    await renderSbUsersList();
-  }
-}
-
-document.getElementById('sb-btn-go').addEventListener('click', doLoadUserSb);
-document.getElementById('sb-inp-user').addEventListener('keydown', e => { if (e.key==='Enter') doLoadUserSb(); });
-document.getElementById('sb-btn-import').addEventListener('click', () => document.getElementById('inp-session').click());
-
-// Sidebar friends toggle
-let _sbFriendsLoaded = false;
-document.getElementById('sb-btn-friends').addEventListener('click', async () => {
-  const fl  = document.getElementById('sb-friends-list');
-  const btn = document.getElementById('sb-btn-friends');
-  const visible = fl.style.display === 'block';
-  fl.style.display = visible ? 'none' : 'block';
-  btn.textContent  = visible ? 'Amigos ▾' : 'Amigos ▴';
-  if (visible || _sbFriendsLoaded) return;
-  _sbFriendsLoaded = true;
-  fl.innerHTML = '<div class="sb-empty">Cargando…</div>';
-  const user = heardCache?.user;
-  if (!user) { fl.innerHTML = '<div class="sb-empty">Sin usuario principal cargado.</div>'; return; }
-  try {
-    const data = await fetch(`/api/friends?user=${encodeURIComponent(user)}`).then(r=>r.json());
-    if (!data.ok || !data.friends.length) {
-      fl.innerHTML = `<div class="sb-empty">${escH(data.error||'Sin amigos en Last.fm')}</div>`; return;
-    }
-    _renderSbFriendsList(data.friends);
-  } catch(e) { fl.innerHTML = `<div class="sb-empty">Error: ${escH(e.message)}</div>`; }
-});
-
-function _renderSbFriendsList(friends) {
-  const fl = document.getElementById('sb-friends-list');
-  if (!fl) return;
-  const added = new Set(extraUsers.map(u => u.user.toLowerCase()));
-  fl.innerHTML = friends.map(f => {
-    const isAdded = added.has(f.username.toLowerCase());
-    const av = f.image
-      ? `<img class="fr-avatar" src="${escH(f.image)}" alt="" onerror="this.style.display='none'">`
-      : `<span class="fr-avatar" style="background:var(--bg3);display:inline-block"></span>`;
-    return `<div class="fr-row">
-      ${av}
-      <span class="fr-name">${escH(f.username)}</span>
-      <button class="btn-sm fr-add" ${isAdded?'disabled':''} onclick="sbAddFriend('${escH(f.username)}',this)">
-        ${isAdded?'✓':'Añadir'}</button>
-    </div>`;
-  }).join('');
-}
-
-async function sbAddFriend(username, btn) {
-  if (!username) return;
-  btn.disabled = true; btn.textContent = '…';
-  const prog = document.getElementById('sb-progress');
-  if (prog) prog.textContent = `Cargando ${username}…`;
-  const src = sbSource();
-  try {
-    const [userInfo, lfmResult] = await Promise.all([
-      fetch(checkUserEndpoint(username, src)).then(r=>r.json()).catch(()=>null),
-      fetchScrobblesSSE(username, msg => {
-        if (prog) prog.textContent = `${username}: pág ${msg.page}/${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
-      }, src),
-    ]);
-    const heard = lfmResult.heard;
-    const songs = lfmResult.heard_songs || [];
-    const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
-    const image = userInfo?.ok ? (userInfo.image||'') : '';
-    const realUser = userInfo?.ok ? userInfo.username : username;
-    const fetched_at = Math.floor(Date.now()/1000);
-    extraUsers.push({ user:realUser, pairs:heard, songs, color, count:heard.length, fetched_at, image, source:src,
-      last_scrobble_ts:lfmResult.last_scrobble_ts||0,
-      last_scrobble_artist:lfmResult.last_scrobble_artist||'',
-      last_scrobble_track:lfmResult.last_scrobble_track||'' });
-    saveExtraUsersLS();
-    await idbSave({ user:realUser, count:heard.length, fetched_at, heard, songs,
-      last_scrobble_ts:lfmResult.last_scrobble_ts||0,
-      last_scrobble_artist:lfmResult.last_scrobble_artist||'',
-      last_scrobble_track:lfmResult.last_scrobble_track||'',
-      complete:true, total_pages:lfmResult.total_pages||0,
-      heard_artists:lfmResult.heard_artists||[], source:src });
-    buildExtraUsersList();
-    btn.textContent = '✓';
-    if (prog) prog.textContent = `✓ ${realUser} añadido`;
-  } catch(e) {
-    btn.disabled = false; btn.textContent = 'Añadir';
-    if (prog) prog.textContent = 'Error: ' + e.message;
-  }
-  await renderSbUsersList();
-}
 
 // ── UI helpers ─────────────────────────────────────────────────────────────
 function showLoading(msg) { loadTxt.textContent = msg || 'Cargando...'; loading.classList.add('visible'); }
@@ -4188,14 +3960,9 @@ function hideUserBadge() {
 function unloadPrimaryUser() {
   heardCache = null; loadedUser = null;
   inpUser.value = '';
-  _sbFriendsLoaded = false;
-  document.getElementById('sb-friends-list').innerHTML = '';
-  document.getElementById('sb-friends-list').style.display = 'none';
-  document.getElementById('sb-btn-friends').textContent = 'Amigos ▾';
   hideUserBadge();
   hideResults();
   renderSecondaryUsers();
-  renderSbUsersList();
 }
 
 // ── Toggle secondary user active state (adds/removes from extraUsers) ──────
