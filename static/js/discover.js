@@ -92,11 +92,15 @@ function buildExtraUsersList() {
   const hasExtra = extraUsers.length > 0;
   const ctrlBar = document.getElementById('discover-ctrl-bar');
   if (ctrlBar) ctrlBar.style.display = hasExtra ? '' : 'none';
-  const _dv = document.getElementById('discover-view');
-  if (_dv && hasExtra) _dv.classList.add('visible');
   if (hasExtra) {
     if (activeDiscoverUserIdx >= extraUsers.length) activeDiscoverUserIdx = 0;
     _updateDiscoverIndicator();
+  } else {
+    // No active users: hide discover results if shown
+    const _dv = document.getElementById('discover-view');
+    if (_dv) _dv.classList.remove('visible');
+    if (discoverEs) { discoverEs.close(); discoverEs = null; }
+    discoverMode = false;
   }
   renderSecondaryUsers();
 }

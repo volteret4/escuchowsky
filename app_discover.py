@@ -1147,6 +1147,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <span id="loading-text">Cargando scrobbles...</span>
       </div>
 
+      <!-- Controles siempre visibles: selector de usuario, modo y límite -->
+      <div id="discover-ctrl-bar" style="display:none">
+        <div id="disc-user-indicator"></div>
+        <div class="disc-controls">
+          <input type="number" id="disc-limit-global" min="5" max="100" value="20">
+          <select id="disc-mode-select">
+            <option value="albums">Álbumes</option>
+            <option value="artists">Artistas</option>
+            <option value="songs">Canciones</option>
+          </select>
+          <button id="disc-play-btn" title="Descubrir">▶</button>
+        </div>
+      </div>
+
       <!-- Empty state — shown when no discover results yet -->
       <div id="empty-state">
         <div id="empty-logo"><span style="color:var(--accent)">tumtum</span><span style="color:var(--ink2)">pa!</span></div>
@@ -1159,21 +1173,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div id="empty-hint">Los datos se guardan en tu navegador (IndexedDB). Exporta / importa sesiones como JSON.</div>
       </div>
 
-      <!-- Discover view -->
+      <!-- Discover view (sin ctrl bar — ahora está fuera) -->
       <div id="discover-view">
-        <!-- Controles: selector de usuario, modo y límite -->
-        <div id="discover-ctrl-bar">
-          <div id="disc-user-indicator"></div>
-          <div class="disc-controls">
-            <input type="number" id="disc-limit-global" min="5" max="100" value="20">
-            <select id="disc-mode-select">
-              <option value="albums">Álbumes</option>
-              <option value="artists">Artistas</option>
-              <option value="songs">Canciones</option>
-            </select>
-            <button id="disc-play-btn" title="Descubrir">▶</button>
-          </div>
-        </div>
         <div class="discover-filters" id="discover-decade-pills"></div>
         <div id="discover-grid"></div>
         <div class="discover-pagination" id="discover-pagination" style="display:none">
