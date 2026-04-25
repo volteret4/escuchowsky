@@ -525,3 +525,17 @@ async function loadUser() {
     }
   } catch(e) {}
 })();
+
+// ── Event listeners (replaces all inline handlers) ────────────────────────
+document.getElementById('user-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') loadUser();
+});
+document.getElementById('user-load-btn').addEventListener('click', loadUser);
+document.getElementById('gpBtn').addEventListener('click', togglePicker);
+document.getElementById('gpDd').addEventListener('click', e => {
+  const link = e.target.closest('.mg-link');
+  if (link) selectGenre(link.dataset.slug);
+});
+document.querySelector('.panel-close').addEventListener('click', closePanel);
+document.getElementById('panelPrev').addEventListener('click', () => panelAlbPage(-1));
+document.getElementById('panelNext').addEventListener('click', () => panelAlbPage(1));

@@ -118,9 +118,9 @@ function buildExtraUsersList() {
         ${avatar}
         <span class="eu-name">${escH(u.user)}</span>
         <span class="eu-meta">${u.count.toLocaleString()} álb.</span>
-        <button class="btn-sm" onclick="syncExtraUser(${i})" title="Sincronizar">↻</button>
-        <button class="btn-sm" onclick="saveExtraUserJSON(${i})" title="Guardar JSON">↓ JSON</button>
-        <button class="eu-del" onclick="removeExtraUser(${i})" title="Eliminar">✕</button>
+        <button class="btn-sm" data-action="sync" data-idx="${i}" title="Sincronizar">↻</button>
+        <button class="btn-sm" data-action="save-json" data-idx="${i}" title="Guardar JSON">↓ JSON</button>
+        <button class="eu-del" data-action="remove" data-idx="${i}" title="Eliminar">✕</button>
       </div>`;
     }).join('');
   }
@@ -134,7 +134,7 @@ function buildExtraUsersList() {
       const av = u.image
         ? `<img src="${escH(u.image)}" alt="">`
         : `<span class="fbu-dot" style="background:${u.color}"></span>`;
-      return `<button class="filter-btn filter-btn-user" data-filter="extra_${i}" onclick="setExtraFilter(${i})">
+      return `<button class="filter-btn filter-btn-user" data-filter="extra_${i}">
         ${av}${escH(u.user)}
       </button>`;
     }).join('');
@@ -386,7 +386,7 @@ async function renderIdbExtraList() {
         </div>
         ${already
           ? `<span style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3)">añadido</span>`
-          : `<button class="btn-sm primary" onclick="idbAddAsExtra('${escH(s.user)}')">Añadir</button>`}
+          : `<button class="btn-sm primary" data-action="add-extra" data-user="${escH(s.user)}">Añadir</button>`}
       </div>`;
     }).join('');
 }
@@ -473,9 +473,9 @@ async function renderIdbList() {
           <div class="idb-entry-user">${escH(s.user)}</div>
           <div class="idb-entry-meta">${(s.count||s.heard?.length||0).toLocaleString()} álb. · ${new Date(_ts*1000).toLocaleDateString()}${escH(_lbl)}</div>
         </div>
-        <button class="btn-sm primary" onclick="idbLoadSession('${escH(s.user)}')">Cargar</button>
-        <button class="btn-sm" onclick="idbDownloadSession('${escH(s.user)}')">↓ JSON</button>
-        <button class="btn-sm" onclick="idbDeleteSession('${escH(s.user)}')">✕</button>
+        <button class="btn-sm primary" data-action="load" data-user="${escH(s.user)}">Cargar</button>
+        <button class="btn-sm" data-action="download" data-user="${escH(s.user)}">↓ JSON</button>
+        <button class="btn-sm" data-action="delete" data-user="${escH(s.user)}">✕</button>
       </div>`;
     }).join('');
 }
@@ -644,16 +644,19 @@ function renderFriendsList(friends) {
   listEl.innerHTML = friends.map(f => {
     const added = alreadyAdded.has(f.username.toLowerCase());
     const avatar = f.image
-      ? `<img class="fr-avatar" src="${escH(f.image)}" alt="" onerror="this.style.display='none'">`
+      ? `<img class="fr-avatar" src="${escH(f.image)}" alt="">`
       : `<span class="fr-avatar" style="background:var(--bg3);display:inline-block"></span>`;
     return `<div class="fr-row" id="fr-row-${escH(f.username.toLowerCase().replace(/[^a-z0-9]/g,''))}">
       ${avatar}
       <span class="fr-name">${escH(f.username)}</span>
-      <button class="btn-sm fr-add" ${added ? 'disabled' : ''} onclick="addExtraUserByName('${escH(f.username)}', this)">
+      <button class="btn-sm fr-add" ${added ? 'disabled' : ''} data-username="${escH(f.username)}">
         ${added ? '✓' : 'Añadir'}
       </button>
     </div>`;
   }).join('');
+  listEl.querySelectorAll('img.fr-avatar').forEach(img => {
+    img.addEventListener('error', () => { img.style.display = 'none'; });
+  });
 }
 
 async function addExtraUserByName(username, btn) {
@@ -817,12 +820,8 @@ function renderJsonTree(nodes, byJsonSlug, depth, pathPrefix) {
     const coll  = byJsonSlug[node.s];
     const slug  = coll ? coll.slug : '';
     const nid   = 'tree-' + (pathPrefix + node.s).replace(/[^a-z0-9]/gi, '_');
-    let onclick = '';
-    if (slug && hasKids) onclick = `toggleTree('${nid}');selectCollection('${escH(slug)}')`;
-    else if (slug)        onclick = `selectCollection('${escH(slug)}')`;
-    else if (hasKids)     onclick = `toggleTree('${nid}')`;
     html += `<div class="tree-genre" id="${nid}">
-      <div class="tree-genre-hdr" style="padding-left:${indent}" onclick="${onclick}" data-slug="${escH(slug)}">
+      <div class="tree-genre-hdr" style="padding-left:${indent}" data-nid="${nid}" data-slug="${escH(slug)}" data-has-kids="${hasKids ? '1' : ''}">
         <span class="tree-genre-name" style="font-size:${fontSize}">${escH(node.n)}</span>
         ${coll && coll.total_albums ? `<span class="sb-coll-count">${coll.total_albums}</span>` : ''}
         ${hasKids ? `<span class="tree-genre-arrow">▶</span>` : ''}
@@ -851,17 +850,13 @@ function buildRymTreeFallback(cols) {
     const hasKids = node.children.size > 0;
     const slug = node.self ? node.self.slug : '';
     const nid = 'tree-' + name.replace(/[^a-z0-9]/gi, '_');
-    let onclick = '';
-    if (slug && hasKids) onclick = `toggleTree('${nid}');selectCollection('${escH(slug)}')`;
-    else if (slug)        onclick = `selectCollection('${escH(slug)}')`;
-    else if (hasKids)     onclick = `toggleTree('${nid}')`;
     html += `<div class="tree-genre" id="${nid}">
-      <div class="tree-genre-hdr" style="padding-left:1.15rem" onclick="${onclick}" data-slug="${escH(slug)}">
+      <div class="tree-genre-hdr" style="padding-left:1.15rem" data-nid="${nid}" data-slug="${escH(slug)}" data-has-kids="${hasKids ? '1' : ''}">
         <span class="tree-genre-name">${escH(name)}</span>
         ${node.self && node.self.total_albums ? `<span class="sb-coll-count">${node.self.total_albums}</span>` : ''}
         ${hasKids ? `<span class="tree-genre-arrow">▶</span>` : ''}
       </div>
-      ${hasKids ? `<div class="tree-sub">${[...node.children.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([n,c]) => `<div class="tree-sub-item" data-slug="${escH(c.self?.slug||'')}" onclick="selectCollection('${escH(c.self?.slug||'')}')">${escH(n)}${c.self?.total_albums?`<span class="sb-coll-count" style="margin-left:auto">${c.self.total_albums}</span>`:''}</div>`).join('')}</div>` : ''}
+      ${hasKids ? `<div class="tree-sub">${[...node.children.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([n,c]) => `<div class="tree-sub-item" data-slug="${escH(c.self?.slug||'')}">${escH(n)}${c.self?.total_albums?`<span class="sb-coll-count" style="margin-left:auto">${c.self.total_albums}</span>`:''}</div>`).join('')}</div>` : ''}
     </div>`;
   }
   return html;
@@ -1165,7 +1160,7 @@ function buildGenrePills() {
     return;
   }
   document.getElementById('genre-pills').innerHTML = top.map(g =>
-    `<span class="pill${activeGenres.has(g)?' active':''}" onclick="toggleGenre('${escH(g)}')">${escH(g)}</span>`
+    `<span class="pill${activeGenres.has(g)?' active':''}" data-genre="${escH(g)}">${escH(g)}</span>`
   ).join('');
 }
 
@@ -1187,7 +1182,7 @@ function buildDecadePills() {
     return;
   }
   document.getElementById('decade-pills').innerHTML = sorted.map(d =>
-    `<span class="pill${activeDecades.has(d)?' active':''}" onclick="toggleDecade(${d})">${d}s</span>`
+    `<span class="pill${activeDecades.has(d)?' active':''}" data-decade="${d}">${d}s</span>`
   ).join('');
 }
 
@@ -1217,6 +1212,12 @@ function renderGrid() {
   if (!f.length) { grid.innerHTML = ''; emptyEl.classList.add('visible'); return; }
   emptyEl.classList.remove('visible');
   grid.innerHTML = f.map(a => cardHTML(a)).join('');
+  grid.querySelectorAll('img.card-cover').forEach(img => {
+    img.addEventListener('error', () => {
+      img.style.display = 'none';
+      if (img.nextElementSibling) img.nextElementSibling.style.display = 'flex';
+    });
+  });
   grid.querySelectorAll('.card').forEach(c => {
     c.addEventListener('click', () => openDetailPanel({ type:'collection', idx: parseInt(c.dataset.idx) }));
   });
@@ -1226,8 +1227,7 @@ function cardHTML(a) {
   const cls  = a.heard ? 'heard' : 'missing';
   const idx  = allAlbums.indexOf(a);
   const imgEl = a.cover
-    ? `<img class="card-cover" src="${escH(a.cover)}" loading="lazy" alt="${escH(a.title)}"
-          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+    ? `<img class="card-cover" src="${escH(a.cover)}" loading="lazy" alt="${escH(a.title)}">`
     : '';
   const ph = `<div class="card-placeholder" ${a.cover ? 'style="display:none"' : ''}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
@@ -1250,3 +1250,84 @@ function cardHTML(a) {
     </div>
   </div>`;
 }
+
+// ── Event listeners (replaces all removed inline handlers) ─────────────────
+
+// Static elements (from HTML template)
+document.getElementById('badge-inline').addEventListener('click', openUserModal);
+document.getElementById('btn-usuario').addEventListener('click', openUserModal);
+document.querySelector('#user-modal .modal-close').addEventListener('click', closeUserModal);
+document.querySelector('#um-sec-extra .um-section-title').addEventListener('click', toggleUmExtra);
+document.getElementById('sidebar-overlay').addEventListener('click', closeSidebar);
+document.getElementById('sidebar-fab').addEventListener('click', toggleSidebar);
+document.querySelector('#panel-colls .sb-panel-hdr').addEventListener('click', () => togglePanel('panel-colls'));
+document.querySelector('#panel-genres .sb-panel-hdr').addEventListener('click', () => togglePanel('panel-genres'));
+document.querySelector('#panel-dates .sb-panel-hdr').addEventListener('click', () => togglePanel('panel-dates'));
+document.querySelector('button.sb-about-btn').addEventListener('click', openAboutModal);
+document.getElementById('about-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeAboutModal(); });
+document.querySelector('.about-close').addEventListener('click', closeAboutModal);
+document.querySelector('.dp-close').addEventListener('click', closeDetailPanel);
+
+// Delegation: extra-users list (sync / save-json / remove)
+document.getElementById('extra-users-list').addEventListener('click', e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const idx = parseInt(btn.dataset.idx);
+  if (btn.dataset.action === 'sync')      syncExtraUser(idx);
+  else if (btn.dataset.action === 'save-json') saveExtraUserJSON(idx);
+  else if (btn.dataset.action === 'remove')    removeExtraUser(idx);
+});
+
+// Delegation: per-user filter buttons
+document.getElementById('filter-extra-users').addEventListener('click', e => {
+  const btn = e.target.closest('[data-filter]');
+  if (!btn) return;
+  const i = parseInt(btn.dataset.filter.replace('extra_', ''));
+  setExtraFilter(i);
+});
+
+// Delegation: idb-extra-list (add-extra)
+document.getElementById('idb-extra-list').addEventListener('click', e => {
+  const btn = e.target.closest('[data-action="add-extra"]');
+  if (btn) idbAddAsExtra(btn.dataset.user);
+});
+
+// Delegation: idb-list (load / download / delete)
+document.getElementById('idb-list').addEventListener('click', e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const user = btn.dataset.user;
+  if (btn.dataset.action === 'load')     idbLoadSession(user);
+  else if (btn.dataset.action === 'download') idbDownloadSession(user);
+  else if (btn.dataset.action === 'delete')   idbDeleteSession(user);
+});
+
+// Delegation: friends-list (fr-add)
+document.getElementById('friends-list').addEventListener('click', e => {
+  const btn = e.target.closest('.fr-add[data-username]');
+  if (btn && !btn.disabled) addExtraUserByName(btn.dataset.username, btn);
+});
+
+// Delegation: colls-body tree nodes (.tree-genre-hdr and .tree-sub-item)
+document.getElementById('colls-body').addEventListener('click', e => {
+  const hdr = e.target.closest('.tree-genre-hdr[data-nid]');
+  if (hdr) {
+    if (hdr.dataset.hasKids) toggleTree(hdr.dataset.nid);
+    if (hdr.dataset.slug)    selectCollection(hdr.dataset.slug);
+    return;
+  }
+  const sub = e.target.closest('.tree-sub-item[data-slug]');
+  if (sub && sub.dataset.slug) selectCollection(sub.dataset.slug);
+});
+
+// Delegation: genre pills
+document.getElementById('genre-pills').addEventListener('click', e => {
+  const pill = e.target.closest('.pill[data-genre]');
+  if (pill) toggleGenre(pill.dataset.genre);
+});
+
+// Delegation: decade pills
+document.getElementById('decade-pills').addEventListener('click', e => {
+  const pill = e.target.closest('.pill[data-decade]');
+  if (pill) toggleDecade(Number(pill.dataset.decade));
+});

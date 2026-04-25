@@ -898,12 +898,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:sticky;top:0;z-index:100;">
   <div class="logo" style="font-size:1.3rem">must<em>listen</em></div>
   <div style="flex:1"></div>
-  <div id="badge-inline" style="display:none;align-items:center;gap:0.45rem;cursor:pointer;" onclick="openUserModal()">
+  <div id="badge-inline" style="display:none;align-items:center;gap:0.45rem;cursor:pointer;">
     <img id="badge-avatar" src="" alt="" style="width:26px;height:26px;border-radius:50%;object-fit:cover;background:var(--bg3);">
     <span id="badge-name" style="font-family:var(--mono);font-size:0.75rem;color:var(--accent);"></span>
     <span id="badge-plays" style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3);"></span>
   </div>
-  <button id="btn-usuario" onclick="openUserModal()">USUARIO</button>
+  <button id="btn-usuario">USUARIO</button>
 </header>
 
 <input type="file" id="inp-session"       accept=".json" style="display:none">
@@ -912,7 +912,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!-- ── User modal ──────────────────────────────────────────────────────── -->
 <div id="user-modal-bg">
   <div id="user-modal">
-    <button class="modal-close" onclick="closeUserModal()">✕</button>
+    <button class="modal-close">✕</button>
 
     <!-- Usuario principal -->
     <div class="um-section">
@@ -940,7 +940,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     <!-- Usuarios adicionales (colapsable) -->
     <div class="um-section collapsed" id="um-sec-extra">
-      <div class="um-section-title" style="display:flex;align-items:center;cursor:pointer" onclick="toggleUmExtra()">
+      <div class="um-section-title" style="display:flex;align-items:center;cursor:pointer">
         Usuarios secundarios
         <button class="um-section-toggle" tabindex="-1">▾</button>
       </div>
@@ -965,9 +965,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 
 <!-- About modal -->
-<div id="about-overlay" onclick="if(event.target===this)closeAboutModal()">
+<div id="about-overlay">
   <div id="about-modal">
-    <button class="about-close" onclick="closeAboutModal()">✕</button>
+    <button class="about-close">✕</button>
     <h2>mustlisten</h2>
     <p>Cruza tu historial de <b>Last.fm</b> con listas de álbumes imprescindibles para saber qué te falta escuchar.</p>
 
@@ -1029,8 +1029,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 
 <!-- Mobile sidebar overlay + FAB -->
-<div id="sidebar-overlay" onclick="closeSidebar()"></div>
-<button id="sidebar-fab" onclick="toggleSidebar()">☰</button>
+<div id="sidebar-overlay"></div>
+<button id="sidebar-fab">☰</button>
 
 <!-- ── App shell ───────────────────────────────────────────────────────── -->
 <div class="app-shell">
@@ -1041,7 +1041,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <!-- Géneros (árbol de RYM charts) -->
       <div class="sb-panel open" id="panel-colls">
-        <div class="sb-panel-hdr" onclick="togglePanel('panel-colls')">
+        <div class="sb-panel-hdr">
           <span class="sb-panel-title">Géneros</span>
           <span class="sb-panel-arrow">▶</span>
         </div>
@@ -1052,7 +1052,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <!-- Géneros (tags de álbumes de la colección) -->
       <div class="sb-panel" id="panel-genres">
-        <div class="sb-panel-hdr" onclick="togglePanel('panel-genres')">
+        <div class="sb-panel-hdr">
           <span class="sb-panel-title">Géneros</span>
           <span class="sb-panel-arrow">▶</span>
         </div>
@@ -1065,7 +1065,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <!-- Fechas -->
       <div class="sb-panel open" id="panel-dates">
-        <div class="sb-panel-hdr" onclick="togglePanel('panel-dates')">
+        <div class="sb-panel-hdr">
           <span class="sb-panel-title">Fechas</span>
           <span class="sb-panel-arrow">▶</span>
         </div>
@@ -1078,7 +1078,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <!-- About + Géneros RYM link -->
       <a class="sb-about-btn" href="/genres" target="_blank" style="text-decoration:none;display:block;text-align:center">Árbol géneros ↗</a>
-      <button class="sb-about-btn" onclick="openAboutModal()">about</button>
+      <button class="sb-about-btn">about</button>
 
     </div><!-- .sb-scroll -->
 
@@ -1154,7 +1154,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!-- Detail side panel -->
 <div id="detail-overlay"></div>
 <div id="detail-panel">
-  <button class="dp-close" onclick="closeDetailPanel()">✕</button>
+  <button class="dp-close">✕</button>
   <div class="dp-header">
     <img class="dp-cover" id="dp-cover" src="" alt="">
     <div class="dp-meta">

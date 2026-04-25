@@ -247,8 +247,7 @@ def render_html(
         scraped = cslug in scraped_map
         cls = "mg-link" + (" scraped" if scraped else "")
         sidebar_html += (
-            f'<div class="{cls}" data-slug="{g["slug"]}" '
-            f'onclick="selectGenre(\'{g["slug"]}\')">'
+            f'<div class="{cls}" data-slug="{g["slug"]}">'
             f'<span class="dot{"" if not scraped else " dot-scraped"}"></span>'
             f'{g["name"]}'
             f'</div>\n'
@@ -276,9 +275,8 @@ def render_html(
   </nav>
   <div id="user-form">
     <input id="user-input" type="text" placeholder="usuario last.fm"
-           autocomplete="off" spellcheck="false"
-           onkeydown="if(event.key==='Enter') loadUser()">
-    <button id="user-load-btn" onclick="loadUser()">Cargar</button>
+           autocomplete="off" spellcheck="false">
+    <button id="user-load-btn">Cargar</button>
     <span id="user-status"></span>
   </div>
 </header>
@@ -288,7 +286,7 @@ def render_html(
     <svg id="tree-svg"></svg>
     <div id="tree-placeholder">Selecciona un género para ver su árbol</div>
     <div class="genre-picker" id="genrePicker">
-      <button class="genre-picker-btn" id="gpBtn" onclick="togglePicker()">
+      <button class="genre-picker-btn" id="gpBtn">
         <span id="gpLabel">Selecciona un género…</span>
         <span class="gp-caret">▾</span>
       </button>
@@ -299,14 +297,14 @@ def render_html(
 
   <aside id="panel">
     <div id="panel-scroll">
-      <button class="panel-close" onclick="closePanel()">✕</button>
+      <button class="panel-close">✕</button>
       <div id="panel-body"></div>
     </div>
     <div id="panel-video-area">
       <div class="panel-pag-row">
-        <button id="panelPrev" class="panel-pag-btn" onclick="panelAlbPage(-1)">&#8592;</button>
+        <button id="panelPrev" class="panel-pag-btn">&#8592;</button>
         <span id="panelPgInfo" style="font-family:'DM Mono',monospace;font-size:.56rem;color:var(--muted)"></span>
-        <button id="panelNext" class="panel-pag-btn" onclick="panelAlbPage(1)">&#8594;</button>
+        <button id="panelNext" class="panel-pag-btn">&#8594;</button>
       </div>
       <div id="panel-alb-pages"></div>
     </div>
