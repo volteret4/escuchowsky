@@ -92,6 +92,8 @@ function buildExtraUsersList() {
   const hasExtra = extraUsers.length > 0;
   const ctrlBar = document.getElementById('discover-ctrl-bar');
   if (ctrlBar) ctrlBar.style.display = hasExtra ? '' : 'none';
+  const _dv = document.getElementById('discover-view');
+  if (_dv && hasExtra) _dv.classList.add('visible');
   if (hasExtra) {
     if (activeDiscoverUserIdx >= extraUsers.length) activeDiscoverUserIdx = 0;
     _updateDiscoverIndicator();
@@ -114,7 +116,7 @@ function _updateDiscoverIndicator() {
   if (!el) return;
   if (!extraUsers.length) { el.innerHTML = ''; return; }
   el.innerHTML = extraUsers.map((uu, i) =>
-    `<div class="disc-user-line${i===activeDiscoverUserIdx?' active':''}" onclick="setActiveDiscoverUser(${i})">
+    `<div class="disc-user-line${i===activeDiscoverUserIdx?' active':''}" data-idx="${i}">
       ${uu.image
         ? `<img src="${escH(uu.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover;flex-shrink:0">`
         : `<span style="width:8px;height:8px;border-radius:50%;background:${uu.color};display:inline-block;flex-shrink:0"></span>`}
@@ -269,16 +271,19 @@ function renderFriendsList(friends) {
   listEl.innerHTML = friends.map(f => {
     const added = alreadyAdded.has(f.username.toLowerCase());
     const avatar = f.image
-      ? `<img class="fr-avatar" src="${escH(f.image)}" alt="" onerror="this.style.display='none'">`
+      ? `<img class="fr-avatar" src="${escH(f.image)}" alt="">`
       : `<span class="fr-avatar" style="background:var(--bg3);display:inline-block"></span>`;
     return `<div class="fr-row" id="fr-row-${escH(f.username.toLowerCase().replace(/[^a-z0-9]/g,''))}">
       ${avatar}
       <span class="fr-name">${escH(f.username)}</span>
-      <button class="btn-sm fr-add" ${added ? 'disabled' : ''} onclick="addExtraUserByName('${escH(f.username)}', this)">
+      <button class="btn-sm fr-add" ${added ? 'disabled' : ''} data-username="${escH(f.username)}">
         ${added ? '✓' : 'Añadir'}
       </button>
     </div>`;
   }).join('');
+  listEl.querySelectorAll('img.fr-avatar').forEach(img => {
+    img.addEventListener('error', () => { img.style.display = 'none'; });
+  });
 }
 
 async function addExtraUserByName(username, btn) {
@@ -463,8 +468,7 @@ function discoverCardHTML(a, i) {
         : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`
     ).join('');
     const cover = a.cover_url
-      ? `<img class="card-cover" src="${escH(a.cover_url)}" loading="lazy" alt=""
-            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+      ? `<img class="card-cover" src="${escH(a.cover_url)}" loading="lazy" alt="">`
       : '';
     return `<div class="card rec-card disc-song-card" data-disc="${i}" style="cursor:pointer">
       ${cover}
@@ -505,8 +509,7 @@ function discoverCardHTML(a, i) {
     </div>`;
   }
   const cover = a.cover_url
-    ? `<img class="card-cover" src="${escH(a.cover_url)}" loading="lazy" alt=""
-          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+    ? `<img class="card-cover" src="${escH(a.cover_url)}" loading="lazy" alt="">`
     : '';
   const ph = `<div class="card-placeholder" ${a.cover_url ? 'style="display:none"' : ''}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
@@ -541,6 +544,12 @@ function renderDiscoverGrid() {
     });
   }
   dg.innerHTML = filtered.map((a, i) => discoverCardHTML(a, discoverAlbums.indexOf(a))).join('');
+  dg.querySelectorAll('img.card-cover').forEach(img => {
+    img.addEventListener('error', () => {
+      img.style.display = 'none';
+      if (img.nextElementSibling) img.nextElementSibling.style.display = 'flex';
+    });
+  });
   dg.querySelectorAll('.card[data-disc]').forEach(c => {
     c.addEventListener('click', () => {
       const idx = parseInt(c.dataset.disc);
@@ -1347,8 +1356,8 @@ async function showCacheNotice() {
     (<b>${escH(oldest?.user || '')}</b>, descargado el ${oldestDate}) podría eliminarse automáticamente.
     <b>Se recomienda hacer una copia de seguridad antes de continuar.</b>
     <div class="notice-btns">
-      <button class="btn-sm" onclick="idbExportAll()">↓ Exportar todo (backup)</button>
-      <button class="btn-sm" onclick="this.closest('#sb-cache-notice').style.display='none';delete this.closest('#sb-cache-notice').dataset.shown">✕ Cerrar</button>
+      <button class="btn-sm" data-action="export">↓ Exportar todo (backup)</button>
+      <button class="btn-sm" data-action="close-notice">✕ Cerrar</button>
     </div>`;
 }
 
@@ -1456,11 +1465,11 @@ async function renderSecondaryUsers() {
         </div>
       </div>
       <div class="sec-user-btns">
-        <button class="btn-sm" onclick="syncSecondaryIdb('${escH(s.user)}')" title="Sincronizar desde Last.fm">↻ Sync</button>
-        <button class="btn-sm${isActive ? ' act' : ''}" onclick="toggleSecondaryUser('${escH(s.user)}')">${isActive ? 'ACTIVO' : 'CARGAR'}</button>
-        <button class="btn-sm" onclick="idbDownloadSession('${escH(s.user)}')" title="Guardar JSON">↓ JSON</button>
-        <button class="btn-sm" onclick="setPrimaryFromSecondary('${escH(s.user)}')" title="Cargar como usuario principal">→ Prin.</button>
-        <button class="eu-del" onclick="idbDeleteSession('${escH(s.user)}')" title="Eliminar">✕</button>
+        <button class="btn-sm" data-action="sync" data-user="${escH(s.user)}" title="Sincronizar desde Last.fm">↻ Sync</button>
+        <button class="btn-sm${isActive ? ' act' : ''}" data-action="toggle" data-user="${escH(s.user)}">${isActive ? 'ACTIVO' : 'CARGAR'}</button>
+        <button class="btn-sm" data-action="download" data-user="${escH(s.user)}" title="Guardar JSON">↓ JSON</button>
+        <button class="btn-sm" data-action="set-primary" data-user="${escH(s.user)}" title="Cargar como usuario principal">→ Prin.</button>
+        <button class="eu-del" data-action="delete" data-user="${escH(s.user)}" title="Eliminar">✕</button>
       </div>
     </div>`;
   }).join('');
@@ -1907,3 +1916,57 @@ if ('serviceWorker' in navigator) {
     }
   }
 })();
+
+// ── Event listeners (replaces all removed inline handlers) ─────────────────
+
+// Static elements (from HTML template)
+document.getElementById('btn-start-welcome').addEventListener('click', startFromWelcome);
+document.getElementById('btn-open-users').addEventListener('click', openUserModal);
+document.querySelector('#user-modal .modal-close').addEventListener('click', closeUserModal);
+document.getElementById('about-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeAboutModal();
+});
+document.querySelector('.about-close').addEventListener('click', closeAboutModal);
+document.getElementById('disc-play-btn').addEventListener('click', triggerDiscover);
+document.getElementById('disc-prev').addEventListener('click', discoverPrevPage);
+document.getElementById('disc-next').addEventListener('click', discoverNextPage);
+document.querySelector('.dp-close').addEventListener('click', closeDetailPanel);
+
+// Delegation: disc-user-indicator (user selector pills)
+document.getElementById('disc-user-indicator').addEventListener('click', e => {
+  const line = e.target.closest('.disc-user-line[data-idx]');
+  if (line) setActiveDiscoverUser(parseInt(line.dataset.idx));
+});
+
+// Delegation: friends-list (fr-add)
+document.getElementById('friends-list').addEventListener('click', e => {
+  const btn = e.target.closest('.fr-add[data-username]');
+  if (btn && !btn.disabled) addExtraUserByName(btn.dataset.username, btn);
+});
+
+// Delegation: sb-cache-notice (export / close)
+document.getElementById('sb-cache-notice').addEventListener('click', e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  if (btn.dataset.action === 'export') {
+    idbExportAll();
+  } else if (btn.dataset.action === 'close-notice') {
+    const notice = document.getElementById('sb-cache-notice');
+    notice.style.display = 'none';
+    delete notice.dataset.shown;
+  }
+});
+
+// Delegation: secondary-users-list (sync / toggle / download / set-primary / delete)
+document.getElementById('secondary-users-list').addEventListener('click', e => {
+  const btn = e.target.closest('[data-action][data-user]');
+  if (!btn) return;
+  const user = btn.dataset.user;
+  switch (btn.dataset.action) {
+    case 'sync':        syncSecondaryIdb(user); break;
+    case 'toggle':      toggleSecondaryUser(user); break;
+    case 'download':    idbDownloadSession(user); break;
+    case 'set-primary': setPrimaryFromSecondary(user); break;
+    case 'delete':      idbDeleteSession(user); break;
+  }
+});

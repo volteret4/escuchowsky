@@ -993,7 +993,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
       </div>
 
-      <button onclick="startFromWelcome()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:0.85rem 1.5rem;font-family:var(--serif);font-weight:700;font-size:1rem;cursor:pointer;letter-spacing:0.02em;transition:background 0.15s">
+      <button id="btn-start-welcome" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:0.85rem 1.5rem;font-family:var(--serif);font-weight:700;font-size:1rem;cursor:pointer;letter-spacing:0.02em;transition:background 0.15s">
         Comenzar →
       </button>
     </div>
@@ -1012,7 +1012,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <img id="badge-avatar" src="" alt="" style="width:24px;height:24px;border-radius:50%;object-fit:cover;background:var(--bg3);display:none">
     <span id="badge-name" style="font-family:var(--mono);font-size:0.75rem;color:var(--accent);"></span>
   </div>
-  <button id="btn-open-users" onclick="openUserModal()" title="Gestionar usuarios" style="width:34px;height:34px;border-radius:50%;background:var(--bg3);border:1px solid var(--border2);color:var(--ink2);font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .15s,color .15s">👤</button>
+  <button id="btn-open-users" title="Gestionar usuarios" style="width:34px;height:34px;border-radius:50%;background:var(--bg3);border:1px solid var(--border2);color:var(--ink2);font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .15s,color .15s">👤</button>
 </header>
 
 <input type="file" id="inp-session" accept=".json" style="display:none">
@@ -1020,7 +1020,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!-- ── User modal ──────────────────────────────────────────────────────── -->
 <div id="user-modal-bg">
   <div id="user-modal">
-    <button class="modal-close" onclick="closeUserModal()">✕</button>
+    <button class="modal-close">✕</button>
 
     <!-- Buscador universal -->
     <div class="um-section">
@@ -1075,9 +1075,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <input type="file" id="inp-extra-json" accept=".json" style="display:none">
 
 <!-- About modal -->
-<div id="about-overlay" onclick="if(event.target===this)closeAboutModal()">
+<div id="about-overlay">
   <div id="about-modal">
-    <button class="about-close" onclick="closeAboutModal()">✕</button>
+    <button class="about-close">✕</button>
     <h2>tumtumpa</h2>
     <p>Cruza tu historial de <b>Last.fm</b> con otros usuarios para saber qué te falta escuchar de su colección.</p>
 
@@ -1171,15 +1171,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               <option value="artists">Artistas</option>
               <option value="songs">Canciones</option>
             </select>
-            <button id="disc-play-btn" onclick="triggerDiscover()" title="Descubrir">▶</button>
+            <button id="disc-play-btn" title="Descubrir">▶</button>
           </div>
         </div>
         <div class="discover-filters" id="discover-decade-pills"></div>
         <div id="discover-grid"></div>
         <div class="discover-pagination" id="discover-pagination" style="display:none">
-          <button class="btn-sm" id="disc-prev" onclick="discoverPrevPage()">← Anteriores</button>
+          <button class="btn-sm" id="disc-prev">← Anteriores</button>
           <span id="disc-page-info" style="font-family:var(--mono);font-size:0.72rem;color:var(--ink3)"></span>
-          <button class="btn-sm" id="disc-next" onclick="discoverNextPage()">Siguientes →</button>
+          <button class="btn-sm" id="disc-next">Siguientes →</button>
         </div>
         <div class="discover-footer" id="discover-footer" style="display:none">
           <span id="discover-progress"></span>
@@ -1194,7 +1194,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!-- Detail side panel -->
 <div id="detail-overlay"></div>
 <div id="detail-panel">
-  <button class="dp-close" onclick="closeDetailPanel()">✕</button>
+  <button class="dp-close">✕</button>
   <div class="dp-header">
     <img class="dp-cover" id="dp-cover" src="" alt="">
     <div class="dp-meta">
