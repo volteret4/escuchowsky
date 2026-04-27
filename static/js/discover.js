@@ -443,15 +443,22 @@ function _normClient(s) {
 const _sleep = ms => new Promise(r => setTimeout(r, ms));
 const _LFM_NO_IMG = '2a96cbd8b46e442fc41c2b86b821562f';
 
-async function lfmGet(method, params, _retries = 3) {
+async function lfmGet(method, params, _retries = 4) {
   const p = new URLSearchParams({ method, api_key: LFM_CLIENT_KEY, format: 'json', ...params });
   const r = await fetch('https://ws.audioscrobbler.com/2.0/?' + p);
-  if (!r.ok) throw new Error(`LFM HTTP ${r.status}`);
+  if (!r.ok) {
+    // LFM returns genuine HTTP 500/503 transiently — retry with backoff
+    if ((r.status === 500 || r.status === 503) && _retries > 0) {
+      await _sleep(3000 + Math.random() * 2000);
+      return lfmGet(method, params, _retries - 1);
+    }
+    throw new Error(`LFM HTTP ${r.status}`);
+  }
   const data = await r.json();
   if (data.error) {
-    // Transient LFM errors: retry with backoff
+    // Transient LFM JSON errors: retry with backoff
     if ((data.error === 8 || data.error === 11 || data.error === 16) && _retries > 0) {
-      await _sleep(2000 + Math.random() * 1000);
+      await _sleep(3000 + Math.random() * 2000);
       return lfmGet(method, params, _retries - 1);
     }
     if (!data.topalbums && !data.toptracks && !data.recenttracks) {
@@ -469,19 +476,23 @@ function _lfmBestImg(images) {
   return '';
 }
 
-async function lbGetDirect(path) {
-  const r = await fetch('https://api.listenbrainz.org' + path);
-  if (!r.ok) throw new Error(`LB HTTP ${r.status}`);
-  return r.json();
-}
-
 let _lbLastCall = 0;
-async function lbGet(path) {
+async function lbGet(path, _retries = 4) {
   const now = Date.now();
   const wait = 1000 - (now - _lbLastCall);
   if (wait > 0) await _sleep(wait);
   _lbLastCall = Date.now();
-  return lbGetDirect(path);
+  const r = await fetch('https://api.listenbrainz.org' + path);
+  if (!r.ok) {
+    if (_retries > 0) {
+      // 429 = rate limited: wait longer before retry
+      const retryWait = r.status === 429 ? 10000 : 4000;
+      await _sleep(retryWait + Math.random() * 2000);
+      return lbGet(path, _retries - 1);
+    }
+    throw new Error(`LB HTTP ${r.status}`);
+  }
+  return r.json();
 }
 
 let _mbLastCall = 0;
