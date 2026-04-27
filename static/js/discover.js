@@ -451,10 +451,21 @@ async function lfmGet(method, params) {
   return data;
 }
 
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
+
 async function lbGetDirect(path) {
   const r = await fetch('https://api.listenbrainz.org' + path);
   if (!r.ok) throw new Error(`LB HTTP ${r.status}`);
   return r.json();
+}
+
+let _lbLastCall = 0;
+async function lbGet(path) {
+  const now = Date.now();
+  const wait = 1000 - (now - _lbLastCall);
+  if (wait > 0) await _sleep(wait);
+  _lbLastCall = Date.now();
+  return lbGetDirect(path);
 }
 
 // Shared helper to turn the internal dicts into the wire format arrays
@@ -577,7 +588,7 @@ async function _lbFetchAllClient(user, onProgress) {
   let maxTs = null, page = 0, totalPages = null;
 
   try {
-    const cnt = await lbGetDirect(`/1/user/${encodeURIComponent(user)}/listen-count`);
+    const cnt = await lbGet(`/1/user/${encodeURIComponent(user)}/listen-count`);
     const total = cnt.payload?.count || 0;
     totalPages = Math.max(1, Math.ceil(total / 100));
   } catch(e) {}
@@ -586,7 +597,7 @@ async function _lbFetchAllClient(user, onProgress) {
     let path = `/1/user/${encodeURIComponent(user)}/listens?count=100`;
     if (maxTs !== null) path += `&max_ts=${maxTs}`;
     let payload;
-    try { payload = (await lbGetDirect(path)).payload || {}; }
+    try { payload = (await lbGet(path)).payload || {}; }
     catch(e) { if (page === 0) throw e; break; }
     const listens = payload.listens || [];
     if (!listens.length) break;
@@ -686,7 +697,7 @@ async function _lbSinceClient(user, since) {
     if (maxTs !== null) path += `&max_ts=${maxTs}`;
     if (since) path += `&min_ts=${since}`;
     let payload;
-    try { payload = (await lbGetDirect(path)).payload || {}; } catch(e) { break; }
+    try { payload = (await lbGet(path)).payload || {}; } catch(e) { break; }
     const listens = payload.listens || [];
     if (!listens.length) break;
     for (const l of listens) {
