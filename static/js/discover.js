@@ -265,7 +265,7 @@ async function addExtraUser() {
       last_scrobble_track: result.last_scrobble_track || "",
     });
     saveExtraUsersLS();
-    await idbSave({
+    await idbSaveOrModal({
       user: realUser,
       count: result.heard.length,
       fetched_at,
@@ -332,7 +332,7 @@ async function syncExtraUser(idx) {
       extraUsers[idx].last_scrobble_track = data.last_scrobble_track || "";
     }
     saveExtraUsersLS();
-    await idbSave({
+    await idbSaveOrModal({
       user: extraUsers[idx].user,
       count: extraUsers[idx].count,
       fetched_at: extraUsers[idx].fetched_at,
@@ -461,7 +461,7 @@ async function addExtraUserByName(username, btn) {
       last_scrobble_track: result.last_scrobble_track || "",
     });
     saveExtraUsersLS();
-    await idbSave({
+    await idbSaveOrModal({
       user: realUser,
       count: result.heard.length,
       fetched_at,
@@ -529,7 +529,7 @@ document
         image: "",
       });
       saveExtraUsersLS();
-      await idbSave({
+      await idbSaveOrModal({
         user: data.user,
         count: data.heard.length,
         fetched_at: ft,
@@ -2508,22 +2508,11 @@ async function idbSave(data) {
       tx.onerror = (e) => reject(e.target.error);
     });
   try {
-    return await _put(data);
+    await _put(data);
+    return null;
   } catch (e) {
-    if (e.name !== "QuotaExceededError") throw e;
-    // Sin canciones (songs pueden ser varios MB para usuarios grandes)
-    console.warn("[idb] QuotaExceededError — guardando sin canciones");
-    try {
-      return await _put({ ...data, songs: [] });
-    } catch (e2) {
-      if (e2.name !== "QuotaExceededError") throw e2;
-      // Sin heard tampoco — solo metadatos para que el usuario aparezca en la lista
-      console.warn("[idb] QuotaExceededError — guardando solo metadatos");
-      const { heard, songs, ...meta } = data;
-      return await _put({ ...meta, heard: [], songs: [], partial: true }).catch(
-        () => null,
-      );
-    }
+    if (e.name === "QuotaExceededError") return { quota: true };
+    throw e;
   }
 }
 async function idbLoad(username) {
@@ -2556,6 +2545,112 @@ async function idbDelete(username) {
     tx.oncomplete = resolve;
     tx.onerror = (e) => reject(e.target.error);
   });
+}
+
+// ── Quota exceeded modal ─────────────────────────────────────────────────
+let _quotaExportPending = null;
+
+async function showQuotaModal(username, inMemoryData) {
+  _quotaExportPending = inMemoryData;
+
+  let sessions = [];
+  try { sessions = await idbList(); } catch (_) {}
+
+  const approxSize = (s) => {
+    const bytes = ((s.heard?.length || s.count || 0) + (s.songs?.length || 0)) * 22;
+    return bytes > 1048576
+      ? `~${(bytes / 1048576).toFixed(1)} MB`
+      : `~${Math.max(1, Math.round(bytes / 1024))} KB`;
+  };
+
+  const others = sessions
+    .filter((s) => s.user.toLowerCase() !== username.toLowerCase())
+    .sort((a, b) => (b.count || 0) - (a.count || 0));
+
+  let usageHtml = "";
+  if (navigator.storage?.estimate) {
+    try {
+      const est = await navigator.storage.estimate();
+      const usedMB = (est.usage / 1048576).toFixed(1);
+      const quotaMB = (est.quota / 1048576).toFixed(0);
+      usageHtml = `<div class="quota-usage">Uso actual: <b>${usedMB} MB</b> de <b>${quotaMB} MB</b></div>`;
+    } catch (_) {}
+  }
+
+  const sessionRows = others
+    .map((s) => {
+      const sid = "qsr-" + s.user.toLowerCase().replace(/[^a-z0-9]/g, "");
+      return `<div class="quota-session-row" id="${sid}">
+        <span class="quota-sname">${escH(s.user)}</span>
+        <span class="quota-ssize">${approxSize(s)}</span>
+        <button class="btn-sm quota-del" data-user="${escH(s.user)}">Eliminar</button>
+      </div>`;
+    })
+    .join("");
+
+  let modal = document.getElementById("quota-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "quota-modal";
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `<div class="quota-box">
+    <h3>Sin espacio en el navegador</h3>
+    <p>Los datos de <b>${escH(username)}</b> están cargados en memoria y puedes usarlos esta sesión, pero el navegador no tiene espacio para guardarlos de forma permanente.</p>
+    ${usageHtml}
+    <div class="quota-actions">
+      <button class="btn" id="quota-export-btn">↓ Exportar JSON</button>
+      <button class="btn" id="quota-persist-btn">Pedir almacenamiento persistente</button>
+    </div>
+    ${others.length
+      ? `<div class="quota-sessions-label">Elimina una sesión para liberar espacio:</div>
+         <div class="quota-sessions">${sessionRows}</div>`
+      : ""}
+    <div class="quota-tip">Para aumentar la cuota en Chrome: <em>Configuración → Privacidad → Configuración de sitios → Almacenamiento</em>. En Firefox, el botón de arriba suele ser suficiente.</div>
+    <button class="btn-sm" id="quota-close-btn" style="margin-top:.3rem">Cerrar</button>
+  </div>`;
+  modal.classList.add("open");
+  document.body.style.overflow = "hidden";
+
+  modal.querySelector("#quota-close-btn").onclick = () => {
+    modal.classList.remove("open");
+    document.body.style.overflow = "";
+  };
+  modal.onclick = (e) => {
+    if (e.target === modal) { modal.classList.remove("open"); document.body.style.overflow = ""; }
+  };
+  modal.querySelector("#quota-export-btn").onclick = () => {
+    const d = _quotaExportPending;
+    if (!d) return;
+    const blob = new Blob(
+      [JSON.stringify({ version: 1, user: d.user, count: d.heard?.length || 0, fetched_at: d.fetched_at || 0, heard: d.heard || [], songs: d.songs || [] }, null, 0)],
+      { type: "application/json" }
+    );
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `tumtumpa_${d.user}_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  modal.querySelector("#quota-persist-btn").onclick = async () => {
+    const btn = modal.querySelector("#quota-persist-btn");
+    if (!navigator.storage?.persist) { btn.textContent = "No soportado en este navegador"; return; }
+    const ok = await navigator.storage.persist();
+    btn.textContent = ok ? "✓ Activado — intenta guardar de nuevo" : "El navegador no concedió permiso";
+  };
+  modal.querySelectorAll(".quota-del").forEach((btn) => {
+    btn.onclick = async () => {
+      const user = btn.dataset.user;
+      await idbDelete(user);
+      const sid = "qsr-" + user.toLowerCase().replace(/[^a-z0-9]/g, "");
+      document.getElementById(sid)?.remove();
+    };
+  });
+}
+
+async function idbSaveOrModal(data) {
+  const r = await idbSave(data);
+  if (r?.quota) showQuotaModal(data.user, data);
 }
 
 // ── Unified secondary users list ─────────────────────────────────────────
@@ -2802,7 +2897,7 @@ async function syncSecondaryIdb(username) {
         method,
       );
       const newFetched = Math.floor(Date.now() / 1000);
-      await idbSave({
+      await idbSaveOrModal({
         user: username,
         count: lfmResult.heard.length,
         fetched_at: newFetched,
@@ -2853,7 +2948,7 @@ async function syncSecondaryIdb(username) {
     );
     const mergedSongs = [...(existing?.songs || []), ...addedSongs];
     const newFetched = data.fetched_at || Math.floor(Date.now() / 1000);
-    await idbSave({
+    await idbSaveOrModal({
       user: username,
       count: merged.length,
       fetched_at: newFetched,
@@ -2936,7 +3031,7 @@ function loadHeardCache(data) {
     heardCache.last_scrobble_artist,
     heardCache.last_scrobble_track,
   );
-  idbSave({
+  const _idbPayload = {
     user: heardCache.user,
     count: heardCache.count,
     fetched_at: heardCache.fetched_at,
@@ -2950,8 +3045,10 @@ function loadHeardCache(data) {
     heard_artists: [...heardCache.artist_set],
     source: heardCache.source,
     tracks_loaded: heardCache.tracks_loaded,
-  })
-    .then(() => {
+  };
+  idbSave(_idbPayload)
+    .then((r) => {
+      if (r?.quota) showQuotaModal(_idbPayload.user, _idbPayload);
       renderIdbList();
       renderIdbExtraList();
     })
@@ -3044,7 +3141,7 @@ inpSession.addEventListener("change", async (e) => {
         image: "",
       });
       saveExtraUsersLS();
-      await idbSave({
+      await idbSaveOrModal({
         user: data.user,
         count: data.heard.length,
         fetched_at: ft,
@@ -3212,7 +3309,7 @@ async function doLoadUser() {
       if (euIdx !== -1) extraUsers[euIdx] = eu;
       else extraUsers.push(eu);
       saveExtraUsersLS();
-      await idbSave({
+      await idbSaveOrModal({
         user: realUser,
         count: result.heard.length,
         fetched_at,

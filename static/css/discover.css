@@ -1185,3 +1185,30 @@ input::placeholder { color: var(--ink3); }
   #user-modal .um-section:last-child { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   #user-modal .um-section:last-child #friends-list { flex: 1; max-height: none; overflow-y: auto; }
 }
+
+/* ── Quota exceeded modal ───────────────────────────────────────────── */
+#quota-modal {
+  display: none; position: fixed; inset: 0; z-index: 600;
+  background: rgba(0,0,0,0.72); backdrop-filter: blur(3px);
+  align-items: center; justify-content: center; padding: 1rem;
+}
+#quota-modal.open { display: flex; }
+.quota-box {
+  background: var(--bg2); border: 1px solid var(--border2);
+  border-radius: 4px; padding: 1.4rem 1.6rem;
+  max-width: 480px; width: 100%; max-height: 85vh; overflow-y: auto;
+}
+.quota-box h3 { margin: 0 0 .5rem; font-size: 1rem; color: var(--ink); }
+.quota-box p  { margin: 0 0 .7rem; font-size: .85rem; color: var(--ink2); line-height: 1.5; }
+.quota-usage  { font-size: .8rem; color: var(--ink3); margin-bottom: .7rem; }
+.quota-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin: .7rem 0; }
+.quota-sessions-label { font-size: .78rem; color: var(--ink3); margin: .5rem 0 .3rem; }
+.quota-sessions { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .7rem; }
+.quota-session-row {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .3rem .4rem; border-radius: 3px; background: var(--bg3);
+  font-size: .8rem;
+}
+.quota-sname { flex: 1; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quota-ssize { color: var(--ink3); flex-shrink: 0; }
+.quota-tip { font-size: .74rem; color: var(--ink3); line-height: 1.5; margin: .5rem 0; }
