@@ -103,6 +103,12 @@ def serve_img(filename):
 # ── API endpoints ──────────────────────────────────────────────────────────────
 
 
+@app.route("/api/config")
+def api_config():
+    """Exposes public client configuration (LFM key for direct browser calls)."""
+    return jsonify({"lfm_key": LFM_API_KEY or ""})
+
+
 @app.route("/api/scrobbles")
 def api_scrobbles():
     """

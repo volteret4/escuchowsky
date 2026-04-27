@@ -163,42 +163,41 @@ async function addExtraUser() {
   const prog = document.getElementById('um-extra-progress');
   const user = inp.value.trim();
   if (!user) return;
-  if (extraUsers.some(u => u.user.toLowerCase() === user.toLowerCase())) {
-    inp.value = ''; return;
-  }
+  if (extraUsers.some(u => u.user.toLowerCase() === user.toLowerCase())) { inp.value = ''; return; }
   const btn = document.getElementById('btn-extra-lfm');
-  btn.disabled = true; inp.disabled = true;
   const src = umSource();
-  prog.textContent = src === 'lb' ? 'Conectando con ListenBrainz...' : 'Conectando con Last.fm...';
+  const userInfo = await checkUserClient(user, src);
+  if (!userInfo.ok) { prog.textContent = 'Error: ' + (userInfo.error || 'Usuario no encontrado'); return; }
+  const method = await showFetchMethodModal(userInfo.username || user, src);
+  if (method === null) return;
+  btn.disabled = true; inp.disabled = true;
+  prog.textContent = 'Conectando…';
   try {
-    const [userInfo, lfmResult] = await Promise.all([
-      fetch(checkUserEndpoint(user, src)).then(r=>r.json()).catch(()=>null),
-      fetchScrobblesSSE(user, msg => {
-        if (msg._waiting) prog.textContent = `⏳ Límite Last.fm — esperando ${msg.waiting}s… (pág ${msg.page}/${msg.total_pages})`;
-        else prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
-      }, src),
-    ]);
-    const heard     = lfmResult.heard;
-    const songs     = lfmResult.heard_songs || [];
-    const color     = USER_COLORS[extraUsers.length % USER_COLORS.length];
-    const image     = userInfo?.ok ? (userInfo.image || '') : '';
-    const realUser  = userInfo?.ok ? userInfo.username : user;
+    const result = await fetchScrobblesClient(userInfo.username || user, msg => {
+      prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+    }, src, method);
+    const realUser = userInfo.username || user;
+    const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
     const fetched_at = Math.floor(Date.now()/1000);
-    const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
-    const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
-    const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
-    extraUsers.push({ user: realUser, pairs: heard, songs, color, count: heard.length, fetched_at, image, source: src, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    extraUsers.push({ user: realUser, pairs: result.heard, songs: result.heard_songs || [], color,
+      count: result.heard.length, fetched_at, image: userInfo.image || '', source: src,
+      tracks_loaded: result.tracks_loaded || false,
+      last_scrobble_ts: result.last_scrobble_ts || 0,
+      last_scrobble_artist: result.last_scrobble_artist || '',
+      last_scrobble_track:  result.last_scrobble_track  || '' });
     saveExtraUsersLS();
-    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, songs, source: src, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, complete: true, total_pages: lfmResult.total_pages || 0, heard_artists: lfmResult.heard_artists || [] });
+    await idbSave({ user: realUser, count: result.heard.length, fetched_at, heard: result.heard,
+      songs: result.heard_songs || [], source: src, tracks_loaded: result.tracks_loaded || false,
+      last_scrobble_ts: result.last_scrobble_ts || 0, last_scrobble_artist: result.last_scrobble_artist || '',
+      last_scrobble_track: result.last_scrobble_track || '', complete: true,
+      total_pages: result.total_pages || 0, heard_artists: result.heard_artists || [] });
     await renderIdbExtraList();
     buildExtraUsersList();
     inp.value = '';
-    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes, ${songs.length.toLocaleString()} canciones`;
+    prog.textContent = `✓ ${realUser} — ${result.heard.length.toLocaleString()} álbumes${result.tracks_loaded ? ', ' + (result.heard_songs?.length || 0).toLocaleString() + ' canciones' : ''}`;
   } catch(e) {
     prog.textContent = 'Error: ' + e.message;
-  } finally {
-    btn.disabled = false; inp.disabled = false;
-  }
+  } finally { btn.disabled = false; inp.disabled = false; }
 }
 
 async function syncExtraUser(idx) {
@@ -207,10 +206,7 @@ async function syncExtraUser(idx) {
   const prog = document.getElementById('um-extra-progress');
   prog.textContent = `Sincronizando ${u.user}...`;
   try {
-    const url = sinceEndpoint(u.user, u.fetched_at || 0, u.source || 'lfm');
-    const r = await fetch(url);
-    if (!r.ok) { const t = await r.text(); throw new Error(`Error ${r.status}: ${t.slice(0, 120)}`); }
-    const data = await r.json();
+    const data = await syncSinceClient(u.user, u.fetched_at || 0, u.source || 'lfm');
     if (data.error) throw new Error(data.error);
     // merge: add only pairs not already present
     const existing = new Set(u.pairs.map(p => p[0] + '|' + p[1]));
@@ -294,49 +290,47 @@ async function addExtraUserByName(username, btn) {
   if (!username) return;
   if (extraUsers.some(u => u.user.toLowerCase() === username.toLowerCase())) return;
   const prog = document.getElementById('um-extra-progress');
-  btn.disabled = true;
-  btn.textContent = '…';
-  prog.textContent = `Cargando ${username}…`;
+  btn.disabled = true; btn.textContent = '…';
+  prog.textContent = `Verificando ${username}…`;
   const src = umSource();
   try {
-    const [userInfo, lfmResult] = await Promise.all([
-      fetch(checkUserEndpoint(username, src)).then(r=>r.json()).catch(()=>null),
-      fetchScrobblesSSE(username, msg => {
-        if (msg._waiting) prog.textContent = `⏳ Límite Last.fm — esperando ${msg.waiting}s… (pág ${msg.page}/${msg.total_pages})`;
-        else prog.textContent = `${username}: página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
-      }, src),
-    ]);
-    const heard      = lfmResult.heard;
-    const songs      = lfmResult.heard_songs || [];
-    const color      = USER_COLORS[extraUsers.length % USER_COLORS.length];
-    const image      = userInfo?.ok ? (userInfo.image || '') : '';
-    const realUser   = userInfo?.ok ? userInfo.username : username;
+    const userInfo = await checkUserClient(username, src);
+    if (!userInfo.ok) { prog.textContent = 'Error: ' + (userInfo.error || 'No encontrado'); btn.disabled = false; btn.textContent = 'Añadir'; return; }
+    const realUser = userInfo.username || username;
+    const method = await showFetchMethodModal(realUser, src);
+    if (method === null) { btn.disabled = false; btn.textContent = 'Añadir'; return; }
+    prog.textContent = `Cargando ${realUser}…`;
+    const result = await fetchScrobblesClient(realUser, msg => {
+      prog.textContent = `${realUser}: ${msg.page}/${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
+    }, src, method);
+    const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
     const fetched_at = Math.floor(Date.now()/1000);
-    const last_scrobble_ts     = lfmResult.last_scrobble_ts    || 0;
-    const last_scrobble_artist = lfmResult.last_scrobble_artist || '';
-    const last_scrobble_track  = lfmResult.last_scrobble_track  || '';
-    extraUsers.push({ user: realUser, pairs: heard, songs, color, count: heard.length, fetched_at, image, source: src, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    extraUsers.push({ user: realUser, pairs: result.heard, songs: result.heard_songs || [], color,
+      count: result.heard.length, fetched_at, image: userInfo.image || '', source: src,
+      tracks_loaded: result.tracks_loaded || false,
+      last_scrobble_ts: result.last_scrobble_ts || 0,
+      last_scrobble_artist: result.last_scrobble_artist || '',
+      last_scrobble_track:  result.last_scrobble_track  || '' });
     saveExtraUsersLS();
-    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, songs, source: src, last_scrobble_ts, last_scrobble_artist, last_scrobble_track });
+    await idbSave({ user: realUser, count: result.heard.length, fetched_at, heard: result.heard,
+      songs: result.heard_songs || [], source: src, tracks_loaded: result.tracks_loaded || false,
+      last_scrobble_ts: result.last_scrobble_ts || 0, last_scrobble_artist: result.last_scrobble_artist || '',
+      last_scrobble_track: result.last_scrobble_track || '', complete: true,
+      total_pages: result.total_pages || 0, heard_artists: result.heard_artists || [] });
     await renderIdbExtraList();
     buildExtraUsersList();
     btn.textContent = '✓';
-    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes, ${songs.length.toLocaleString()} canciones`;
-    // Refresh friends list so the newly added user shows as already added
+    prog.textContent = `✓ ${realUser} — ${result.heard.length.toLocaleString()} álbumes${result.tracks_loaded ? ', ' + (result.heard_songs?.length || 0).toLocaleString() + ' canciones' : ''}`;
     const frList = document.getElementById('friends-list');
     if (frList?.children.length) {
       frList.querySelectorAll('.fr-add').forEach(b => {
         const row = b.closest('.fr-row');
         const name = row?.querySelector('.fr-name')?.textContent?.trim() || '';
-        if (extraUsers.some(eu => eu.user.toLowerCase() === name.toLowerCase())) {
-          b.disabled = true;
-          b.textContent = '✓';
-        }
+        if (extraUsers.some(eu => eu.user.toLowerCase() === name.toLowerCase())) { b.disabled = true; b.textContent = '✓'; }
       });
     }
   } catch(e) {
-    btn.disabled = false;
-    btn.textContent = 'Añadir';
+    btn.disabled = false; btn.textContent = 'Añadir';
     prog.textContent = 'Error: ' + e.message;
   }
 }
@@ -381,9 +375,9 @@ async function idbAddAsExtra(username) {
   if (extraUsers.some(u => u.user.toLowerCase() === username.toLowerCase())) return;
   const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
   // try to get avatar
-  const userInfo = await fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null);
+  const userInfo = await checkUserClient(username, data.source || 'lfm').catch(() => null);
   const image = userInfo?.ok ? (userInfo.image || '') : '';
-  extraUsers.push({ user: data.user, pairs: data.heard, songs: data.songs || [], color, count: data.heard.length, fetched_at: data.fetched_at || 0, image });
+  extraUsers.push({ user: data.user, pairs: data.heard, songs: data.songs || [], color, count: data.heard.length, fetched_at: data.fetched_at || 0, image, source: data.source || 'lfm', tracks_loaded: data.tracks_loaded || false });
   saveExtraUsersLS();
   buildExtraUsersList();
   renderIdbExtraList();
@@ -431,32 +425,331 @@ document.addEventListener('DOMContentLoaded', () => {
   // sb-source (sidebar eliminado) — no sync needed
 });
 
-// ── Helper: consume /api/scrobbles SSE stream ─────────────────────────────
-async function fetchScrobblesSSE(user, onProgress, source = 'lfm') {
-  const response = await fetch(scrobblesEndpoint(user, source));
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const reader   = response.body.getReader();
-  const decoder  = new TextDecoder();
-  let buffer = '';
-  let result = null;
+// ── Client-side Last.fm / ListenBrainz API ────────────────────────────────
+let LFM_CLIENT_KEY = '';
+
+async function initClientKey() {
+  try {
+    const cfg = await fetch('/api/config').then(r => r.json());
+    LFM_CLIENT_KEY = cfg.lfm_key || '';
+  } catch(e) {}
+}
+
+// Matches Python: re.sub(r"[^\w]", "", s.lower()) with Unicode support
+function _normClient(s) {
+  return (s || '').toLowerCase().replace(/[^\p{L}\p{N}_]/gu, '');
+}
+
+async function lfmGet(method, params) {
+  const p = new URLSearchParams({ method, api_key: LFM_CLIENT_KEY, format: 'json', ...params });
+  const r = await fetch('https://ws.audioscrobbler.com/2.0/?' + p);
+  if (!r.ok) throw new Error(`LFM HTTP ${r.status}`);
+  const data = await r.json();
+  if (data.error && !data.topalbums && !data.toptracks && !data.recenttracks) {
+    throw new Error(data.message || `LFM error ${data.error}`);
+  }
+  return data;
+}
+
+async function lbGetDirect(path) {
+  const r = await fetch('https://api.listenbrainz.org' + path);
+  if (!r.ok) throw new Error(`LB HTTP ${r.status}`);
+  return r.json();
+}
+
+// Shared helper to turn the internal dicts into the wire format arrays
+function _buildHeard(heardCounts) {
+  return Object.entries(heardCounts).map(([k, v]) => {
+    const sep = k.indexOf('|||');
+    return [k.slice(0, sep), k.slice(sep + 3), v[0], v[1], v[2]];
+  });
+}
+function _buildSongs(heardSongs) {
+  return Object.entries(heardSongs).map(([k, v]) => {
+    const sep = k.indexOf('|||');
+    return [k.slice(0, sep), k.slice(sep + 3), v[0], v[1], v[2], v[3]];
+  });
+}
+
+// ── getTopAlbums path (fast, ~200 pages for 400k user) ────────────────────
+async function _lfmFetchTopAlbums(user, onProgress) {
+  const heard_counts = {};
+  const heard_artists = new Set();
+  let last_scrobble_ts = 0, last_scrobble_artist = '', last_scrobble_track = '';
+  let page = 1, totalPages = null;
 
   while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split('\n\n');
-    buffer = parts.pop();
-    for (const part of parts) {
-      if (!part.startsWith('data: ')) continue;
-      const msg = JSON.parse(part.slice(6));
-      if (msg.error) throw new Error(msg.error);
-      if (msg.done) result = msg;
-      else if (msg.waiting) onProgress({ ...msg, _waiting: true });
-      else onProgress(msg);
+    const data = await lfmGet('user.getTopAlbums', { user, limit: 200, page, period: 'overall' });
+    const container = data.topalbums || {};
+    const attrs = container['@attr'] || {};
+    if (!totalPages) totalPages = Math.max(1, parseInt(attrs.totalPages || '1'));
+    const albums = container.album || [];
+    for (const a of (Array.isArray(albums) ? albums : [albums])) {
+      const artist = typeof a.artist === 'object' ? (a.artist.name || '') : String(a.artist || '');
+      const album  = a.name || '';
+      const count  = parseInt(a.playcount || '1') || 1;
+      if (artist) heard_artists.add(_normClient(artist));
+      if (artist && album) {
+        const key = `${_normClient(artist)}|||${_normClient(album)}`;
+        if (!heard_counts[key]) heard_counts[key] = [artist, album, count];
+        else heard_counts[key][2] = Math.max(count, heard_counts[key][2]);
+      }
     }
+    onProgress({ page, total_pages: totalPages, count: Object.keys(heard_counts).length });
+    if (page >= totalPages) break;
+    page++;
   }
-  if (!result) throw new Error('No se recibió respuesta del servidor');
-  return result; // {heard, last_scrobble_ts, last_scrobble_artist, last_scrobble_track, ...}
+
+  // 1 page of recentTracks for last_scrobble info
+  try {
+    const recent = await lfmGet('user.getRecentTracks', { user, limit: 1, page: 1 });
+    const arr = [].concat(recent.recenttracks?.track || []);
+    for (const t of arr) {
+      if (t['@attr']?.nowplaying) continue;
+      const art = typeof t.artist === 'object' ? (t.artist['#text'] || '') : String(t.artist || '');
+      last_scrobble_ts = parseInt(t.date?.uts || '0') || 0;
+      last_scrobble_artist = art;
+      last_scrobble_track  = t.name || '';
+      break;
+    }
+  } catch(e) {}
+
+  return {
+    heard: _buildHeard(heard_counts), heard_songs: [],
+    heard_artists: [...heard_artists],
+    last_scrobble_ts, last_scrobble_artist, last_scrobble_track,
+    total_pages: totalPages || 0, tracks_loaded: false,
+  };
+}
+
+// ── getRecentTracks path (complete, albums + songs, ~400 pages for 400k user) ─
+async function _lfmFetchFull(user, onProgress) {
+  const heard_counts = {};
+  const heard_songs  = {};
+  const heard_artists = new Set();
+  let last_scrobble_ts = 0, last_scrobble_artist = '', last_scrobble_track = '';
+  let page = 1, totalPages = null;
+
+  while (true) {
+    const data = await lfmGet('user.getRecentTracks', { user, limit: 1000, page });
+    const rt    = data.recenttracks || {};
+    const attrs = rt['@attr'] || {};
+    if (!totalPages) totalPages = Math.max(1, parseInt(attrs.totalPages || '1'));
+    const tracks = [].concat(rt.track || []);
+    for (const t of tracks) {
+      if (t['@attr']?.nowplaying) continue;
+      const artist = typeof t.artist === 'object' ? (t.artist['#text'] || '') : String(t.artist || '');
+      const album  = typeof t.album  === 'object' ? (t.album['#text']  || '') : String(t.album  || '');
+      const track_name = t.name || '';
+      const ts = parseInt(t.date?.uts || '0') || 0;
+      if (!last_scrobble_ts && ts) { last_scrobble_ts = ts; last_scrobble_artist = artist; last_scrobble_track = track_name; }
+      if (artist) heard_artists.add(_normClient(artist));
+      if (artist && album) {
+        const key = `${_normClient(artist)}|||${_normClient(album)}`;
+        if (!heard_counts[key]) heard_counts[key] = [artist, album, 1];
+        else heard_counts[key][2]++;
+      }
+      if (artist && track_name) {
+        const key = `${_normClient(artist)}|||${_normClient(track_name)}`;
+        if (!heard_songs[key]) heard_songs[key] = [artist, album, track_name, 1];
+        else heard_songs[key][3]++;
+      }
+    }
+    onProgress({ page, total_pages: totalPages, count: Object.keys(heard_counts).length });
+    if (page >= totalPages) break;
+    page++;
+  }
+
+  return {
+    heard: _buildHeard(heard_counts), heard_songs: _buildSongs(heard_songs),
+    heard_artists: [...heard_artists],
+    last_scrobble_ts, last_scrobble_artist, last_scrobble_track,
+    total_pages: totalPages || 0, tracks_loaded: true,
+  };
+}
+
+// ── ListenBrainz full fetch ───────────────────────────────────────────────
+async function _lbFetchAllClient(user, onProgress) {
+  const heard_counts = {};
+  const heard_songs  = {};
+  const heard_artists = new Set();
+  let last_scrobble_ts = 0, last_scrobble_artist = '', last_scrobble_track = '';
+  let maxTs = null, page = 0, totalPages = null;
+
+  try {
+    const cnt = await lbGetDirect(`/1/user/${encodeURIComponent(user)}/listen-count`);
+    const total = cnt.payload?.count || 0;
+    totalPages = Math.max(1, Math.ceil(total / 100));
+  } catch(e) {}
+
+  while (true) {
+    let path = `/1/user/${encodeURIComponent(user)}/listens?count=100`;
+    if (maxTs !== null) path += `&max_ts=${maxTs}`;
+    let payload;
+    try { payload = (await lbGetDirect(path)).payload || {}; }
+    catch(e) { if (page === 0) throw e; break; }
+    const listens = payload.listens || [];
+    if (!listens.length) break;
+    page++;
+    for (const l of listens) {
+      const tm = l.track_metadata || {};
+      const artist = tm.artist_name || '', album = tm.release_name || '', track = tm.track_name || '';
+      const ts = l.listened_at || 0;
+      if (!last_scrobble_ts && ts) { last_scrobble_ts = ts; last_scrobble_artist = artist; last_scrobble_track = track; }
+      if (artist) heard_artists.add(_normClient(artist));
+      if (artist && album) {
+        const key = `${_normClient(artist)}|||${_normClient(album)}`;
+        if (!heard_counts[key]) heard_counts[key] = [artist, album, 1]; else heard_counts[key][2]++;
+      }
+      if (artist && track) {
+        const key = `${_normClient(artist)}|||${_normClient(track)}`;
+        if (!heard_songs[key]) heard_songs[key] = [artist, album, track, 1]; else heard_songs[key][3]++;
+      }
+    }
+    const tsVals = listens.map(l => l.listened_at).filter(t => t > 0);
+    if (!tsVals.length) break;
+    maxTs = Math.min(...tsVals) - 1;
+    onProgress({ page, total_pages: totalPages || page, count: Object.keys(heard_counts).length });
+  }
+
+  return {
+    heard: _buildHeard(heard_counts), heard_songs: _buildSongs(heard_songs),
+    heard_artists: [...heard_artists],
+    last_scrobble_ts, last_scrobble_artist, last_scrobble_track,
+    total_pages: totalPages || page, tracks_loaded: true,
+  };
+}
+
+// ── Unified fetch entry point ─────────────────────────────────────────────
+async function fetchScrobblesClient(user, onProgress, source = 'lfm', method = 'albums') {
+  if (source === 'lb') return _lbFetchAllClient(user, onProgress);
+  if (method === 'full') return _lfmFetchFull(user, onProgress);
+  return _lfmFetchTopAlbums(user, onProgress);
+}
+
+// ── Client-side check user ────────────────────────────────────────────────
+async function checkUserClient(user, source) {
+  try {
+    if (source === 'lb') {
+      const data = await lbGetDirect(`/1/user/${encodeURIComponent(user)}/listens?count=1`);
+      return { ok: true, username: data.payload?.user_id || user, realname: '', playcount: 0, image: '' };
+    }
+    const data = await lfmGet('user.getInfo', { user });
+    const u = data.user || {};
+    const img = (u.image || []).find(i => i.size === 'medium');
+    return { ok: true, username: u.name || user, realname: u.realname || '', playcount: u.playcount || 0, image: img?.['#text'] || '' };
+  } catch(e) { return { ok: false, error: e.message }; }
+}
+
+// ── Client-side sync (getRecentTracks?from= or LB) ────────────────────────
+async function syncSinceClient(user, since, source) {
+  if (source === 'lb') return _lbSinceClient(user, since);
+  const new_counts = {}, new_songs = {};
+  let last_scrobble_ts = 0, last_scrobble_artist = '', last_scrobble_track = '';
+  let page = 1, totalPages = 1;
+  while (page <= totalPages) {
+    const params = { user, limit: 200, page };
+    if (since) params.from = since + 1;
+    let data;
+    try { data = await lfmGet('user.getRecentTracks', params); }
+    catch(e) { if (page === 1) throw e; break; }
+    const rt = data.recenttracks || {};
+    const tp = Math.max(1, parseInt(rt['@attr']?.totalPages || '1'));
+    if (tp > totalPages) totalPages = tp;
+    for (const t of [].concat(rt.track || [])) {
+      if (t['@attr']?.nowplaying) continue;
+      const artist = typeof t.artist === 'object' ? (t.artist['#text'] || '') : String(t.artist || '');
+      const album  = typeof t.album  === 'object' ? (t.album['#text']  || '') : String(t.album  || '');
+      const track_name = t.name || '';
+      if (!last_scrobble_ts) { last_scrobble_ts = parseInt(t.date?.uts || '0') || 0; last_scrobble_artist = artist; last_scrobble_track = track_name; }
+      if (artist && album) {
+        const k = `${_normClient(artist)}|||${_normClient(album)}`;
+        if (!new_counts[k]) new_counts[k] = [artist, album, 1]; else new_counts[k][2]++;
+      }
+      if (artist && track_name) {
+        const k = `${_normClient(artist)}|||${_normClient(track_name)}`;
+        if (!new_songs[k]) new_songs[k] = [artist, album, track_name, 1]; else new_songs[k][3]++;
+      }
+    }
+    page++;
+  }
+  return { new_pairs: _buildHeard(new_counts), new_songs: _buildSongs(new_songs),
+    fetched_at: Math.floor(Date.now() / 1000), last_scrobble_ts, last_scrobble_artist, last_scrobble_track };
+}
+
+async function _lbSinceClient(user, since) {
+  const new_counts = {}, new_songs = {};
+  let last_scrobble_ts = 0, last_scrobble_artist = '', last_scrobble_track = '';
+  let maxTs = null;
+  while (true) {
+    let path = `/1/user/${encodeURIComponent(user)}/listens?count=100`;
+    if (maxTs !== null) path += `&max_ts=${maxTs}`;
+    if (since) path += `&min_ts=${since}`;
+    let payload;
+    try { payload = (await lbGetDirect(path)).payload || {}; } catch(e) { break; }
+    const listens = payload.listens || [];
+    if (!listens.length) break;
+    for (const l of listens) {
+      const tm = l.track_metadata || {};
+      const artist = tm.artist_name || '', album = tm.release_name || '', track = tm.track_name || '';
+      const ts = l.listened_at || 0;
+      if (!last_scrobble_ts && ts) { last_scrobble_ts = ts; last_scrobble_artist = artist; last_scrobble_track = track; }
+      if (artist && album) {
+        const k = `${_normClient(artist)}|||${_normClient(album)}`;
+        if (!new_counts[k]) new_counts[k] = [artist, album, 1]; else new_counts[k][2]++;
+      }
+      if (artist && track) {
+        const k = `${_normClient(artist)}|||${_normClient(track)}`;
+        if (!new_songs[k]) new_songs[k] = [artist, album, track, 1]; else new_songs[k][3]++;
+      }
+    }
+    const tsVals = listens.map(l => l.listened_at).filter(t => t > since);
+    if (!tsVals.length) break;
+    maxTs = Math.min(...tsVals) - 1;
+    if (maxTs <= since) break;
+  }
+  return { new_pairs: _buildHeard(new_counts), new_songs: _buildSongs(new_songs),
+    fetched_at: Math.floor(Date.now() / 1000), last_scrobble_ts, last_scrobble_artist, last_scrobble_track };
+}
+
+// ── Fetch-method choice modal ─────────────────────────────────────────────
+function showFetchMethodModal(username, source) {
+  if (source === 'lb') return Promise.resolve('full');
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:500;display:flex;align-items:center;justify-content:center;padding:1rem';
+    ov.innerHTML = `
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:1.5rem;max-width:440px;width:100%;font-family:var(--sans)">
+        <div style="font-family:var(--serif);font-size:1.1rem;font-weight:700;margin-bottom:1rem">¿Cómo cargar <em>${escH(username)}</em>?</div>
+        <div style="display:flex;flex-direction:column;gap:.6rem;margin-bottom:1.2rem">
+          <label id="fm-lbl-albums" style="display:flex;gap:.75rem;align-items:flex-start;padding:.75rem;border:1px solid var(--accent);border-radius:8px;cursor:pointer;background:var(--bg3)">
+            <input type="radio" name="fm" value="albums" checked style="margin-top:3px;flex-shrink:0">
+            <div>
+              <div style="font-weight:600;font-size:.875rem;color:var(--ink)">Rápido — Top Álbumes</div>
+              <div style="font-size:.78rem;color:var(--ink2);line-height:1.5;margin-top:.2rem">Usa <code>getTopAlbums</code>. Descarga los álbumes más escuchados. Más rápido: ~200 páginas para un usuario con 400k scrobbles. No incluye canciones individuales.</div>
+            </div>
+          </label>
+          <label id="fm-lbl-full" style="display:flex;gap:.75rem;align-items:flex-start;padding:.75rem;border:1px solid var(--border2);border-radius:8px;cursor:pointer;background:var(--bg3)">
+            <input type="radio" name="fm" value="full" style="margin-top:3px;flex-shrink:0">
+            <div>
+              <div style="font-weight:600;font-size:.875rem;color:var(--ink)">Completo — Todos los scrobbles</div>
+              <div style="font-size:.78rem;color:var(--ink2);line-height:1.5;margin-top:.2rem">Usa <code>getRecentTracks</code>. Descarga todo el historial. Álbumes más fieles e incluye canciones. ~400 páginas para 400k scrobbles — puede tardar <strong style="color:var(--ink)">15–20 min</strong>.</div>
+            </div>
+          </label>
+        </div>
+        <div style="display:flex;gap:.75rem;justify-content:flex-end">
+          <button id="fm-cancel" class="btn-sm">Cancelar</button>
+          <button id="fm-ok" class="btn-sm primary">Cargar →</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.querySelectorAll('input[name="fm"]').forEach(r => r.addEventListener('change', () => {
+      document.getElementById('fm-lbl-albums').style.borderColor = r.value === 'albums' && r.checked ? 'var(--accent)' : 'var(--border2)';
+      document.getElementById('fm-lbl-full').style.borderColor   = r.value === 'full'   && r.checked ? 'var(--accent)' : 'var(--border2)';
+    }));
+    ov.querySelector('#fm-cancel').onclick = () => { ov.remove(); resolve(null); };
+    ov.querySelector('#fm-ok').onclick    = () => { const v = ov.querySelector('input[name="fm"]:checked')?.value || 'albums'; ov.remove(); resolve(v); };
+  });
 }
 
 // (duplicate init block removed — single init at bottom of script)
@@ -1294,14 +1587,10 @@ async function renderSbUsersList() { return renderSecondaryUsers(); }
 async function sbSyncPrimary() {
   if (!heardCache) return;
   const prog = document.getElementById('um-extra-progress');
-  const isLb = heardCache.source === 'lb';
   if (prog) prog.textContent = 'Sincronizando...';
   try {
-    if (isLb) {
-      const url = sinceEndpoint(heardCache.user, heardCache.fetched_at || 0, 'lb');
-      const r = await fetch(url);
-      if (!r.ok) throw new Error(`Error ${r.status}`);
-      const data = await r.json();
+    {
+      const data = await syncSinceClient(heardCache.user, heardCache.fetched_at || 0, heardCache.source || 'lfm');
       if (data.error) throw new Error(data.error);
       const existing = new Set(heardCache.pairs.map(p => p[0] + '|' + p[1]));
       const added = (data.new_pairs || []).filter(p => !existing.has(p[0] + '|' + p[1]));
@@ -1316,17 +1605,6 @@ async function sbSyncPrimary() {
       showUserBadge(heardCache.user, document.getElementById('badge-avatar')?.src||'', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
       if (prog) prog.textContent = added.length ? `✓ +${added.length} nuevos` : '✓ Al día';
       await renderSecondaryUsers();
-    } else {
-      const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${heardCache.count||0}`;
-      const data = await fetch(url).then(r => r.json());
-      if (data.error) { if (prog) prog.textContent = 'Error: ' + data.error; return; }
-      if (data.new_count === 0) { if (prog) prog.textContent = '✓ Al día'; return; }
-      if (data.full_replace) {
-        heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
-        showUserBadge(heardCache.user, document.getElementById('badge-avatar')?.src||'', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
-        if (prog) prog.textContent = '✓ Al día';
-        await renderSecondaryUsers();
-      }
     }
   } catch(e) { if (prog) prog.textContent = 'Error: ' + e.message; }
 }
@@ -1600,9 +1878,9 @@ async function toggleSecondaryUser(username) {
   if (!data) return;
   const prog = document.getElementById('um-extra-progress');
   const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
-  const userInfo = await fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null);
+  const userInfo = await checkUserClient(data.user, data.source || 'lfm').catch(() => null);
   const image = userInfo?.ok ? (userInfo.image || '') : '';
-  extraUsers.push({ user: data.user, pairs: data.heard, songs: data.songs || [], color, count: data.heard.length, fetched_at: data.fetched_at || 0, image });
+  extraUsers.push({ user: data.user, pairs: data.heard, songs: data.songs || [], color, count: data.heard.length, fetched_at: data.fetched_at || 0, image, source: data.source || 'lfm', tracks_loaded: data.tracks_loaded || false });
   saveExtraUsersLS();
   buildExtraUsersList();
   renderSecondaryUsers();
@@ -1620,28 +1898,25 @@ async function syncSecondaryIdb(username) {
     // Si la sesión no está marcada como completa, descargar todo desde cero
     if (existing && existing.complete === false) {
       if (prog) prog.textContent = `Sesión incompleta — descargando completo...`;
-      const lfmResult = await fetchScrobblesSSE(username, msg => {
+      const method = await showFetchMethodModal(username, euSrc);
+      if (method === null) { if (prog) prog.textContent = ''; return; }
+      const lfmResult = await fetchScrobblesClient(username, msg => {
         if (prog) prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
-      }, euSrc);
-      const heard = lfmResult.heard;
-      const songs = lfmResult.heard_songs || [];
+      }, euSrc, method);
       const newFetched = Math.floor(Date.now()/1000);
-      await idbSave({ user: username, count: heard.length, fetched_at: newFetched, heard, songs,
-        last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
-        last_scrobble_artist: lfmResult.last_scrobble_artist || '',
-        last_scrobble_track: lfmResult.last_scrobble_track || '',
-        complete: true, total_pages: lfmResult.total_pages || 0, source: euSrc });
+      await idbSave({ user: username, count: lfmResult.heard.length, fetched_at: newFetched, heard: lfmResult.heard,
+        songs: lfmResult.heard_songs || [], last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
+        last_scrobble_artist: lfmResult.last_scrobble_artist || '', last_scrobble_track: lfmResult.last_scrobble_track || '',
+        complete: true, total_pages: lfmResult.total_pages || 0, source: euSrc,
+        tracks_loaded: lfmResult.tracks_loaded || false, heard_artists: lfmResult.heard_artists || [] });
       const eu = extraUsers.find(u => u.user.toLowerCase() === username.toLowerCase());
-      if (eu) { eu.pairs = heard; eu.songs = songs; eu.count = heard.length; eu.fetched_at = newFetched; saveExtraUsersLS(); }
+      if (eu) { eu.pairs = lfmResult.heard; eu.songs = lfmResult.heard_songs || []; eu.count = lfmResult.heard.length; eu.fetched_at = newFetched; eu.tracks_loaded = lfmResult.tracks_loaded || false; saveExtraUsersLS(); }
       renderSecondaryUsers();
-      if (prog) prog.textContent = `✓ ${username}: ${heard.length.toLocaleString()} álbumes (descarga completa)`;
+      if (prog) prog.textContent = `✓ ${username}: ${lfmResult.heard.length.toLocaleString()} álbumes`;
       return;
     }
     const since = existing?.fetched_at || 0;
-    const url = sinceEndpoint(username, since, euSrc);
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
+    const data = await syncSinceClient(username, since, euSrc);
     if (data.error) throw new Error(data.error);
     // merge new pairs into existing
     const existSet = new Set((existing?.heard || []).map(p => p[0] + '|' + p[1]));
@@ -1696,6 +1971,7 @@ function loadHeardCache(data) {
     complete:            data.complete !== undefined ? data.complete : true,
     total_pages:         data.total_pages          || 0,
     source:              data.source               || 'lfm',
+    tracks_loaded:       data.tracks_loaded        || false,
     // Set de artistas normalizados para filtro en modo Descubrir artistas
     artist_set:          data.heard_artists
                            ? new Set(data.heard_artists)
@@ -1719,6 +1995,7 @@ function loadHeardCache(data) {
     total_pages:         heardCache.total_pages,
     heard_artists:       [...heardCache.artist_set],
     source:              heardCache.source,
+    tracks_loaded:       heardCache.tracks_loaded,
   }).then(() => { renderIdbList(); renderIdbExtraList(); }).catch(() => {});
   dismissWelcome();
 }
@@ -1776,7 +2053,7 @@ inpSession.addEventListener('change', async e => {
       buildExtraUsersList();
       prog.textContent = `✓ ${data.user} importado como secundario — ${data.heard.length.toLocaleString()} álbumes`;
       // Fetch avatar in background
-      fetch(`/api/check_user?user=${encodeURIComponent(data.user)}`).then(r=>r.json()).then(info => {
+      checkUserClient(data.user, data.source || 'lfm').then(info => {
         if (!info?.ok || !info.image) return;
         const eu = extraUsers.find(u => u.user.toLowerCase() === data.user.toLowerCase());
         if (eu) { eu.image = info.image; saveExtraUsersLS(); renderSecondaryUsers(); }
@@ -1822,18 +2099,20 @@ document.getElementById('btn-sync-session').addEventListener('click', async () =
       showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
       prog.textContent = added.length ? `✓ +${added.length} nuevos (total ${heardCache.count.toLocaleString()})` : '✓ Al día';
     } else {
-      const knownCount = heardCache.count || 0;
-      const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${knownCount}`;
-      const data = await fetch(url).then(r => r.json());
-      if (data.error) { prog.textContent = 'Error: ' + data.error; return; }
-      if (data.new_count === 0) {
-        prog.textContent = '✓ Al día'; btn.textContent = '↻ Sync'; return;
+      const data = await syncSinceClient(heardCache.user, heardCache.fetched_at || 0, 'lfm');
+      if (data.error) throw new Error(data.error);
+      const existing = new Set(heardCache.pairs.map(p => p[0] + '|' + p[1]));
+      const added = (data.new_pairs || []).filter(p => !existing.has(p[0] + '|' + p[1]));
+      heardCache.pairs      = [...heardCache.pairs, ...added];
+      heardCache.count      = heardCache.pairs.length;
+      heardCache.fetched_at = data.fetched_at;
+      if (data.last_scrobble_ts && data.last_scrobble_ts > (heardCache.last_scrobble_ts || 0)) {
+        heardCache.last_scrobble_ts = data.last_scrobble_ts;
+        heardCache.last_scrobble_artist = data.last_scrobble_artist || '';
+        heardCache.last_scrobble_track  = data.last_scrobble_track  || '';
       }
-      if (data.full_replace) {
-        heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
-        showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
-        prog.textContent = `✓ Al día`;
-      }
+      showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+      prog.textContent = added.length ? `✓ +${added.length} nuevos (total ${heardCache.count.toLocaleString()})` : '✓ Al día';
     }
   } catch(e) {
     prog.textContent = 'Error: ' + e.message;
@@ -1855,65 +2134,58 @@ async function doLoadUser() {
   hideError();
   const prog = document.getElementById('um-progress');
   btnGo.disabled = true;
-
-  // If primary already loaded AND this user is not the primary → add as secondary
-  const addAsSecondary = !!heardCache && heardCache.user.toLowerCase() !== user.toLowerCase();
   const src = umSource();
 
   try {
+    // Verify user exists first
+    prog.textContent = src === 'lb' ? 'Verificando ListenBrainz…' : 'Verificando Last.fm…';
+    const userInfo = await checkUserClient(user, src);
+    if (!userInfo.ok) { prog.textContent = 'Error: ' + (userInfo.error || 'Usuario no encontrado'); return; }
+    const realUser = userInfo.username || user;
+
+    // Show method choice modal (always, before starting download)
+    const method = await showFetchMethodModal(realUser, src);
+    if (method === null) { prog.textContent = ''; return; }
+
+    prog.textContent = 'Conectando…';
+    const result = await fetchScrobblesClient(realUser, msg => {
+      prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+    }, src, method);
+
+    const fetched_at = Math.floor(Date.now() / 1000);
+    const addAsSecondary = !!heardCache && heardCache.user.toLowerCase() !== realUser.toLowerCase();
+
     if (addAsSecondary) {
-      // Always do a full fresh download via the search box — never short-circuit
-      // from IDB here; the IDB may contain a truncated previous download.
-      // Use the "CARGAR" button on the secondary list to load from IDB instead.
-      prog.textContent = src === 'lb' ? 'Conectando con ListenBrainz...' : 'Conectando con Last.fm...';
-      const [userInfo, lfmResult] = await Promise.all([
-        fetch(checkUserEndpoint(user, src)).then(r=>r.json()).catch(()=>null),
-        fetchScrobblesSSE(user, msg => {
-          prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
-        }, src),
-      ]);
-      const heard = lfmResult.heard;
       const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
-      const image = userInfo?.ok ? (userInfo.image || '') : '';
-      const realUser = userInfo?.ok ? userInfo.username : user;
-      const fetched_at = Math.floor(Date.now()/1000);
-      // Replace existing extraUsers entry if present, else push new
       const euIdx = extraUsers.findIndex(u => u.user.toLowerCase() === realUser.toLowerCase());
-      const eu = { user: realUser, pairs: heard, songs: lfmResult.heard_songs||[], color: euIdx !== -1 ? extraUsers[euIdx].color : color,
-        count: heard.length, fetched_at, image, source: src,
-        last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
-        last_scrobble_artist: lfmResult.last_scrobble_artist || '',
-        last_scrobble_track: lfmResult.last_scrobble_track || '' };
+      const eu = { user: realUser, pairs: result.heard, songs: result.heard_songs || [],
+        color: euIdx !== -1 ? extraUsers[euIdx].color : color,
+        count: result.heard.length, fetched_at, image: userInfo.image || '', source: src,
+        tracks_loaded: result.tracks_loaded || false,
+        last_scrobble_ts: result.last_scrobble_ts || 0,
+        last_scrobble_artist: result.last_scrobble_artist || '',
+        last_scrobble_track:  result.last_scrobble_track  || '' };
       if (euIdx !== -1) extraUsers[euIdx] = eu; else extraUsers.push(eu);
       saveExtraUsersLS();
-      await idbSave({ user: realUser, count: heard.length, fetched_at, heard,
-        songs: lfmResult.heard_songs || [],
-        last_scrobble_ts: lfmResult.last_scrobble_ts || 0,
-        last_scrobble_artist: lfmResult.last_scrobble_artist || '',
-        last_scrobble_track: lfmResult.last_scrobble_track || '',
-        complete: true, total_pages: lfmResult.total_pages || 0,
-        heard_artists: lfmResult.heard_artists || [], source: src });
+      await idbSave({ user: realUser, count: result.heard.length, fetched_at, heard: result.heard,
+        songs: result.heard_songs || [], source: src, tracks_loaded: result.tracks_loaded || false,
+        last_scrobble_ts: result.last_scrobble_ts || 0, last_scrobble_artist: result.last_scrobble_artist || '',
+        last_scrobble_track: result.last_scrobble_track || '', complete: true,
+        total_pages: result.total_pages || 0, heard_artists: result.heard_artists || [] });
       buildExtraUsersList();
-      prog.textContent = `✓ ${realUser} añadido — ${heard.length.toLocaleString()} álbumes`;
+      prog.textContent = `✓ ${realUser} añadido — ${result.heard.length.toLocaleString()} álbumes${result.tracks_loaded ? ', ' + (result.heard_songs?.length || 0).toLocaleString() + ' canciones' : ''}`;
       inpUser.value = '';
     } else {
-      // Load as primary
-      prog.textContent = src === 'lb' ? 'Conectando con ListenBrainz...' : 'Conectando con Last.fm...';
-      const result = await fetchScrobblesSSE(user, msg => {
-        prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes únicos`;
-      }, src);
       loadHeardCache({
-        user, heard: result.heard, heard_songs: result.heard_songs || [],
-        fetched_at:           Math.floor(Date.now()/1000),
-        last_scrobble_ts:     result.last_scrobble_ts    || 0,
+        user: realUser, heard: result.heard, heard_songs: result.heard_songs || [],
+        fetched_at, last_scrobble_ts: result.last_scrobble_ts || 0,
         last_scrobble_artist: result.last_scrobble_artist || '',
         last_scrobble_track:  result.last_scrobble_track  || '',
-        complete:             true,
-        total_pages:          result.total_pages          || 0,
-        heard_artists:        result.heard_artists         || [],
-        source:               src,
+        complete: true, total_pages: result.total_pages || 0,
+        heard_artists: result.heard_artists || [], source: src,
+        tracks_loaded: result.tracks_loaded || false,
       });
-      prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados`;
+      prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados${result.tracks_loaded ? ' + canciones' : ''}`;
       closeUserModal();
     }
   } catch(e) {
@@ -1941,6 +2213,7 @@ if ('serviceWorker' in navigator) {
 
 // ── Init ─────────────────────────────────────────────────────────────────
 (async () => {
+  await initClientKey();
   loadExtraUsersLS();
   // Purge extra users no longer in IDB
   if (extraUsers.length) {
