@@ -18,6 +18,8 @@ const USER_COLORS = [
   "#7ab5a0",
 ];
 let extraUsers = []; // [{user, pairs:[[na,nt,oa,ot,count],...], color, count, fetched_at}]
+// Session cache: survives deactivation within same page load. username.lc → data
+const _sessionCache = new Map();
 
 // discover state
 let discoverMode = false;
@@ -66,6 +68,21 @@ document.addEventListener("keydown", (e) => {
     closeAboutModal();
 });
 
+// ── Topbar avatar button ───────────────────────────────────────────────────
+function _updateTopbarAvatar(imgSrc) {
+  const btn = document.getElementById("btn-open-users");
+  if (!btn) return;
+  if (imgSrc) {
+    btn.innerHTML = `<img src="${escH(imgSrc)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;display:block">`;
+    btn.style.overflow = "hidden";
+    btn.style.padding = "0";
+  } else {
+    btn.textContent = "👤";
+    btn.style.overflow = "";
+    btn.style.padding = "";
+  }
+}
+
 // ── User modal open/close ──────────────────────────────────────────────────
 function openUserModal() {
   document.getElementById("user-modal-bg").classList.add("open");
@@ -88,29 +105,56 @@ document.addEventListener("keydown", (e) => {
 
 // ── Extra users (recommendation) ──────────────────────────────────────────
 function saveExtraUsersLS() {
-  localStorage.setItem(
-    "ml_extra_users",
-    JSON.stringify(
-      extraUsers.map((u) => ({
-        user: u.user,
-        pairs: u.pairs,
-        color: u.color,
-        count: u.count,
-        fetched_at: u.fetched_at,
-        image: u.image || "",
-        source: u.source || "lfm",
-      })),
-    ),
-  );
+  try {
+    localStorage.setItem(
+      "ml_extra_users",
+      JSON.stringify(
+        extraUsers.map((u) => ({
+          user: u.user,
+          color: u.color,
+          count: u.count,
+          fetched_at: u.fetched_at,
+          image: u.image || "",
+          source: u.source || "lfm",
+        })),
+      ),
+    );
+  } catch (_) {}
 }
 
 function loadExtraUsersLS() {
   try {
     const saved = JSON.parse(localStorage.getItem("ml_extra_users") || "[]");
     for (const u of saved) {
-      if (u.user && u.pairs) extraUsers.push({ ...u, image: u.image || "" });
+      if (u.user) extraUsers.push({ ...u, pairs: [], songs: [], image: u.image || "" });
     }
   } catch (e) {}
+}
+
+async function hydrateExtraUsersFromIdb() {
+  for (let i = 0; i < extraUsers.length; i++) {
+    if (!extraUsers[i].pairs?.length) {
+      const data = await idbLoad(extraUsers[i].user).catch(() => null);
+      if (data?.heard?.length) {
+        extraUsers[i].pairs = data.heard;
+        extraUsers[i].songs = data.songs || [];
+        extraUsers[i].count = data.count || data.heard.length;
+        extraUsers[i].tracks_loaded = data.tracks_loaded || false;
+        extraUsers[i].last_scrobble_ts = data.last_scrobble_ts || 0;
+        extraUsers[i].last_scrobble_artist = data.last_scrobble_artist || "";
+        extraUsers[i].last_scrobble_track = data.last_scrobble_track || "";
+        _sessionCache.set(extraUsers[i].user.toLowerCase(), {
+          pairs: data.heard, songs: data.songs || [],
+          count: data.count || data.heard.length,
+          fetched_at: data.fetched_at || 0,
+          color: extraUsers[i].color,
+          image: extraUsers[i].image || "",
+          source: data.source || "lfm",
+          tracks_loaded: data.tracks_loaded || false,
+        });
+      }
+    }
+  }
 }
 
 function buildExtraUsersList() {
@@ -250,6 +294,12 @@ async function addExtraUser() {
     const realUser = userInfo.username || user;
     const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
     const fetched_at = Math.floor(Date.now() / 1000);
+    _sessionCache.set(realUser.toLowerCase(), {
+      pairs: result.heard, songs: result.heard_songs || [],
+      count: result.heard.length, fetched_at, color,
+      image: userInfo.image || "", source: src,
+      tracks_loaded: result.tracks_loaded || false,
+    });
     extraUsers.push({
       user: realUser,
       pairs: result.heard,
@@ -446,6 +496,12 @@ async function addExtraUserByName(username, btn) {
     );
     const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
     const fetched_at = Math.floor(Date.now() / 1000);
+    _sessionCache.set(realUser.toLowerCase(), {
+      pairs: result.heard, songs: result.heard_songs || [],
+      count: result.heard.length, fetched_at, color,
+      image: userInfo.image || "", source: src,
+      tracks_loaded: result.tracks_loaded || false,
+    });
     extraUsers.push({
       user: realUser,
       pairs: result.heard,
@@ -519,6 +575,7 @@ document
       const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
       const ft = data.fetched_at || 0;
       const importedSongs = data.songs || [];
+      _sessionCache.set(data.user.toLowerCase(), { pairs: data.heard, songs: importedSongs, count: data.heard.length, fetched_at: ft, color, image: "", source: "lfm", tracks_loaded: false });
       extraUsers.push({
         user: data.user,
         pairs: data.heard,
@@ -2653,6 +2710,22 @@ async function idbSaveOrModal(data) {
   if (r?.quota) showQuotaModal(data.user, data);
 }
 
+function _exportMemoryUser(username) {
+  const lc = username.toLowerCase();
+  const eu = extraUsers.find((u) => u.user.toLowerCase() === lc);
+  const src = eu || _sessionCache.get(lc);
+  if (!src?.pairs?.length) return;
+  const blob = new Blob(
+    [JSON.stringify({ version: 1, user: src.user || username, count: src.pairs.length, fetched_at: src.fetched_at || 0, heard: src.pairs, songs: src.songs || [] }, null, 0)],
+    { type: "application/json" },
+  );
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `tumtumpa_${username}_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ── Unified secondary users list ─────────────────────────────────────────
 async function renderSecondaryUsers() {
   const sessions = await idbList();
@@ -2663,29 +2736,26 @@ async function renderSecondaryUsers() {
     .filter((s) => s.user.toLowerCase() !== primaryUser)
     .sort((a, b) => b.fetched_at - a.fetched_at);
 
-  if (!visible.length) {
-    el.innerHTML = '<div class="idb-empty">Sin sesiones guardadas</div>';
-    return;
-  }
-  el.innerHTML = visible
-    .map((s) => {
-      const eu = extraUsers.find(
-        (u) => u.user.toLowerCase() === s.user.toLowerCase(),
-      );
-      const isActive = !!eu;
-      const _ts = s.last_scrobble_ts || s.fetched_at;
-      const dateStr = new Date(_ts * 1000).toLocaleDateString();
-      const lastLbl = s.last_scrobble_artist
-        ? ` · ${s.last_scrobble_artist}`
+  // Memory-only users: active in extraUsers but not saved in IDB
+  const idbSet = new Set(visible.map((s) => s.user.toLowerCase()));
+  const memOnly = extraUsers.filter(
+    (u) => u.user.toLowerCase() !== primaryUser && !idbSet.has(u.user.toLowerCase()),
+  );
+
+  const _renderIdbRow = (s) => {
+    const eu = extraUsers.find((u) => u.user.toLowerCase() === s.user.toLowerCase());
+    const isActive = !!eu;
+    const _ts = s.last_scrobble_ts || s.fetched_at;
+    const dateStr = new Date(_ts * 1000).toLocaleDateString();
+    const lastLbl = s.last_scrobble_artist ? ` · ${s.last_scrobble_artist}` : "";
+    const incompleteTag =
+      s.complete === false
+        ? ' <span style="color:var(--red);font-size:0.7rem" title="Descarga incompleta — usa ↻ Sync">⚠</span>'
         : "";
-      const incompleteTag =
-        s.complete === false
-          ? ' <span style="color:var(--red);font-size:0.7rem" title="Descarga incompleta — usa ↻ Sync">⚠</span>'
-          : "";
-      const avatar = eu?.image
-        ? `<img class="eu-avatar" src="${escH(eu.image)}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0">`
-        : `<div class="eu-dot" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${eu?.color || "var(--ink3)"}"></div>`;
-      return `<div class="sec-user-row${isActive ? " active" : ""}">
+    const avatar = eu?.image
+      ? `<img class="eu-avatar" src="${escH(eu.image)}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0">`
+      : `<div class="eu-dot" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${eu?.color || "var(--ink3)"}"></div>`;
+    return `<div class="sec-user-row${isActive ? " active" : ""}">
       <div class="sec-user-left">
         ${avatar}
         <div class="sec-user-info">
@@ -2701,8 +2771,33 @@ async function renderSecondaryUsers() {
         <button class="eu-del" data-action="delete" data-user="${escH(s.user)}" title="Eliminar">✕</button>
       </div>
     </div>`;
-    })
-    .join("");
+  };
+
+  const _renderMemRow = (u) => {
+    const avatar = u.image
+      ? `<img class="eu-avatar" src="${escH(u.image)}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0">`
+      : `<div class="eu-dot" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${u.color || "var(--ink3)"}"></div>`;
+    return `<div class="sec-user-row active">
+      <div class="sec-user-left">
+        ${avatar}
+        <div class="sec-user-info">
+          <div class="sec-user-name">${escH(u.user)} <span style="font-size:.68rem;color:var(--ink3)" title="Solo esta sesión — exporta JSON para guardar">⚡ sesión</span></div>
+          <div class="sec-user-meta">${u.count.toLocaleString()} álb. · sin guardar en navegador</div>
+        </div>
+      </div>
+      <div class="sec-user-btns">
+        <button class="btn-sm act" data-action="toggle" data-user="${escH(u.user)}">ACTIVO</button>
+        <button class="btn-sm" data-action="mem-export" data-user="${escH(u.user)}" title="Guardar JSON">↓ JSON</button>
+      </div>
+    </div>`;
+  };
+
+  if (!visible.length && !memOnly.length) {
+    el.innerHTML = '<div class="idb-empty">Sin sesiones guardadas</div>';
+    return;
+  }
+  el.innerHTML = visible.map(_renderIdbRow).join("") +
+    (memOnly.length ? memOnly.map(_renderMemRow).join("") : "");
 }
 
 async function idbLoadSession(username) {
@@ -2775,6 +2870,7 @@ function showUserBadge(
   lastArtist,
   lastTrack,
 ) {
+  _updateTopbarAvatar(img || "");
   if (img) {
     const av = document.getElementById("badge-avatar");
     if (av) {
@@ -2810,6 +2906,7 @@ function showUserBadge(
   renderSecondaryUsers();
 }
 function hideUserBadge() {
+  _updateTopbarAvatar("");
   document.getElementById("badge-inline").style.display = "none";
   const secPrim = document.getElementById("um-sec-primary");
   if (secPrim) secPrim.style.display = "none";
@@ -2830,25 +2927,53 @@ function unloadPrimaryUser() {
 
 // ── Toggle secondary user active state (adds/removes from extraUsers) ──────
 async function toggleSecondaryUser(username) {
-  const idx = extraUsers.findIndex(
-    (u) => u.user.toLowerCase() === username.toLowerCase(),
-  );
+  const lc = username.toLowerCase();
+  const idx = extraUsers.findIndex((u) => u.user.toLowerCase() === lc);
   if (idx !== -1) {
-    // Already active → deactivate
+    // Already active → deactivate: save to session cache before removing
+    _sessionCache.set(lc, {
+      pairs: extraUsers[idx].pairs,
+      songs: extraUsers[idx].songs || [],
+      count: extraUsers[idx].count,
+      fetched_at: extraUsers[idx].fetched_at || 0,
+      color: extraUsers[idx].color,
+      image: extraUsers[idx].image || "",
+      source: extraUsers[idx].source || "lfm",
+      tracks_loaded: extraUsers[idx].tracks_loaded || false,
+    });
     extraUsers.splice(idx, 1);
     saveExtraUsersLS();
     buildExtraUsersList();
     renderSecondaryUsers();
     return;
   }
-  // Not active → activate (load from IDB + get image)
+  const prog = document.getElementById("um-extra-progress");
+  // Try session cache first (instant, no IDB needed)
+  const cached = _sessionCache.get(lc);
+  if (cached?.pairs?.length) {
+    const color = cached.color || USER_COLORS[extraUsers.length % USER_COLORS.length];
+    extraUsers.push({
+      user: username,
+      pairs: cached.pairs,
+      songs: cached.songs || [],
+      color,
+      count: cached.count || cached.pairs.length,
+      fetched_at: cached.fetched_at || 0,
+      image: cached.image || "",
+      source: cached.source || "lfm",
+      tracks_loaded: cached.tracks_loaded || false,
+    });
+    saveExtraUsersLS();
+    buildExtraUsersList();
+    renderSecondaryUsers();
+    if (prog) prog.textContent = `✓ ${username} cargado`;
+    return;
+  }
+  // Load from IDB
   const data = await idbLoad(username);
   if (!data) return;
-  const prog = document.getElementById("um-extra-progress");
   const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
-  const userInfo = await checkUserClient(data.user, data.source || "lfm").catch(
-    () => null,
-  );
+  const userInfo = await checkUserClient(data.user, data.source || "lfm").catch(() => null);
   const image = userInfo?.ok ? userInfo.image || "" : "";
   extraUsers.push({
     user: data.user,
@@ -2861,6 +2986,7 @@ async function toggleSecondaryUser(username) {
     source: data.source || "lfm",
     tracks_loaded: data.tracks_loaded || false,
   });
+  _sessionCache.set(lc, { pairs: data.heard, songs: data.songs || [], count: data.heard.length, fetched_at: data.fetched_at || 0, color, image, source: data.source || "lfm", tracks_loaded: data.tracks_loaded || false });
   saveExtraUsersLS();
   buildExtraUsersList();
   renderSecondaryUsers();
@@ -3003,6 +3129,7 @@ async function setPrimaryFromSecondary(username) {
 function loadHeardCache(data) {
   heardCache = {
     user: data.user,
+    image: data.image || "",
     pairs: data.heard,
     songs: data.songs || data.heard_songs || [],
     count: data.heard.length,
@@ -3025,7 +3152,7 @@ function loadHeardCache(data) {
   inpUser.value = data.user;
   showUserBadge(
     data.user,
-    "",
+    data.image || "",
     data.heard.length,
     heardCache.last_scrobble_ts,
     heardCache.last_scrobble_artist,
@@ -3306,6 +3433,12 @@ async function doLoadUser() {
         last_scrobble_artist: result.last_scrobble_artist || "",
         last_scrobble_track: result.last_scrobble_track || "",
       };
+      _sessionCache.set(realUser.toLowerCase(), {
+        pairs: result.heard, songs: result.heard_songs || [],
+        count: result.heard.length, fetched_at, color: eu.color,
+        image: userInfo.image || "", source: src,
+        tracks_loaded: result.tracks_loaded || false,
+      });
       if (euIdx !== -1) extraUsers[euIdx] = eu;
       else extraUsers.push(eu);
       saveExtraUsersLS();
@@ -3330,6 +3463,7 @@ async function doLoadUser() {
     } else {
       loadHeardCache({
         user: realUser,
+        image: userInfo.image || "",
         heard: result.heard,
         heard_songs: result.heard_songs || [],
         fetched_at,
@@ -3372,7 +3506,7 @@ if ("serviceWorker" in navigator) {
 (async () => {
   await initClientKey();
   loadExtraUsersLS();
-  // Purge extra users no longer in IDB
+  // Hydrate pairs from IDB; purge users no longer in IDB
   if (extraUsers.length) {
     try {
       const sessions = await idbList();
@@ -3384,6 +3518,7 @@ if ("serviceWorker" in navigator) {
         saveExtraUsersLS();
       }
     } catch (e) {}
+    await hydrateExtraUsersFromIdb();
   }
   await renderSecondaryUsers();
   buildExtraUsersList();
@@ -3476,6 +3611,9 @@ document
         break;
       case "delete":
         idbDeleteSession(user);
+        break;
+      case "mem-export":
+        _exportMemoryUser(user);
         break;
     }
   });

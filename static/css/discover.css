@@ -619,9 +619,14 @@ input::placeholder { color: var(--ink3); }
 #discover-view.visible { display: block; }
 #discover-ctrl-bar {
   display: flex; flex-direction: column; gap: 0; margin-bottom: 0.7rem;
+  position: sticky; top: 0; z-index: 90;
+  background: var(--bg); padding: 0.4rem 0 0.1rem;
+  border-bottom: 1px solid var(--border);
+  margin-top: -0.5rem; margin-left: -1.5rem; margin-right: -1.5rem;
+  padding-left: 1.5rem; padding-right: 1.5rem;
 }
 #disc-rel-tabs {
-  display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 0.5rem;
+  display: flex; gap: 0; margin-bottom: 0.4rem;
 }
 .disc-tab {
   padding: .38rem 1rem; border: none; border-bottom: 2px solid transparent;
@@ -1149,7 +1154,7 @@ input::placeholder { color: var(--ink3); }
   flex-direction: column;
 }
 .main-inner {
-  padding: 1.25rem 1.5rem 3rem;
+  padding: 0.5rem 1.5rem 3rem;
   max-width: 1400px;
   width: 100%;
 }
