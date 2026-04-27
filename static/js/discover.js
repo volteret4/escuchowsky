@@ -31,8 +31,9 @@ let discoverDecadeFilter = new Set();
 let discoverPage = 0;
 let discoverLimit = 20;
 let discoverModeType = "albums";
-let discoverUserIdxs        = [0];   // active discover users (snapshot at trigger)
+let discoverUserIdxs        = [0];       // active discover users (snapshot at trigger)
 let activeDiscoverUserIdxs  = new Set([0]); // selected users in indicator (toggleable)
+let discoverRelMode         = 'discover'; // 'discover' | 'share' | 'enjoy'
 
 // album info cache (artist|||title → data)
 const albumInfoCache = new Map();
@@ -186,7 +187,7 @@ async function triggerDiscover() {
       }
     }
   }
-  enterDiscoverMode(idxs, limit, mode);
+  enterDiscoverMode(idxs, limit, mode, discoverRelMode);
 }
 
 function saveExtraUserJSON(idx) {
@@ -1358,108 +1359,130 @@ function renderDiscoverGrid() {
   });
 }
 
-function enterDiscoverMode(userIdxs, limit = 20, mode = "albums") {
+function _priUser() {
+  return { user: heardCache?.user || '?', count: 0, color: 'var(--ink3)', image: '' };
+}
+
+function enterDiscoverMode(userIdxs, limit = 20, mode = "albums", relMode = 'discover') {
   if (!extraUsers.length) return;
   const users = (Array.isArray(userIdxs) ? userIdxs : [userIdxs])
     .map(i => extraUsers[i]).filter(Boolean);
   if (!users.length) return;
+  if ((relMode === 'share' || relMode === 'enjoy') && !heardCache) return;
   limit = Math.min(100, Math.max(1, limit));
 
   discoverMode      = true;
   discoverPage      = 0;
   discoverLimit     = limit;
   discoverModeType  = mode;
+  discoverRelMode   = relMode;
   discoverUserIdxs  = (Array.isArray(userIdxs) ? userIdxs : [userIdxs]).filter(i => i < extraUsers.length);
   discoverAllCandidates = [];
   discoverDecadeFilter.clear();
   if (discoverEs) { discoverEs.close(); discoverEs = null; }
 
-  const primaryPairs = heardCache
-    ? new Set(heardCache.pairs.map(p => p[0] + "|" + p[1])) : new Set();
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const primaryPairs   = heardCache ? new Set(heardCache.pairs.map(p => p[0]+"|"+p[1])) : new Set();
+  const primaryArtists = heardCache ? heardCache.artist_set || new Set(heardCache.pairs.map(p => p[0])) : new Set();
+  const primarySongs   = heardCache ? heardCache.song_set || new Set((heardCache.songs||[]).map(s => s[0]+"|"+s[1])) : new Set();
 
-  if (mode === "artists") {
-    const primaryArtists = heardCache
-      ? heardCache.artist_set || new Set(heardCache.pairs.map(p => p[0])) : new Set();
-    // Each user's artist→{total,album_count} map
-    const userAMaps = users.map(u => {
-      const m = new Map();
-      for (const p of u.pairs) {
-        if (!m.has(p[0])) m.set(p[0], { orig_a: p[2] || p[0], total: 0, album_count: 0 });
-        const e = m.get(p[0]); e.total += p[4] || 1; e.album_count++;
+  // ── "ESCUCHA": secondary ∩ALL − primary ───────────────────────────────────
+  if (relMode === 'discover') {
+    if (mode === "artists") {
+      const userAMaps = users.map(u => { const m = new Map(); for (const p of u.pairs) { if (!m.has(p[0])) m.set(p[0], { orig_a: p[2]||p[0], total: 0, album_count: 0 }); const e = m.get(p[0]); e.total += p[4]||1; e.album_count++; } return m; });
+      const amap = {};
+      for (const k of [...userAMaps[0].keys()].filter(k => !primaryArtists.has(k) && userAMaps.every(m => m.has(k)))) {
+        amap[k] = { norm_a: k, orig_a: userAMaps[0].get(k).orig_a, orig_t: "", total: 0, album_count: 0, users: [], type: "artist" };
+        users.forEach((u, i) => { const e = userAMaps[i].get(k); amap[k].total += e.total; amap[k].album_count += e.album_count; amap[k].users.push({ user: u.user, count: e.total, color: u.color, image: u.image||"" }); });
       }
-      return m;
-    });
-    // Intersection of artist norm keys across all users, excluding primary
-    const baseKeys = [...userAMaps[0].keys()].filter(k =>
-      !primaryArtists.has(k) && userAMaps.every(m => m.has(k))
-    );
-    const amap = {};
-    for (const normA of baseKeys) {
-      amap[normA] = {
-        norm_a: normA,
-        orig_a: userAMaps[0].get(normA).orig_a,
-        orig_t: "", total: 0, album_count: 0, users: [], type: "artist",
-      };
-      users.forEach((u, i) => {
-        const e = userAMaps[i].get(normA);
-        amap[normA].total       += e.total;
-        amap[normA].album_count += e.album_count;
-        amap[normA].users.push({ user: u.user, count: e.total, color: u.color, image: u.image || "" });
-      });
+      discoverAllCandidates = Object.values(amap).sort((a, b) => b.total - a.total);
+    } else if (mode === "songs") {
+      const userSMaps = users.map(u => new Map((u.songs||[]).map(s => [s[0]+"|"+s[1], s])));
+      const smap = {};
+      for (const k of [...userSMaps[0].keys()].filter(k => !primarySongs.has(k) && userSMaps.every(m => m.has(k)))) {
+        const s0 = userSMaps[0].get(k);
+        smap[k] = { norm_a: s0[0], norm_t: s0[1], orig_a: s0[2]||s0[0], orig_album: s0[3]||"", orig_t: s0[4]||s0[1], total: 0, users: [], type: "song" };
+        users.forEach((u, i) => { const s = userSMaps[i].get(k); const c = s[5]||1; smap[k].total += c; smap[k].users.push({ user: u.user, count: c, color: u.color, image: u.image||"" }); });
+      }
+      discoverAllCandidates = Object.values(smap).sort((a, b) => b.total - a.total);
+    } else {
+      const userPMaps = users.map(u => new Map(u.pairs.map(p => [p[0]+"|"+p[1], p])));
+      const cmap = {};
+      for (const k of [...userPMaps[0].keys()].filter(k => !primaryPairs.has(k) && userPMaps.every(m => m.has(k)))) {
+        const p0 = userPMaps[0].get(k);
+        cmap[k] = { norm_a: p0[0], norm_t: p0[1], orig_a: p0[2]||p0[0], orig_t: p0[3]||p0[1], total: 0, users: [] };
+        users.forEach((u, i) => { const p = userPMaps[i].get(k); const c = p[4]||1; cmap[k].total += c; cmap[k].users.push({ user: u.user, count: c, color: u.color, image: u.image||"" }); });
+      }
+      discoverAllCandidates = Object.values(cmap).sort((a, b) => b.total - a.total);
     }
-    discoverAllCandidates = Object.values(amap).sort((a, b) => b.total - a.total);
 
-  } else if (mode === "songs") {
-    const primarySongs = heardCache
-      ? heardCache.song_set || new Set((heardCache.songs || []).map(s => s[0] + "|" + s[1])) : new Set();
-    // Each user's song key → song entry
-    const userSMaps = users.map(u => new Map(
-      (u.songs || []).map(s => [s[0] + "|" + s[1], s])
-    ));
-    const baseKeys = [...userSMaps[0].keys()].filter(k =>
-      !primarySongs.has(k) && userSMaps.every(m => m.has(k))
-    );
-    const smap = {};
-    for (const key of baseKeys) {
-      const s0 = userSMaps[0].get(key);
-      smap[key] = {
-        norm_a: s0[0], norm_t: s0[1],
-        orig_a: s0[2] || s0[0], orig_album: s0[3] || "", orig_t: s0[4] || s0[1],
-        total: 0, users: [], type: "song",
-      };
-      users.forEach((u, i) => {
-        const s = userSMaps[i].get(key);
-        const count = s[5] || 1;
-        smap[key].total += count;
-        smap[key].users.push({ user: u.user, count, color: u.color, image: u.image || "" });
-      });
+  // ── "COMPARTE": primary − secondary∪ANY ───────────────────────────────────
+  } else if (relMode === 'share') {
+    const pri = _priUser();
+    if (mode === "artists") {
+      const secArtistUnion = new Set(users.flatMap(u => u.pairs.map(p => p[0])));
+      const amap = {};
+      for (const p of heardCache.pairs) {
+        if (secArtistUnion.has(p[0])) continue;
+        if (!amap[p[0]]) amap[p[0]] = { norm_a: p[0], orig_a: p[2]||p[0], orig_t: "", total: 0, album_count: 0, users: [{ ...pri }], type: "artist" };
+        amap[p[0]].total += p[4]||1; amap[p[0]].album_count++; amap[p[0]].users[0].count += p[4]||1;
+      }
+      discoverAllCandidates = Object.values(amap).sort((a, b) => b.total - a.total);
+    } else if (mode === "songs") {
+      const secSongUnion = new Set(users.flatMap(u => (u.songs||[]).map(s => s[0]+"|"+s[1])));
+      const smap = {};
+      for (const s of (heardCache.songs||[])) {
+        const k = s[0]+"|"+s[1]; if (secSongUnion.has(k)) continue;
+        const c = s[5]||1; smap[k] = { norm_a: s[0], norm_t: s[1], orig_a: s[2]||s[0], orig_album: s[3]||"", orig_t: s[4]||s[1], total: c, users: [{ ...pri, count: c }], type: "song" };
+      }
+      discoverAllCandidates = Object.values(smap).sort((a, b) => b.total - a.total);
+    } else {
+      const secPairUnion = new Set(users.flatMap(u => u.pairs.map(p => p[0]+"|"+p[1])));
+      const cmap = {};
+      for (const p of heardCache.pairs) {
+        const k = p[0]+"|"+p[1]; if (secPairUnion.has(k)) continue;
+        const c = p[4]||1; cmap[k] = { norm_a: p[0], norm_t: p[1], orig_a: p[2]||p[0], orig_t: p[3]||p[1], total: c, users: [{ ...pri, count: c }] };
+      }
+      discoverAllCandidates = Object.values(cmap).sort((a, b) => b.total - a.total);
     }
-    discoverAllCandidates = Object.values(smap).sort((a, b) => b.total - a.total);
 
+  // ── "DISFRUTA": primary ∩ secondary∩ALL ───────────────────────────────────
   } else {
-    // Albums mode
-    const userPMaps = users.map(u => new Map(
-      u.pairs.map(p => [p[0] + "|" + p[1], p])
-    ));
-    const baseKeys = [...userPMaps[0].keys()].filter(k =>
-      !primaryPairs.has(k) && userPMaps.every(m => m.has(k))
-    );
-    const cmap = {};
-    for (const key of baseKeys) {
-      const p0 = userPMaps[0].get(key);
-      cmap[key] = {
-        norm_a: p0[0], norm_t: p0[1],
-        orig_a: p0[2] || p0[0], orig_t: p0[3] || p0[1],
-        total: 0, users: [],
-      };
-      users.forEach((u, i) => {
-        const p = userPMaps[i].get(key);
-        const count = p[4] || 1;
-        cmap[key].total += count;
-        cmap[key].users.push({ user: u.user, count, color: u.color, image: u.image || "" });
-      });
+    const pri = _priUser();
+    if (mode === "artists") {
+      const secAMaps = users.map(u => { const m = new Map(); for (const p of u.pairs) { if (!m.has(p[0])) m.set(p[0], { total: 0, album_count: 0 }); const e = m.get(p[0]); e.total += p[4]||1; e.album_count++; } return m; });
+      const amap = {};
+      for (const p of heardCache.pairs) {
+        if (!secAMaps.every(m => m.has(p[0]))) continue;
+        if (!amap[p[0]]) {
+          const priEntry = { ...pri, count: 0 };
+          amap[p[0]] = { norm_a: p[0], orig_a: p[2]||p[0], orig_t: "", total: 0, album_count: 0, type: "artist",
+            users: [priEntry, ...users.map((u, i) => { const e = secAMaps[i].get(p[0]); return { user: u.user, count: e?.total||0, color: u.color, image: u.image||"" }; })] };
+        }
+        amap[p[0]].total += p[4]||1; amap[p[0]].album_count++; amap[p[0]].users[0].count += p[4]||1;
+      }
+      discoverAllCandidates = Object.values(amap).sort((a, b) => b.total - a.total);
+    } else if (mode === "songs") {
+      const secSMaps = users.map(u => new Map((u.songs||[]).map(s => [s[0]+"|"+s[1], s])));
+      const smap = {};
+      for (const s of (heardCache.songs||[])) {
+        const k = s[0]+"|"+s[1]; if (!secSMaps.every(m => m.has(k))) continue;
+        const c = s[5]||1;
+        smap[k] = { norm_a: s[0], norm_t: s[1], orig_a: s[2]||s[0], orig_album: s[3]||"", orig_t: s[4]||s[1], type: "song", total: c,
+          users: [{ ...pri, count: c }, ...users.map((u, i) => { const ss = secSMaps[i].get(k); return { user: u.user, count: ss?.[5]||1, color: u.color, image: u.image||"" }; })] };
+      }
+      discoverAllCandidates = Object.values(smap).sort((a, b) => b.total - a.total);
+    } else {
+      const secPMaps = users.map(u => new Map(u.pairs.map(p => [p[0]+"|"+p[1], p])));
+      const cmap = {};
+      for (const p of heardCache.pairs) {
+        const k = p[0]+"|"+p[1]; if (!secPMaps.every(m => m.has(k))) continue;
+        const c = p[4]||1;
+        cmap[k] = { norm_a: p[0], norm_t: p[1], orig_a: p[2]||p[0], orig_t: p[3]||p[1], total: c,
+          users: [{ ...pri, count: c }, ...users.map((u, i) => { const sp = secPMaps[i].get(k); return { user: u.user, count: sp?.[4]||1, color: u.color, image: u.image||"" }; })] };
+      }
+      discoverAllCandidates = Object.values(cmap).sort((a, b) => b.total - a.total);
     }
-    discoverAllCandidates = Object.values(cmap).sort((a, b) => b.total - a.total);
   }
 
   document.getElementById("discover-view").classList.add("visible");
@@ -1568,7 +1591,7 @@ function _loadDiscoverPage() {
   if (!discoverCandidates.length) {
     document.getElementById("discover-progress").textContent =
       discoverUserIdxs.length > 1
-        ? "Sin álbumes en común entre los usuarios seleccionados"
+        ? { discover: "Sin álbumes en común entre los seleccionados", share: "Todo está en común", enjoy: "Sin álbumes compartidos" }[discoverRelMode] || "Sin candidatos"
         : "Sin candidatos para este usuario";
     document.getElementById("discover-footer").style.display = "";
     renderDiscoverGrid();
@@ -1582,7 +1605,7 @@ function _loadDiscoverPage() {
     renderDiscoverGrid();
     document.getElementById("discover-footer").style.display = "";
     document.getElementById("discover-progress").textContent =
-      `${discoverAlbums.length} artistas de ${uName} (pág. ${discoverPage + 1})`;
+      `${discoverAlbums.length} artistas · ${uName} (pág. ${discoverPage + 1})`;
 
     // Artist images: sequential client-side LFM calls with cancellation
     let active = true;
@@ -1636,12 +1659,12 @@ function _loadDiscoverPage() {
     renderDiscoverGrid();
     document.getElementById("discover-footer").style.display = "";
     document.getElementById("discover-progress").textContent =
-      `${discoverAlbums.length} canciones de ${uName} (pág. ${discoverPage + 1})`;
+      `${discoverAlbums.length} canciones · ${uName} (pág. ${discoverPage + 1})`;
     _enrichSongCovers();
   } else {
     document.getElementById("discover-footer").style.display = "";
     document.getElementById("discover-progress").textContent =
-      `Buscando ${discoverCandidates.length} álbumes de ${uName}…`;
+      `Buscando ${discoverCandidates.length} álbumes · ${uName}…`;
     loadMoreDiscover();
   }
 }
@@ -3359,3 +3382,14 @@ document
         break;
     }
   });
+
+// Delegation: disc-rel-tabs
+document.getElementById("disc-rel-tabs").addEventListener("click", e => {
+  const btn = e.target.closest(".disc-tab[data-rel]");
+  if (!btn) return;
+  const rel = btn.dataset.rel;
+  if (rel === discoverRelMode) return;
+  discoverRelMode = rel;
+  document.querySelectorAll(".disc-tab").forEach(b => b.classList.toggle("active", b.dataset.rel === rel));
+  if (discoverMode) triggerDiscover();
+});

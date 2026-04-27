@@ -618,15 +618,26 @@ input::placeholder { color: var(--ink3); }
 #discover-view { display: none; }
 #discover-view.visible { display: block; }
 #discover-ctrl-bar {
-  display: flex; align-items: center; gap: 0.5rem;
-  flex-wrap: wrap; margin-bottom: 0.7rem;
+  display: flex; flex-direction: column; gap: 0; margin-bottom: 0.7rem;
 }
-#discover-ctrl-bar #disc-user-indicator {
+#disc-rel-tabs {
+  display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 0.5rem;
+}
+.disc-tab {
+  padding: .38rem 1rem; border: none; border-bottom: 2px solid transparent;
+  background: transparent; color: var(--ink3); cursor: pointer;
+  font-size: .8rem; font-family: var(--sans); transition: color .15s, border-color .15s;
+}
+.disc-tab:hover { color: var(--ink); }
+.disc-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+#disc-ctrl-row {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+}
+#disc-ctrl-row #disc-user-indicator {
   display: flex; flex-wrap: wrap; gap: 0.3rem; flex: 1; min-width: 0;
 }
-#discover-ctrl-bar .disc-controls {
-  display: flex; align-items: center; gap: 0.35rem;
-  padding: 0; flex-shrink: 0;
+#disc-ctrl-row .disc-controls {
+  display: flex; align-items: center; gap: 0.35rem; padding: 0; flex-shrink: 0;
 }
 .discover-nav {
   display: none; /* eliminado */
