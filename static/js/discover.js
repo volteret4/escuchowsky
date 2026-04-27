@@ -440,18 +440,34 @@ function _normClient(s) {
   return (s || '').toLowerCase().replace(/[^\p{L}\p{N}_]/gu, '');
 }
 
-async function lfmGet(method, params) {
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
+const _LFM_NO_IMG = '2a96cbd8b46e442fc41c2b86b821562f';
+
+async function lfmGet(method, params, _retries = 3) {
   const p = new URLSearchParams({ method, api_key: LFM_CLIENT_KEY, format: 'json', ...params });
   const r = await fetch('https://ws.audioscrobbler.com/2.0/?' + p);
   if (!r.ok) throw new Error(`LFM HTTP ${r.status}`);
   const data = await r.json();
-  if (data.error && !data.topalbums && !data.toptracks && !data.recenttracks) {
-    throw new Error(data.message || `LFM error ${data.error}`);
+  if (data.error) {
+    // Transient LFM errors: retry with backoff
+    if ((data.error === 8 || data.error === 11 || data.error === 16) && _retries > 0) {
+      await _sleep(2000 + Math.random() * 1000);
+      return lfmGet(method, params, _retries - 1);
+    }
+    if (!data.topalbums && !data.toptracks && !data.recenttracks) {
+      throw new Error(data.message || `LFM error ${data.error}`);
+    }
   }
   return data;
 }
 
-const _sleep = ms => new Promise(r => setTimeout(r, ms));
+function _lfmBestImg(images) {
+  for (const img of (images || [])) {
+    const url = img['#text'] || '';
+    if (img.size === 'extralarge' && url && !url.includes(_LFM_NO_IMG)) return url;
+  }
+  return '';
+}
 
 async function lbGetDirect(path) {
   const r = await fetch('https://api.listenbrainz.org' + path);
@@ -466,6 +482,27 @@ async function lbGet(path) {
   if (wait > 0) await _sleep(wait);
   _lbLastCall = Date.now();
   return lbGetDirect(path);
+}
+
+let _mbLastCall = 0;
+async function mbGet(path) {
+  const now = Date.now();
+  const wait = 1100 - (now - _mbLastCall);
+  if (wait > 0) await _sleep(wait);
+  _mbLastCall = Date.now();
+  const r = await fetch('https://musicbrainz.org' + path, { headers: { 'Accept': 'application/json' } });
+  if (!r.ok) throw new Error(`MB HTTP ${r.status}`);
+  return r.json();
+}
+
+async function mbSearchRelGroup(artist, album) {
+  const q = `artist:"${artist.replace(/"/g, '')}" AND release:"${album.replace(/"/g, '')}"`;
+  const data = await mbGet('/ws/2/release-group?' + new URLSearchParams({ query: q, fmt: 'json', limit: '1' }));
+  const rgs = data['release-groups'] || [];
+  if (!rgs.length) return {};
+  const rg = rgs[0];
+  const ac = rg['artist-credit'] || [];
+  return { mbid: rg.id || '', title: rg.title || album, artist: (ac[0]?.name) || artist, date: rg['first-release-date'] || '' };
 }
 
 // Shared helper to turn the internal dicts into the wire format arrays
@@ -727,39 +764,56 @@ async function _lbSinceClient(user, since) {
 function showFetchMethodModal(username, source) {
   if (source === 'lb') return Promise.resolve('full');
   return new Promise(resolve => {
+    let selected = 'albums';
     const ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:500;display:flex;align-items:center;justify-content:center;padding:1rem';
+
+    const optStyle = (active) =>
+      `display:flex;gap:.75rem;align-items:flex-start;padding:.85rem;border:2px solid ${active ? 'var(--accent)' : 'var(--border2)'};border-radius:8px;cursor:pointer;background:var(--bg3);transition:border-color .15s`;
+    const dotStyle = (active) =>
+      `width:16px;height:16px;border-radius:50%;border:2px solid ${active ? 'var(--accent)' : 'var(--ink3)'};background:${active ? 'var(--accent)' : 'transparent'};flex-shrink:0;margin-top:2px;transition:all .15s`;
+
     ov.innerHTML = `
       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:1.5rem;max-width:440px;width:100%;font-family:var(--sans)">
-        <div style="font-family:var(--serif);font-size:1.1rem;font-weight:700;margin-bottom:1rem">¿Cómo cargar <em>${escH(username)}</em>?</div>
+        <div style="font-family:var(--serif);font-size:1.1rem;font-weight:700;margin-bottom:1rem;color:var(--ink)">¿Cómo cargar <em>${escH(username)}</em>?</div>
         <div style="display:flex;flex-direction:column;gap:.6rem;margin-bottom:1.2rem">
-          <label id="fm-lbl-albums" style="display:flex;gap:.75rem;align-items:flex-start;padding:.75rem;border:1px solid var(--accent);border-radius:8px;cursor:pointer;background:var(--bg3)">
-            <input type="radio" name="fm" value="albums" checked style="margin-top:3px;flex-shrink:0">
+          <div id="fm-opt-albums" style="${optStyle(true)}">
+            <div id="fm-dot-albums" style="${dotStyle(true)}"></div>
             <div>
-              <div style="font-weight:600;font-size:.875rem;color:var(--ink)">Rápido — Top Álbumes</div>
-              <div style="font-size:.78rem;color:var(--ink2);line-height:1.5;margin-top:.2rem">Usa <code>getTopAlbums</code>. Descarga los álbumes más escuchados. Más rápido: ~200 páginas para un usuario con 400k scrobbles. No incluye canciones individuales.</div>
+              <div style="font-weight:600;font-size:.875rem;color:var(--ink);font-family:var(--sans)">Rápido — Top Álbumes</div>
+              <div style="font-size:.78rem;color:var(--ink2);line-height:1.5;margin-top:.3rem;font-family:var(--sans)">Usa <code style="font-family:var(--mono);color:var(--accent)">getTopAlbums</code>. Descarga los álbumes más escuchados. ~200 páginas para 400k scrobbles. No incluye canciones.</div>
             </div>
-          </label>
-          <label id="fm-lbl-full" style="display:flex;gap:.75rem;align-items:flex-start;padding:.75rem;border:1px solid var(--border2);border-radius:8px;cursor:pointer;background:var(--bg3)">
-            <input type="radio" name="fm" value="full" style="margin-top:3px;flex-shrink:0">
+          </div>
+          <div id="fm-opt-full" style="${optStyle(false)}">
+            <div id="fm-dot-full" style="${dotStyle(false)}"></div>
             <div>
-              <div style="font-weight:600;font-size:.875rem;color:var(--ink)">Completo — Todos los scrobbles</div>
-              <div style="font-size:.78rem;color:var(--ink2);line-height:1.5;margin-top:.2rem">Usa <code>getRecentTracks</code>. Descarga todo el historial. Álbumes más fieles e incluye canciones. ~400 páginas para 400k scrobbles — puede tardar <strong style="color:var(--ink)">15–20 min</strong>.</div>
+              <div style="font-weight:600;font-size:.875rem;color:var(--ink);font-family:var(--sans)">Completo — Todos los scrobbles</div>
+              <div style="font-size:.78rem;color:var(--ink2);line-height:1.5;margin-top:.3rem;font-family:var(--sans)">Usa <code style="font-family:var(--mono);color:var(--accent)">getRecentTracks</code>. Todo el historial, álbumes más fieles e incluye canciones. ~400 páginas para 400k scrobbles — puede tardar <strong style="color:var(--ink)">15–20 min</strong>.</div>
             </div>
-          </label>
+          </div>
         </div>
         <div style="display:flex;gap:.75rem;justify-content:flex-end">
           <button id="fm-cancel" class="btn-sm">Cancelar</button>
           <button id="fm-ok" class="btn-sm primary">Cargar →</button>
         </div>
       </div>`;
+
     document.body.appendChild(ov);
-    ov.querySelectorAll('input[name="fm"]').forEach(r => r.addEventListener('change', () => {
-      document.getElementById('fm-lbl-albums').style.borderColor = r.value === 'albums' && r.checked ? 'var(--accent)' : 'var(--border2)';
-      document.getElementById('fm-lbl-full').style.borderColor   = r.value === 'full'   && r.checked ? 'var(--accent)' : 'var(--border2)';
-    }));
+
+    function pick(val) {
+      selected = val;
+      ov.querySelector('#fm-opt-albums').style.borderColor = val === 'albums' ? 'var(--accent)' : 'var(--border2)';
+      ov.querySelector('#fm-opt-full').style.borderColor   = val === 'full'   ? 'var(--accent)' : 'var(--border2)';
+      ov.querySelector('#fm-dot-albums').style.background  = val === 'albums' ? 'var(--accent)' : 'transparent';
+      ov.querySelector('#fm-dot-albums').style.borderColor = val === 'albums' ? 'var(--accent)' : 'var(--ink3)';
+      ov.querySelector('#fm-dot-full').style.background    = val === 'full'   ? 'var(--accent)' : 'transparent';
+      ov.querySelector('#fm-dot-full').style.borderColor   = val === 'full'   ? 'var(--accent)' : 'var(--ink3)';
+    }
+
+    ov.querySelector('#fm-opt-albums').onclick = () => pick('albums');
+    ov.querySelector('#fm-opt-full').onclick   = () => pick('full');
     ov.querySelector('#fm-cancel').onclick = () => { ov.remove(); resolve(null); };
-    ov.querySelector('#fm-ok').onclick    = () => { const v = ov.querySelector('input[name="fm"]:checked')?.value || 'albums'; ov.remove(); resolve(v); };
+    ov.querySelector('#fm-ok').onclick     = () => { ov.remove(); resolve(selected); };
   });
 }
 
@@ -979,9 +1033,33 @@ function enterDiscoverMode(userIdx, limit = 20, mode = 'albums') {
   _loadDiscoverPage();
 }
 
-function _enrichSongCovers() {
-  // Collect unique (orig_a, orig_album) pairs that still need covers, keyed by "a|||album"
-  const needed = {};  // "a|||album" -> [idx, ...]
+function _applyEnrichCover(cover_url, mbid, artist, album, needed) {
+  enrichCacheSet(artist, album, { cover_url, mbid: mbid || '' });
+  const entry = needed[artist + '|||' + album];
+  if (!entry) return;
+  entry.idxs.forEach(idx => {
+    if (!discoverAlbums[idx]) return;
+    discoverAlbums[idx].cover_url = cover_url;
+    const card = document.querySelector(`#discover-grid .card[data-disc="${idx}"]`);
+    if (!card) return;
+    let img = card.querySelector('.card-cover');
+    const ph = card.querySelector('.disc-song-ph');
+    if (!img) {
+      img = document.createElement('img');
+      img.className = 'card-cover';
+      img.alt = '';
+      img.loading = 'lazy';
+      img.onerror = function() { this.style.display = 'none'; if (ph) ph.style.display = 'flex'; };
+      card.insertBefore(img, card.firstChild);
+    }
+    if (ph) ph.style.display = 'none';
+    img.style.display = '';
+    img.src = cover_url;
+  });
+}
+
+async function _enrichSongCovers() {
+  const needed = {};
   discoverAlbums.forEach((a, i) => {
     if (a.type !== 'song' || a.cover_url || !a.orig_album) return;
     const k = (a.orig_a || '') + '|||' + (a.orig_album || '');
@@ -991,45 +1069,26 @@ function _enrichSongCovers() {
   const pairs = Object.values(needed);
   if (!pairs.length) return;
 
-  // Use api_enrich_albums SSE to fetch missing covers
-  const url = '/api/enrich_albums?albums=' + encodeURIComponent(JSON.stringify(
-    pairs.map(p => [p.orig_a, p.orig_album])
-  ));
-  const es = new EventSource(url);
-  es.onmessage = e => {
-    let msg;
-    try { msg = JSON.parse(e.data); } catch { return; }
-    if (msg.done || msg.error) { es.close(); return; }
-    if (!msg.artist || !msg.album || !msg.cover_url) return;
-    const k = msg.artist + '|||' + msg.album;
-    enrichCacheSet(msg.artist, msg.album, { cover_url: msg.cover_url, mbid: msg.mbid || '' });
-    const entry = needed[k];
-    if (!entry) return;
-    entry.idxs.forEach(idx => {
-      if (!discoverAlbums[idx]) return;
-      discoverAlbums[idx].cover_url = msg.cover_url;
-      // Patch the card in the DOM
-      const card = document.querySelector(`#discover-grid .card[data-disc="${idx}"]`);
-      if (!card) return;
-      let img = card.querySelector('.card-cover');
-      const ph = card.querySelector('.disc-song-ph');
-      if (!img) {
-        img = document.createElement('img');
-        img.className = 'card-cover';
-        img.alt = '';
-        img.loading = 'lazy';
-        img.onerror = function() {
-          this.style.display = 'none';
-          if (ph) ph.style.display = 'flex';
-        };
-        card.insertBefore(img, card.firstChild);
-      }
-      if (ph) ph.style.display = 'none';
-      img.style.display = '';
-      img.src = msg.cover_url;
-    });
-  };
-  es.onerror = () => es.close();
+  for (const { orig_a: artist, orig_album: album } of pairs) {
+    let cover_url = '', mbid = '';
+    try {
+      const lfm = await lfmGet('album.getInfo', { artist, album, autocorrect: 1 });
+      const al = lfm.album || {};
+      const lfmImg  = _lfmBestImg(al.image);
+      const lfmMbid = (al.mbid || '').trim();
+      if (lfmImg)       cover_url = lfmImg;
+      else if (lfmMbid) cover_url = `https://coverartarchive.org/release/${lfmMbid}/front-500`;
+    } catch(e) {}
+
+    if (!cover_url) {
+      try {
+        const mb = await mbSearchRelGroup(artist, album);
+        if (mb.mbid) { mbid = mb.mbid; cover_url = `https://coverartarchive.org/release-group/${mbid}/front-500`; }
+      } catch(e) {}
+    }
+
+    if (cover_url) _applyEnrichCover(cover_url, mbid, artist, album, needed);
+  }
 }
 
 function _loadDiscoverPage() {
@@ -1150,9 +1209,8 @@ function leaveDiscoverMode() {
   const _es2 = document.getElementById('empty-state'); if (_es2) _es2.style.display = '';
 }
 
-function loadMoreDiscover() {
+async function loadMoreDiscover() {
   if (discoverSearching) return;
-  // Load all remaining candidates (limit was chosen at entry)
   const batch = discoverCandidates.slice(discoverOffset);
   if (!batch.length) {
     document.getElementById('discover-progress').textContent = '✓ No hay más candidatos';
@@ -1163,9 +1221,8 @@ function loadMoreDiscover() {
   const prog = document.getElementById('discover-progress');
   document.getElementById('discover-footer').style.display = '';
 
-  // Build placeholders, separating cached vs uncached items
   const startIdx   = discoverAlbums.length;
-  const uncachedJs = [];  // batch indices that need SSE enrichment
+  const uncachedJs = [];
 
   batch.forEach((c, j) => {
     const hit = enrichCacheGet(c.orig_a, c.orig_t);
@@ -1181,7 +1238,6 @@ function loadMoreDiscover() {
   });
   renderDiscoverGrid();
 
-  // If everything was cached, no SSE needed
   if (!uncachedJs.length) {
     discoverOffset  += batch.length;
     discoverSearching = false;
@@ -1191,44 +1247,60 @@ function loadMoreDiscover() {
 
   prog.textContent = `Consultando… (0 / ${uncachedJs.length})`;
 
-  if (discoverEs) { discoverEs.close(); discoverEs = null; }
-  const sseBatch    = uncachedJs.map(j => [batch[j].orig_a, batch[j].orig_t]);
-  const albumsParam = encodeURIComponent(JSON.stringify(sseBatch));
-  discoverEs = new EventSource(`/api/enrich_albums?albums=${albumsParam}`);
+  let active = true;
+  if (discoverEs) discoverEs.close();
+  discoverEs = { close() { active = false; } };
 
-  discoverEs.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.done) {
-      discoverEs.close(); discoverEs = null;
-      discoverOffset  += batch.length;
-      discoverSearching = false;
-      prog.textContent  = `✓ ${discoverAlbums.length} álbumes encontrados`;
-      return;
+  for (let i = 0; i < uncachedJs.length; i++) {
+    if (!active) break;
+    const j     = uncachedJs[i];
+    const c     = batch[j];
+    const aIdx  = startIdx + j;
+    const artist = c.orig_a, album = c.orig_t;
+
+    let cover_url = '', mbid = '', mb_title = album, mb_artist = artist, date = '';
+
+    try {
+      const lfm = await lfmGet('album.getInfo', { artist, album, autocorrect: 1 });
+      const al  = lfm.album || {};
+      const lfmImg  = _lfmBestImg(al.image);
+      const lfmMbid = (al.mbid || '').trim();
+      mb_title  = al.name || album;
+      mb_artist = (typeof al.artist === 'object' ? al.artist.name : al.artist) || artist;
+      if (lfmImg)       cover_url = lfmImg;
+      else if (lfmMbid) cover_url = `https://coverartarchive.org/release/${lfmMbid}/front-500`;
+    } catch(e) {}
+
+    if (!active) break;
+
+    if (!cover_url) {
+      try {
+        const mb = await mbSearchRelGroup(artist, album);
+        if (mb.mbid) {
+          mbid      = mb.mbid;
+          mb_title  = mb.title  || mb_title;
+          mb_artist = mb.artist || mb_artist;
+          date      = mb.date   || '';
+          cover_url = `https://coverartarchive.org/release-group/${mbid}/front-500`;
+        }
+      } catch(e) {}
     }
-    if (typeof msg.i === 'number') {
-      const aIdx = startIdx + uncachedJs[msg.i];  // map SSE index → discoverAlbums index
-      if (!discoverAlbums[aIdx]) return;
-      const cover_url = msg.cover_url || (msg.mbid ? `/api/cover?mbid=${encodeURIComponent(msg.mbid)}` : '');
-      const enriched  = {
-        mbid:      msg.mbid      || '',
-        cover_url,
-        mb_title:  msg.mb_title  || discoverAlbums[aIdx].orig_t,
-        mb_artist: msg.mb_artist || discoverAlbums[aIdx].orig_a,
-        date:      msg.date      || '',
-      };
+
+    if (discoverAlbums[aIdx]) {
+      const enriched = { mbid, cover_url, mb_title, mb_artist, date };
       Object.assign(discoverAlbums[aIdx], enriched);
-      enrichCacheSet(discoverAlbums[aIdx].orig_a, discoverAlbums[aIdx].orig_t, enriched);
+      enrichCacheSet(artist, album, enriched);
       _patchDiscoverCard(aIdx, discoverAlbums[aIdx]);
     }
-    prog.textContent = `Buscando… (${msg.i + 1} / ${uncachedJs.length})`;
-  };
+    prog.textContent = `Buscando… (${i + 1} / ${uncachedJs.length})`;
+  }
 
-  discoverEs.onerror = () => {
-    discoverEs.close(); discoverEs = null;
-    discoverOffset  += batch.length;
-    discoverSearching = false;
+  if (active) {
+    discoverOffset   += batch.length;
     prog.textContent  = `✓ ${discoverAlbums.length} álbumes encontrados`;
-  };
+  }
+  discoverEs        = null;
+  discoverSearching = false;
 }
 
 document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -1512,18 +1584,64 @@ async function fetchAlbumInfo(artist, album, mbid) {
   loading.style.display = '';
   const cacheKey = `${artist}|||${album}`;
   try {
-    // Use in-memory cache to avoid repeated server calls for same album
     if (albumInfoCache.has(cacheKey)) {
       _applyAlbumInfoToPanel(albumInfoCache.get(cacheKey), artist);
       loading.style.display = 'none';
       return;
     }
-    const p = new URLSearchParams({ artist, album });
-    if (mbid) p.set('mbid', mbid);
-    const data = await fetch(`/api/album_info?${p}`).then(r => r.json());
-    if (data.error) { loading.style.display = 'none'; return; }
-    albumInfoCache.set(cacheKey, data);
-    _applyAlbumInfoToPanel(data, artist);
+    const result = {};
+
+    // LFM album.getInfo
+    try {
+      const alData = await lfmGet('album.getInfo', { artist, album, autocorrect: 1 });
+      if (alData.album) {
+        const al = alData.album;
+        const tags = [].concat(al.tags?.tag || []);
+        result.lfm = {
+          listeners: al.listeners || '',
+          playcount:  al.playcount  || '',
+          tags:  tags.slice(0, 6).map(t => t.name || t),
+          wiki:  (al.wiki?.summary || '').split('<a ')[0].trim(),
+          image: _lfmBestImg(al.image),
+          url:   al.url || '',
+        };
+        if (!mbid && al.mbid) mbid = al.mbid;
+      }
+    } catch(e) {}
+
+    // LFM artist.getInfo
+    try {
+      const arData = await lfmGet('artist.getInfo', { artist, autocorrect: 1 });
+      if (arData.artist) {
+        const ar = arData.artist;
+        result.artist = {
+          bio:       (ar.bio?.summary || '').split('<a ')[0].trim(),
+          listeners: ar.stats?.listeners || '',
+          image:     _lfmBestImg(ar.image),
+          url:       ar.url || '',
+        };
+      }
+    } catch(e) {}
+
+    // MusicBrainz: only if no mbid and there's an album name
+    if (!mbid && album) {
+      try {
+        const mb = await mbSearchRelGroup(artist, album);
+        if (mb.mbid) {
+          mbid = mb.mbid;
+          Object.assign(result, {
+            mbid, mb_title: mb.title, mb_artist: mb.artist, date: mb.date,
+            cover_url: `https://coverartarchive.org/release-group/${mbid}/front-500`,
+          });
+        }
+      } catch(e) {}
+    } else if (mbid) {
+      result.mbid      = mbid;
+      result.cover_url = `https://coverartarchive.org/release-group/${mbid}/front-500`;
+    }
+
+    albumInfoCache.set(cacheKey, result);
+    _applyAlbumInfoToPanel(result, artist);
   } catch(e) {}
   loading.style.display = 'none';
 }
