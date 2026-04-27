@@ -2077,29 +2077,10 @@ document.getElementById('btn-sync-session').addEventListener('click', async () =
   const prog = document.getElementById('um-progress');
   btn.disabled = true;
   btn.textContent = '↻ ...';
-  const isLb = heardCache.source === 'lb';
-  prog.textContent = isLb ? 'Sincronizando con ListenBrainz...' : 'Sincronizando con Last.fm...';
+  prog.textContent = 'Sincronizando…';
   try {
-    if (isLb) {
-      const url = sinceEndpoint(heardCache.user, heardCache.fetched_at || 0, 'lb');
-      const r = await fetch(url);
-      if (!r.ok) throw new Error(`Error ${r.status}`);
-      const data = await r.json();
-      if (data.error) throw new Error(data.error);
-      const existing = new Set(heardCache.pairs.map(p => p[0] + '|' + p[1]));
-      const added = (data.new_pairs || []).filter(p => !existing.has(p[0] + '|' + p[1]));
-      heardCache.pairs     = [...heardCache.pairs, ...added];
-      heardCache.count     = heardCache.pairs.length;
-      heardCache.fetched_at = data.fetched_at;
-      if (data.last_scrobble_ts && data.last_scrobble_ts > (heardCache.last_scrobble_ts || 0)) {
-        heardCache.last_scrobble_ts     = data.last_scrobble_ts;
-        heardCache.last_scrobble_artist = data.last_scrobble_artist || '';
-        heardCache.last_scrobble_track  = data.last_scrobble_track  || '';
-      }
-      showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
-      prog.textContent = added.length ? `✓ +${added.length} nuevos (total ${heardCache.count.toLocaleString()})` : '✓ Al día';
-    } else {
-      const data = await syncSinceClient(heardCache.user, heardCache.fetched_at || 0, 'lfm');
+    {
+      const data = await syncSinceClient(heardCache.user, heardCache.fetched_at || 0, heardCache.source || 'lfm');
       if (data.error) throw new Error(data.error);
       const existing = new Set(heardCache.pairs.map(p => p[0] + '|' + p[1]));
       const added = (data.new_pairs || []).filter(p => !existing.has(p[0] + '|' + p[1]));
@@ -2107,7 +2088,7 @@ document.getElementById('btn-sync-session').addEventListener('click', async () =
       heardCache.count      = heardCache.pairs.length;
       heardCache.fetched_at = data.fetched_at;
       if (data.last_scrobble_ts && data.last_scrobble_ts > (heardCache.last_scrobble_ts || 0)) {
-        heardCache.last_scrobble_ts = data.last_scrobble_ts;
+        heardCache.last_scrobble_ts     = data.last_scrobble_ts;
         heardCache.last_scrobble_artist = data.last_scrobble_artist || '';
         heardCache.last_scrobble_track  = data.last_scrobble_track  || '';
       }
