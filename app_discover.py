@@ -956,9 +956,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <link rel="icon" type="image/png" href="/img/little_chicken.png" />
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#7c6fff">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="tumtumpa">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-title" content="tumtumpa">
 <meta name="description" content="Descubre qué escuchan tus amigos que tú no has escuchado aún">
 <!-- Umami Analytics -->
 <script defer src="https://cloud.umami.is/script.js" data-website-id="262419b6-9389-4f91-898c-3943726c6dc8"></script>
