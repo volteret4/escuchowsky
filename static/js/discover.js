@@ -1294,17 +1294,39 @@ async function renderSbUsersList() { return renderSecondaryUsers(); }
 async function sbSyncPrimary() {
   if (!heardCache) return;
   const prog = document.getElementById('um-extra-progress');
+  const isLb = heardCache.source === 'lb';
   if (prog) prog.textContent = 'Sincronizando...';
   try {
-    const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${heardCache.count||0}`;
-    const data = await fetch(url).then(r => r.json());
-    if (data.error) { if (prog) prog.textContent = 'Error: ' + data.error; return; }
-    if (data.new_count === 0) { if (prog) prog.textContent = '✓ Al día'; return; }
-    if (data.full_replace) {
-      heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
+    if (isLb) {
+      const url = sinceEndpoint(heardCache.user, heardCache.fetched_at || 0, 'lb');
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`Error ${r.status}`);
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      const existing = new Set(heardCache.pairs.map(p => p[0] + '|' + p[1]));
+      const added = (data.new_pairs || []).filter(p => !existing.has(p[0] + '|' + p[1]));
+      heardCache.pairs      = [...heardCache.pairs, ...added];
+      heardCache.count      = heardCache.pairs.length;
+      heardCache.fetched_at = data.fetched_at;
+      if (data.last_scrobble_ts && data.last_scrobble_ts > (heardCache.last_scrobble_ts || 0)) {
+        heardCache.last_scrobble_ts     = data.last_scrobble_ts;
+        heardCache.last_scrobble_artist = data.last_scrobble_artist || '';
+        heardCache.last_scrobble_track  = data.last_scrobble_track  || '';
+      }
       showUserBadge(heardCache.user, document.getElementById('badge-avatar')?.src||'', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
-      if (prog) prog.textContent = '✓ Al día';
+      if (prog) prog.textContent = added.length ? `✓ +${added.length} nuevos` : '✓ Al día';
       await renderSecondaryUsers();
+    } else {
+      const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${heardCache.count||0}`;
+      const data = await fetch(url).then(r => r.json());
+      if (data.error) { if (prog) prog.textContent = 'Error: ' + data.error; return; }
+      if (data.new_count === 0) { if (prog) prog.textContent = '✓ Al día'; return; }
+      if (data.full_replace) {
+        heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
+        showUserBadge(heardCache.user, document.getElementById('badge-avatar')?.src||'', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+        if (prog) prog.textContent = '✓ Al día';
+        await renderSecondaryUsers();
+      }
     }
   } catch(e) { if (prog) prog.textContent = 'Error: ' + e.message; }
 }
@@ -1673,6 +1695,7 @@ function loadHeardCache(data) {
     last_scrobble_track: data.last_scrobble_track  || '',
     complete:            data.complete !== undefined ? data.complete : true,
     total_pages:         data.total_pages          || 0,
+    source:              data.source               || 'lfm',
     // Set de artistas normalizados para filtro en modo Descubrir artistas
     artist_set:          data.heard_artists
                            ? new Set(data.heard_artists)
@@ -1695,6 +1718,7 @@ function loadHeardCache(data) {
     complete:            heardCache.complete,
     total_pages:         heardCache.total_pages,
     heard_artists:       [...heardCache.artist_set],
+    source:              heardCache.source,
   }).then(() => { renderIdbList(); renderIdbExtraList(); }).catch(() => {});
   dismissWelcome();
 }
@@ -1776,19 +1800,40 @@ document.getElementById('btn-sync-session').addEventListener('click', async () =
   const prog = document.getElementById('um-progress');
   btn.disabled = true;
   btn.textContent = '↻ ...';
-  prog.textContent = 'Sincronizando con Last.fm...';
+  const isLb = heardCache.source === 'lb';
+  prog.textContent = isLb ? 'Sincronizando con ListenBrainz...' : 'Sincronizando con Last.fm...';
   try {
-    const knownCount = heardCache.count || 0;
-    const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${knownCount}`;
-    const data = await fetch(url).then(r => r.json());
-    if (data.error) { prog.textContent = 'Error: ' + data.error; return; }
-    if (data.new_count === 0) {
-      prog.textContent = '✓ Al día'; btn.textContent = '↻ Sync'; return;
-    }
-    if (data.full_replace) {
-      heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
+    if (isLb) {
+      const url = sinceEndpoint(heardCache.user, heardCache.fetched_at || 0, 'lb');
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`Error ${r.status}`);
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      const existing = new Set(heardCache.pairs.map(p => p[0] + '|' + p[1]));
+      const added = (data.new_pairs || []).filter(p => !existing.has(p[0] + '|' + p[1]));
+      heardCache.pairs     = [...heardCache.pairs, ...added];
+      heardCache.count     = heardCache.pairs.length;
+      heardCache.fetched_at = data.fetched_at;
+      if (data.last_scrobble_ts && data.last_scrobble_ts > (heardCache.last_scrobble_ts || 0)) {
+        heardCache.last_scrobble_ts     = data.last_scrobble_ts;
+        heardCache.last_scrobble_artist = data.last_scrobble_artist || '';
+        heardCache.last_scrobble_track  = data.last_scrobble_track  || '';
+      }
       showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
-      prog.textContent = `✓ Al día`;
+      prog.textContent = added.length ? `✓ +${added.length} nuevos (total ${heardCache.count.toLocaleString()})` : '✓ Al día';
+    } else {
+      const knownCount = heardCache.count || 0;
+      const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${knownCount}`;
+      const data = await fetch(url).then(r => r.json());
+      if (data.error) { prog.textContent = 'Error: ' + data.error; return; }
+      if (data.new_count === 0) {
+        prog.textContent = '✓ Al día'; btn.textContent = '↻ Sync'; return;
+      }
+      if (data.full_replace) {
+        heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
+        showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+        prog.textContent = `✓ Al día`;
+      }
     }
   } catch(e) {
     prog.textContent = 'Error: ' + e.message;
@@ -1866,6 +1911,7 @@ async function doLoadUser() {
         complete:             true,
         total_pages:          result.total_pages          || 0,
         heard_artists:        result.heard_artists         || [],
+        source:               src,
       });
       prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados`;
       closeUserModal();
