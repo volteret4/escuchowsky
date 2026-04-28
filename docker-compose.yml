@@ -62,15 +62,7 @@ services:
     volumes:
       - ${HOME}/contenedores/nginx/crowdsec_textfiles:/textfiles:ro
     command:
-      - "--collector.disable-defaults"
-      - "--collector.textfile"
       - "--collector.textfile.directory=/textfiles"
-      - "--collector.cpu"
-      - "--collector.meminfo"
-      - "--collector.loadavg"
-      - "--collector.netdev"
-      - "--collector.diskstats"
-      - "--collector.filesystem"
       - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|run)($$|/)"
     ports:
       - "9100:9100"
@@ -105,11 +97,11 @@ services:
       # - NGINX_ALWAYS_TLS_REDIRECT=off
 
       # ── ModSecurity core ───────────────────────────────────────────────────
-      - MODSEC_RULE_ENGINE=DetectionOnly  # On | Off | DetectionOnly
-      - MODSEC_AUDIT_ENGINE=RelevantOnly  # On | Off | RelevantOnly
+      - MODSEC_RULE_ENGINE=DetectionOnly # On | Off | DetectionOnly
+      - MODSEC_AUDIT_ENGINE=RelevantOnly # On | Off | RelevantOnly
       - MODSEC_AUDIT_LOG=/var/log/nginx/modsec_audit.log
-      - MODSEC_AUDIT_LOG_TYPE=Serial      # Serial | Concurrent
-      - MODSEC_AUDIT_LOG_FORMAT=Native    # JSON | Native
+      - MODSEC_AUDIT_LOG_TYPE=Serial # Serial | Concurrent
+      - MODSEC_AUDIT_LOG_FORMAT=Native # JSON | Native
       - MODSEC_AUDIT_LOG_PARTS=ABIJDEFHZ
       - MODSEC_AUDIT_LOG_RELEVANT_STATUS=^(?:5|4(?!04))
       - MODSEC_AUDIT_STORAGE_DIR=/var/log/nginx/modsec_audit
@@ -117,12 +109,12 @@ services:
       # - MODSEC_DEBUG_LOGLEVEL=0         # 0-9
       - MODSEC_REQ_BODY_ACCESS=On
       - MODSEC_REQ_BODY_LIMIT=13107200
-      - MODSEC_REQ_BODY_LIMIT_ACTION=Reject   # Reject | ProcessPartial
+      - MODSEC_REQ_BODY_LIMIT_ACTION=Reject # Reject | ProcessPartial
       - MODSEC_REQ_BODY_NOFILES_LIMIT=131072
       - MODSEC_REQ_BODY_JSON_DEPTH_LIMIT=512
       - MODSEC_RESP_BODY_ACCESS=On
       - MODSEC_RESP_BODY_LIMIT=1048576
-      - MODSEC_RESP_BODY_LIMIT_ACTION=ProcessPartial  # Reject | ProcessPartial
+      - MODSEC_RESP_BODY_LIMIT_ACTION=ProcessPartial # Reject | ProcessPartial
       - MODSEC_RESP_BODY_MIMETYPE=text/plain text/html text/xml
       # - MODSEC_TMP_DIR=/tmp/modsecurity/tmp
       # - MODSEC_DATA_DIR=/tmp/modsecurity/data
@@ -134,10 +126,10 @@ services:
       # - MODSEC_STATUS_ENGINE=Off
 
       # ── OWASP CRS ──────────────────────────────────────────────────────────
-      - BLOCKING_PARANOIA=2     # 1-4 (reemplaza PARANOIA en CRSv4)
-      - DETECTION_PARANOIA=2    # >= BLOCKING_PARANOIA; detecta sin bloquear
-      - ANOMALY_INBOUND=5       # puntuación para bloquear request entrante
-      - ANOMALY_OUTBOUND=4      # puntuación para bloquear respuesta saliente
+      - BLOCKING_PARANOIA=2 # 1-4 (reemplaza PARANOIA en CRSv4)
+      - DETECTION_PARANOIA=2 # >= BLOCKING_PARANOIA; detecta sin bloquear
+      - ANOMALY_INBOUND=5 # puntuación para bloquear request entrante
+      - ANOMALY_OUTBOUND=4 # puntuación para bloquear respuesta saliente
       # - REPORTING_LEVEL=4     # 0-5 verbosidad del score en logs
       # - ENFORCE_BODYPROC_URLENCODED=0
       # - VALIDATE_UTF8_ENCODING=0
@@ -172,6 +164,7 @@ services:
       - /home/docker_webs/contenedores/nginx/logs/nginx:/var/log/nginx
       - ./modsec/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
     networks:
+      out:
       musica:
         ipv4_address: 172.20.0.10
 
@@ -181,3 +174,5 @@ networks:
     ipam:
       config:
         - subnet: 172.20.0.0/24
+  out:
+    external: true

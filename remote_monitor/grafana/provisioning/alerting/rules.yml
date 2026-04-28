@@ -1,0 +1,1154 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: Seguridad
+    folder: AWS Seguridad
+    interval: 2m
+    rules:
+      - uid: prov-tunnel-down
+        title: Tunel rsyslog caido
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"}[10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 10m
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-ssh-brute-force
+        title: Brute force SSH
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "Failed password" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 5
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-sudo-usage
+        title: Uso de sudo
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "sudo" |= "COMMAND" [5m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: warning
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-ssh-root-login
+        title: Login root por SSH
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "Accepted" |= "root" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-new-user-created
+        title: Usuario nuevo creado en el sistema
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |~ "useradd|adduser|new user" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-invalid-user-burst
+        title: Rafaga de usuarios SSH invalidos
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "Invalid user" [5m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 10
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: warning
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-crowdsec-ban
+        title: CrowdSec ban activo
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |~ "crowdsec|ban|blocked" |~ "ban|decision" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: warning
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+  - orgId: 1
+    name: Infraestructura
+    folder: AWS Seguridad
+    interval: 2m
+    rules:
+      # IMPORTANTE: reemplaza dfkgq1kcwh4aob con el UID real de tu datasource Prometheus
+      # Grafana -> Connections -> Data sources -> Prometheus -> mira la URL
+
+      - uid: prov-high-cpu
+        title: CPU elevada en AWS
+        condition: C
+        data:
+          - refId: A
+            queryType: ""
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: dfkgq1kcwh4aob
+            model:
+              datasource:
+                type: prometheus
+                uid: dfkgq1kcwh4aob
+              editorMode: code
+              expr: '100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 85
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations: {}
+        labels:
+          severity: warning
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-high-memory
+        title: Memoria elevada en AWS
+        condition: C
+        data:
+          - refId: A
+            queryType: ""
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: dfkgq1kcwh4aob
+            model:
+              datasource:
+                type: prometheus
+                uid: dfkgq1kcwh4aob
+              editorMode: code
+              expr: "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)"
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 90
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations: {}
+        labels:
+          severity: warning
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-high-disk
+        title: Disco casi lleno en AWS
+        condition: C
+        data:
+          - refId: A
+            queryType: ""
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: dfkgq1kcwh4aob
+            model:
+              datasource:
+                type: prometheus
+                uid: dfkgq1kcwh4aob
+              editorMode: code
+              expr: '100 * (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"})'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 85
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-nginx-down
+        title: Nginx caido en AWS
+        condition: C
+        data:
+          - refId: A
+            queryType: ""
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: dfkgq1kcwh4aob
+            model:
+              datasource:
+                type: prometheus
+                uid: dfkgq1kcwh4aob
+              editorMode: code
+              expr: "nginx_up"
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 2m
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-server-down
+        title: Servidor AWS caido
+        condition: C
+        data:
+          - refId: A
+            queryType: ""
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: dfkgq1kcwh4aob
+            model:
+              datasource:
+                type: prometheus
+                uid: dfkgq1kcwh4aob
+              editorMode: code
+              expr: 'up{job="node"}'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+  - orgId: 1
+    name: Auditd
+    folder: AWS Seguridad
+    interval: 2m
+    rules:
+      - uid: prov-auditd-identity
+        title: "Auditd: modificacion de identidad"
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "key=identity" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-auditd-kernel-modules
+        title: "Auditd: modulo de kernel cargado"
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "key=kernel_modules" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-auditd-bin-modification
+        title: "Auditd: binario del sistema modificado"
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "key=bin_modification" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-auditd-log-tamper
+        title: "Auditd: manipulacion de logs del sistema"
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "key=log_tamper" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-auditd-docker-socket
+        title: "Auditd: acceso al socket de Docker"
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "key=docker_socket" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: warning
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-auditd-net-connect-root
+        title: "Auditd: conexion saliente de root (posible shell inversa)"
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "key=net_connect_root" [5m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 5
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: critical
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-auditd-recon
+        title: "Auditd: herramienta de reconocimiento ejecutada"
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "key=recon" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 3
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: warning
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
+
+      - uid: prov-auditd-privilege-esc
+        title: "Auditd: escalada de privilegios (setuid/setgid)"
+        condition: C
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: dfkgq4azjn6kgf
+            model:
+              datasource:
+                type: loki
+                uid: dfkgq4azjn6kgf
+              editorMode: code
+              expr: 'sum(count_over_time({job="rsyslog"} |= "key=privilege_escalation" [10m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations: {}
+        labels:
+          severity: warning
+        isPaused: false
+        notification_settings:
+          receiver: telegram crowdsec
