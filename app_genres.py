@@ -875,6 +875,7 @@ def genres_tree():
     from pathlib import Path
     from flask import send_file, abort
     candidates = [
+        Path("/tmp/rym_genre_tree.html"),
         Path(__file__).parent / "docs/must_hear/rym_genre_tree.html",
         Path(__file__).parent / "rym_genre_tree.html",
     ]

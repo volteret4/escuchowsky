@@ -9,7 +9,7 @@ if [ -f "/app/db/rym_genres.json" ]; then
 else
   GENRES_JSON="/app_escuchowsky/rym_genres.json"
 fi
-OUT="/app_escuchowsky/rym_genre_tree.html"
+OUT="/tmp/rym_genre_tree.html"
 
 if [ -f "$DB" ] && [ -f "$GENRES_JSON" ]; then
   echo "Generando árbol de géneros..."
@@ -26,7 +26,6 @@ else
   echo "   GENRES_JSON=$GENRES_JSON"
 fi
 
-mkdir -p /app/logs
 exec gunicorn \
   -w 2 \
   --threads 4 \
