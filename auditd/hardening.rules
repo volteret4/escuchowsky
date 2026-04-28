@@ -92,6 +92,4 @@
 -w /var/run/faillock/   -p wa -k auth
 
 # ── Inmutabilidad (debe ir siempre al final) ─────────────────────────────────
-# -e 2
-# Activar -e 2 solo en producción estabilizada; impide descargar reglas sin reboot.
-# Para activar: descomentar la línea y aplicar.
+-e 2
