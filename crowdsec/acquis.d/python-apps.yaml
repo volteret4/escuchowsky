@@ -1,0 +1,43 @@
+## CrowdSec acquisition — python-apps.yaml
+## Deploy: /etc/crowdsec/acquis.d/python-apps.yaml
+## Reload: systemctl reload crowdsec
+##
+## IMPORTANTE: ajusta las rutas a donde esté desplegado el proyecto en el
+## servidor AWS. Si el repo está en /srv/escuchowsky, los logs estarán en
+## /srv/escuchowsky/logs/escuchowsky/access.log   (y tumtumpa)
+##
+## Verificar con: cscli parsers list | grep gunicorn
+## Si no hay parser gunicorn, instalar: cscli collections install crowdsecurity/nginx
+## El formato de gunicorn combined es compatible con el parser nginx de CrowdSec.
+
+---
+# Logs de acceso de escuchowsky (gunicorn access log en formato combined)
+source: file
+filenames:
+  - DEPLOY_PATH/logs/escuchowsky/access.log
+labels:
+  type: gunicorn
+
+---
+# Logs de error de escuchowsky
+source: file
+filenames:
+  - DEPLOY_PATH/logs/escuchowsky/error.log
+labels:
+  type: gunicorn
+
+---
+# Logs de acceso de tumtumpa
+source: file
+filenames:
+  - DEPLOY_PATH/logs/tumtumpa/access.log
+labels:
+  type: gunicorn
+
+---
+# Logs de error de tumtumpa
+source: file
+filenames:
+  - DEPLOY_PATH/logs/tumtumpa/error.log
+labels:
+  type: gunicorn

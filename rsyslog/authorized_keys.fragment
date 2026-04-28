@@ -1,0 +1,28 @@
+## Fragmento para ~/.ssh/authorized_keys del usuario tunnel en el servidor AWS
+## (o /home/tunnel/.ssh/authorized_keys)
+##
+## Esta clave equivale al certificado de cliente de mTLS:
+## solo quien tenga la clave privada (/etc/autossh/rsyslog_tunnel_key en local)
+## puede establecer el túnel — y SOLO el túnel, nada más.
+##
+## El prefijo "restrict,port-forwarding" desactiva todo excepto port forwarding:
+##   - Sin shell
+##   - Sin ejecución de comandos
+##   - Sin X11
+##   - Sin agent forwarding
+##   - Sin PTY
+##
+## Preparación en el servidor AWS:
+##
+##   # Crear usuario sin shell ni home real
+##   useradd --system --no-create-home --shell /usr/sbin/nologin tunnel
+##   mkdir -p /home/tunnel/.ssh
+##   chmod 700 /home/tunnel/.ssh
+##
+##   # Pegar aquí la clave pública generada en el servidor local:
+##   # cat /etc/autossh/rsyslog_tunnel_key.pub
+##
+##   # AllowTcpForwarding yes  debe estar en sshd_config (normalmente lo está)
+##   # GatewayPorts no         (valor por defecto — el túnel solo escucha en 127.0.0.1 de AWS)
+
+restrict,port-forwarding ssh-ed25519 AAAAC3Nza... SUSTITUIR_CON_CLAVE_PUBLICA_REAL rsyslog-tunnel@local

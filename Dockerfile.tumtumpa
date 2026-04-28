@@ -19,12 +19,13 @@ EXPOSE 5001
 # gunicorn: 2 procesos x 4 threads = 8 requests concurrentes
 # --timeout 1800: SSE streams de scrobbles para usuarios con 2000+ páginas (400k tracks)
 # toman ~600-1000s; 1800 es el límite real, por encima del timeout de nginx (600s)
-CMD ["gunicorn", \
-     "-w", "2", \
-     "--threads", "4", \
-     "-b", "0.0.0.0:5001", \
-     "--timeout", "9000", \
-     "--forwarded-allow-ips", "172.20.0.10", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "app_discover:app"]
+CMD ["sh", "-c", \
+     "mkdir -p /app/logs && exec gunicorn \
+      -w 2 \
+      --threads 4 \
+      -b 0.0.0.0:5001 \
+      --timeout 9000 \
+      --forwarded-allow-ips 172.20.0.10 \
+      --access-logfile /app/logs/access.log \
+      --error-logfile /app/logs/error.log \
+      app_discover:app"]

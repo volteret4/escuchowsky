@@ -26,12 +26,13 @@ else
   echo "   GENRES_JSON=$GENRES_JSON"
 fi
 
+mkdir -p /app/logs
 exec gunicorn \
   -w 2 \
   --threads 4 \
   -b 0.0.0.0:5001 \
   --timeout 120 \
   --forwarded-allow-ips "172.20.0.10" \
-  --access-logfile - \
-  --error-logfile - \
+  --access-logfile /app/logs/access.log \
+  --error-logfile /app/logs/error.log \
   app_genres:app

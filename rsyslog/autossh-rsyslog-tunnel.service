@@ -1,0 +1,61 @@
+## systemd unit — autossh reverse tunnel para rsyslog
+## Deploy: /etc/systemd/system/autossh-rsyslog-tunnel.service
+##         (en el servidor LOCAL, no en AWS)
+##
+## Instalación:
+##   cp autossh-rsyslog-tunnel.service /etc/systemd/system/
+##   systemctl daemon-reload
+##   systemctl enable --now autossh-rsyslog-tunnel.service
+##
+## Requisitos previos:
+##   apt install autossh
+##   Generar par de claves: ssh-keygen -t ed25519 -f /etc/autossh/rsyslog_tunnel_key -N ""
+##   Copiar la clave pública al AWS: ver authorized_keys.fragment
+##
+## Verificar túnel activo:
+##   systemctl status autossh-rsyslog-tunnel
+##   ss -tlnp | grep 10514   (en AWS, debe aparecer 127.0.0.1:10514)
+
+[Unit]
+Description=autossh reverse tunnel — rsyslog desde AWS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=autossh
+Group=autossh
+
+# AJUSTA aws-server.example.com al hostname/IP del servidor AWS
+# y al usuario SSH apropiado (normalmente ubuntu, ec2-user, etc.)
+Environment=AUTOSSH_GATETIME=0
+Environment=AUTOSSH_LOGFILE=/var/log/autossh-rsyslog.log
+
+ExecStart=/usr/bin/autossh \
+    -M 0 \
+    -N \
+    -i /etc/autossh/rsyslog_tunnel_key \
+    -o "ServerAliveInterval=30" \
+    -o "ServerAliveCountMax=3" \
+    -o "ExitOnForwardFailure=yes" \
+    -o "StrictHostKeyChecking=yes" \
+    -o "UserKnownHostsFile=/etc/autossh/known_hosts" \
+    -o "PasswordAuthentication=no" \
+    -o "BatchMode=yes" \
+    -R 127.0.0.1:10514:127.0.0.1:10514 \
+    tunnel@aws-server.example.com
+
+Restart=always
+RestartSec=30
+TimeoutStartSec=60
+
+# Hardening del servicio
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
