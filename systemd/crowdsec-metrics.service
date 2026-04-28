@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/crowdsec-metrics.sh
+ExecStart=/home/admin/.local/bin/crowdsec-metrics.sh
 Restart=on-failure
 RestartSec=10
 
