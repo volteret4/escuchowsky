@@ -651,7 +651,7 @@ groups:
                 type: prometheus
                 uid: dfkgq1kcwh4aob
               editorMode: code
-              expr: 'up{job="node"}'
+              expr: 'up{job="node_exporter"}'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200

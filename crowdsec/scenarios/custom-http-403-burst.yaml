@@ -1,0 +1,12 @@
+type: leaky
+name: custom/http-403-burst
+description: "Scanner probando rutas protegidas: rafaga de respuestas 403"
+filter: "evt.Meta.service == 'http' && evt.Parsed.http_status == '403'"
+groupby: "evt.Meta.source_ip"
+leakspeed: "5s"
+capacity: 10
+labels:
+  service: http
+  type: probing
+  remediation: true
+blackhole: 2m

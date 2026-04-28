@@ -19,7 +19,7 @@ import urllib.request
 import urllib.parse
 from pathlib import Path
 from functools import lru_cache
-from flask import Flask, jsonify, request, render_template_string, abort, Response, stream_with_context
+from flask import Flask, jsonify, request, render_template_string, abort, Response, stream_with_context, send_from_directory
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 
@@ -855,6 +855,14 @@ def api_album_info():
     resp.headers["Cache-Control"] = "public, max-age=3600"
     return resp
 
+
+@app.route("/img/<path:filename>")
+def serve_img(filename):
+    return send_from_directory(Path(__file__).parent / "img", filename)
+
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(Path(__file__).parent / "img", "boar.png", mimetype="image/png")
 
 @app.route("/")
 def index():
