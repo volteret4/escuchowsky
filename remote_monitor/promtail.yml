@@ -1,0 +1,29 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: rsyslog_aws
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: rsyslog
+          source: aws
+          __path__: /var/log/remote/**/*.log
+    pipeline_stages:
+      # Extrae hostname del path: /var/log/remote/<hostname>/fecha.log
+      - match:
+          selector: '{job="rsyslog"}'
+          stages:
+            - regex:
+                source: filename
+                expression: '/var/log/remote/(?P<remote_host>[^/]+)/'
+            - labels:
+                remote_host:

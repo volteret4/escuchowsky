@@ -4,34 +4,40 @@
 
 set -e
 
-# Usuario dedicado a autossh
-useradd --system --no-create-home --shell /usr/sbin/nologin autossh 2>/dev/null || true
-mkdir -p /etc/autossh
-chmod 700 /etc/autossh
+# Usuario con home propio para que pueda leer/escribir sus propios archivos
+useradd --system --create-home --home-dir /home/autossh --shell /usr/sbin/nologin autossh 2>/dev/null || true
 
-# Generar par de claves ED25519 para el túnel (sin passphrase — es un servicio)
-if [ ! -f /etc/autossh/rsyslog_tunnel_key ]; then
+KEY_DIR="/home/autossh/.ssh"
+KEY_FILE="${KEY_DIR}/rsyslog_tunnel_key"
+
+mkdir -p "$KEY_DIR"
+chmod 700 "$KEY_DIR"
+
+# Generar par de claves ED25519 (sin passphrase — es un servicio)
+if [ ! -f "$KEY_FILE" ]; then
     ssh-keygen -t ed25519 \
-        -f /etc/autossh/rsyslog_tunnel_key \
+        -f "$KEY_FILE" \
         -N "" \
-        -C "rsyslog-tunnel@local"
+        -C "rsyslog-tunnel@pepecono"
     echo ""
     echo "Par de claves generado."
 fi
 
-chown -R autossh:autossh /etc/autossh
-chmod 600 /etc/autossh/rsyslog_tunnel_key
-chmod 644 /etc/autossh/rsyslog_tunnel_key.pub
+chown -R autossh:autossh "$KEY_DIR"
+chmod 600 "$KEY_FILE"
+chmod 644 "${KEY_FILE}.pub"
 
-# Hacer ssh una vez manualmente para guardar el fingerprint del host AWS
-# (StrictHostKeyChecking=yes en el servicio requiere que este archivo exista)
+# Primer SSH manual para aceptar el fingerprint y guardarlo en known_hosts
+# (StrictHostKeyChecking=yes en el servicio requiere que exista)
 echo ""
-echo "SIGUIENTE PASO — ejecuta esto manualmente para guardar el fingerprint del AWS:"
+echo "SIGUIENTE PASO — ejecuta esto como el usuario autossh para guardar el fingerprint:"
 echo ""
-echo "  ssh -i /etc/autossh/rsyslog_tunnel_key \\"
-echo "      -o UserKnownHostsFile=/etc/autossh/known_hosts \\"
+echo "  sudo -u autossh ssh -p 2145 \\"
+echo "      -i ${KEY_FILE} \\"
 echo "      tunnel@aws-server.example.com echo ok"
+echo ""
+echo "Escribe 'yes' cuando pregunte por el fingerprint."
 echo ""
 echo "Clave pública a copiar al servidor AWS:"
 echo ""
-cat /etc/autossh/rsyslog_tunnel_key.pub
+cat "${KEY_FILE}.pub"

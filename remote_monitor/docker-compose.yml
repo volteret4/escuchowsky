@@ -1,0 +1,65 @@
+# Stack Prometheus + Grafana + Loki + Promtail para pepecono
+# Arrancar con: docker-compose up -d
+#
+# Estructura esperada en este directorio:
+#   prometheus.yml
+#   promtail.yml
+#   certs/
+#     prometheus_client.crt   (copiar desde EC2 ssl/)
+#     prometheus_client.key   (copiar desde EC2 ssl/)
+
+services:
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./certs:/etc/prometheus/certs:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  loki:
+    container_name: loki
+    image: grafana/loki:3.4.2
+    restart: unless-stopped
+    volumes:
+      - loki_data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    container_name: promtail
+    image: grafana/promtail:3.4.2
+    restart: unless-stopped
+    volumes:
+      - /var/log/remote:/var/log/remote:ro
+      - ./promtail.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "0.0.0.0:3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=cambia_esto
+    depends_on:
+      - loki
+      - prometheus
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:

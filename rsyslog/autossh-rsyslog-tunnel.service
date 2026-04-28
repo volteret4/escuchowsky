@@ -29,21 +29,21 @@ Group=autossh
 # AJUSTA aws-server.example.com al hostname/IP del servidor AWS
 # y al usuario SSH apropiado (normalmente ubuntu, ec2-user, etc.)
 Environment=AUTOSSH_GATETIME=0
-Environment=AUTOSSH_LOGFILE=/var/log/autossh-rsyslog.log
 
 ExecStart=/usr/bin/autossh \
     -M 0 \
     -N \
-    -i /etc/autossh/rsyslog_tunnel_key \
+    -i /home/autossh/.ssh/rsyslog_tunnel_key \
     -o "ServerAliveInterval=30" \
     -o "ServerAliveCountMax=3" \
     -o "ExitOnForwardFailure=yes" \
     -o "StrictHostKeyChecking=yes" \
-    -o "UserKnownHostsFile=/etc/autossh/known_hosts" \
+    -o "UserKnownHostsFile=/home/autossh/.ssh/known_hosts" \
     -o "PasswordAuthentication=no" \
     -o "BatchMode=yes" \
     -R 127.0.0.1:10514:127.0.0.1:10514 \
-    tunnel@aws-server.example.com
+    -p 2145 \
+    tunnel@ec2-13-61-12-80.eu-north-1.compute.amazonaws.com
 
 Restart=always
 RestartSec=30
@@ -53,8 +53,7 @@ TimeoutStartSec=60
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/log
+ProtectHome=false
 AmbientCapabilities=
 
 [Install]

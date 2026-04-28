@@ -25,4 +25,4 @@
 ##   # AllowTcpForwarding yes  debe estar en sshd_config (normalmente lo está)
 ##   # GatewayPorts no         (valor por defecto — el túnel solo escucha en 127.0.0.1 de AWS)
 
-restrict,port-forwarding ssh-ed25519 AAAAC3Nza... SUSTITUIR_CON_CLAVE_PUBLICA_REAL rsyslog-tunnel@local
+restrict,port-forwarding ssh-ed25519 AAAAC3Nza... SUSTITUIR_CON_CLAVE_PUBLICA_REAL rsyslog-tunnel@pepecono

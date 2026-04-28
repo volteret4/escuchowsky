@@ -1,0 +1,25 @@
+# prometheus.yml — scrape config para métricas de EC2 con mTLS
+# En pepecono: poner prometheus_client.crt y prometheus_client.key en ./certs/
+
+global:
+  scrape_interval: 60s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: 'ec2-node'
+    scheme: https
+    tls_config:
+      cert_file: /etc/prometheus/certs/prometheus_client.crt
+      key_file:  /etc/prometheus/certs/prometheus_client.key
+    metrics_path: /metrics/node
+    static_configs:
+      - targets: ['escuchowsky.duckdns.org']
+
+  - job_name: 'ec2-nginx'
+    scheme: https
+    tls_config:
+      cert_file: /etc/prometheus/certs/prometheus_client.crt
+      key_file:  /etc/prometheus/certs/prometheus_client.key
+    metrics_path: /metrics/nginx
+    static_configs:
+      - targets: ['escuchowsky.duckdns.org']
