@@ -1177,14 +1177,12 @@ input::placeholder {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
 }
 #disc-ctrl-row #disc-user-indicator {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
     flex: 1;
     min-width: 0;
+    position: relative;
 }
 #disc-ctrl-row .disc-controls {
     display: flex;
@@ -2192,14 +2190,19 @@ input::placeholder {
     font-size: 0.72rem;
     font-family: var(--mono);
     cursor: pointer;
-    max-width: 100%;
+    width: 100%;
+    min-width: 0;
     overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
 }
 .disc-user-btn:hover { border-color: var(--accent); color: var(--ink); }
 .disc-dd-arrow { font-size: 0.6rem; flex-shrink: 0; }
-.disc-user-summary { overflow: hidden; text-overflow: ellipsis; }
+.disc-user-summary {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+}
 .disc-user-dd {
     position: absolute;
     top: calc(100% + 2px);
@@ -2314,25 +2317,10 @@ input::placeholder {
         scrollbar-width: none;
     }
     #disc-rel-tabs::-webkit-scrollbar { display: none; }
-    #disc-ctrl-row {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0.2rem;
-    }
-    #disc-ctrl-row #disc-user-indicator {
-        flex: none;
-        width: 100%;
-    }
-    #disc-ctrl-row .disc-controls {
-        display: flex;
-        align-items: center;
-        gap: 0.35rem;
-        width: 100%;
-    }
     #disc-ctrl-row .disc-controls select {
-        flex: 1 1 auto;
+        flex: 0 1 auto;
         min-width: 0;
-        max-width: 150px;
+        max-width: 120px;
     }
     .main-inner {
         padding-left: 0.75rem;

@@ -208,12 +208,13 @@ function _updateDiscoverIndicator() {
     return;
   }
 
-  // Build summary label
+  // Build summary label (truncate each name at 20 chars)
+  const _trunc = (s) => s.length > 20 ? s.slice(0, 19) + "…" : s;
   const activeIdxs = [...activeDiscoverUserIdxs].filter(i => i < extraUsers.length);
   const summary = activeIdxs.length === 0
     ? "Ninguno"
     : activeIdxs.length <= 2
-      ? activeIdxs.map(i => extraUsers[i].user).join(", ")
+      ? activeIdxs.map(i => _trunc(extraUsers[i].user)).join(", ")
       : `${activeIdxs.length} activos`;
 
   // Build dropdown items HTML
