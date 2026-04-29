@@ -618,12 +618,10 @@ input::placeholder { color: var(--ink3); }
 #discover-view { display: none; }
 #discover-view.visible { display: block; }
 #discover-ctrl-bar {
-  display: flex; flex-direction: column; gap: 0; margin-bottom: 0.3rem;
-  position: sticky; top: 0; z-index: 90;
-  background: var(--bg); padding: 0.08rem 0 0.05rem;
+  display: flex; flex-direction: column; gap: 0;
+  background: var(--bg); padding: 0.08rem 1.5rem 0.05rem;
   border-bottom: 1px solid var(--border);
-  margin-top: 0; margin-left: -1.5rem; margin-right: -1.5rem;
-  padding-left: 1.5rem; padding-right: 1.5rem;
+  flex-shrink: 0;
 }
 #disc-rel-tabs {
   display: flex; gap: 0; margin-bottom: 0.1rem;
@@ -1149,14 +1147,16 @@ input::placeholder { color: var(--ink3); }
 /* ── Main content area ─────────────────────────────────────────────── */
 #main {
   flex: 1;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  scrollbar-gutter: stable;
+  min-height: 0;
 }
 .main-inner {
-  padding: 0 1.5rem 3rem;
-  width: 100%;
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 0.5rem 1.5rem 3rem;
+  min-height: 0;
 }
 
 /* ── Responsive ────────────────────────────────────────────────────── */

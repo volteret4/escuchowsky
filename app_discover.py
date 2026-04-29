@@ -1142,6 +1142,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <!-- ── Main ──────────────────────────────────────────────────────────── -->
   <div id="main">
+
+    <!-- Controles sticky: fuera de .main-inner para pegarse al header sin huecos -->
+    <div id="discover-ctrl-bar" style="display:none">
+      <div id="disc-rel-tabs">
+        <button class="disc-tab active" data-rel="discover">Escucha</button>
+        <button class="disc-tab" data-rel="share">Comparte</button>
+        <button class="disc-tab" data-rel="enjoy">Disfruta</button>
+      </div>
+      <div id="disc-ctrl-row">
+        <div id="disc-user-indicator"></div>
+        <div class="disc-controls">
+          <input type="number" id="disc-limit-global" min="5" max="100" value="20">
+          <select id="disc-mode-select">
+            <option value="albums">Álbumes</option>
+            <option value="artists">Artistas</option>
+            <option value="songs">Canciones</option>
+          </select>
+          <button id="disc-play-btn" title="Descubrir">▶</button>
+        </div>
+      </div>
+    </div>
+
     <div class="main-inner">
 
       <!-- Error -->
@@ -1151,27 +1173,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="loading">
         <div class="spinner"></div>
         <span id="loading-text">Cargando scrobbles...</span>
-      </div>
-
-      <!-- Controles siempre visibles: selector de usuario, modo y límite -->
-      <div id="discover-ctrl-bar" style="display:none">
-        <div id="disc-rel-tabs">
-          <button class="disc-tab active" data-rel="discover">Escucha</button>
-          <button class="disc-tab" data-rel="share">Comparte</button>
-          <button class="disc-tab" data-rel="enjoy">Disfruta</button>
-        </div>
-        <div id="disc-ctrl-row">
-          <div id="disc-user-indicator"></div>
-          <div class="disc-controls">
-            <input type="number" id="disc-limit-global" min="5" max="100" value="20">
-            <select id="disc-mode-select">
-              <option value="albums">Álbumes</option>
-              <option value="artists">Artistas</option>
-              <option value="songs">Canciones</option>
-            </select>
-            <button id="disc-play-btn" title="Descubrir">▶</button>
-          </div>
-        </div>
       </div>
 
       <!-- Empty state — shown when no discover results yet -->
