@@ -202,19 +202,71 @@ function toggleDiscoverUser(i) {
 function _updateDiscoverIndicator() {
   const el = document.getElementById("disc-user-indicator");
   if (!el) return;
-  if (!extraUsers.length) { el.innerHTML = ""; return; }
-  el.innerHTML = extraUsers.map((uu, i) => {
+
+  if (!extraUsers.length) {
+    el.innerHTML = "";
+    return;
+  }
+
+  // Build summary label
+  const activeIdxs = [...activeDiscoverUserIdxs].filter(i => i < extraUsers.length);
+  const summary = activeIdxs.length === 0
+    ? "Ninguno"
+    : activeIdxs.length <= 2
+      ? activeIdxs.map(i => extraUsers[i].user).join(", ")
+      : `${activeIdxs.length} activos`;
+
+  // Build dropdown items HTML
+  const itemsHtml = extraUsers.map((uu, i) => {
     const sel = activeDiscoverUserIdxs.has(i);
     const dot = uu.image
       ? `<img src="${escH(uu.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover;flex-shrink:0">`
       : `<span style="width:8px;height:8px;border-radius:50%;background:${uu.color};display:inline-block;flex-shrink:0"></span>`;
-    const chk = `<span style="width:14px;height:14px;border-radius:3px;border:2px solid ${sel ? 'var(--accent)' : 'var(--ink3)'};background:${sel ? 'var(--accent)' : 'transparent'};display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;color:#fff">${sel ? '✓' : ''}</span>`;
-    return `<div class="disc-user-line${sel ? " active" : ""}" data-idx="${i}" style="cursor:pointer;display:flex;gap:.4rem;align-items:center;padding:.2rem .3rem;border-radius:4px;${sel ? 'background:var(--bg3)' : ''}">
-      ${chk}${dot}
-      <span class="disc-user-line-name">${escH(uu.user)}</span>
+    return `<div class="disc-dd-item${sel ? " sel" : ""}" data-idx="${i}">
+      <span class="disc-chk${sel ? " sel" : ""}">${sel ? "✓" : ""}</span>
+      ${dot}
+      <span class="disc-dd-name">${escH(uu.user)}</span>
     </div>`;
   }).join("");
+
+  // Reuse structure if already built, update content only
+  let btn = el.querySelector(".disc-user-btn");
+  let dd = el.querySelector(".disc-user-dd");
+
+  if (!btn) {
+    el.style.cssText = "position:relative;flex:1;min-width:0";
+    el.innerHTML = `<button class="disc-user-btn">
+      <span class="disc-user-summary"></span>
+      <span class="disc-dd-arrow">▾</span>
+    </button>
+    <div class="disc-user-dd" style="display:none"></div>`;
+    btn = el.querySelector(".disc-user-btn");
+    dd = el.querySelector(".disc-user-dd");
+
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dd.style.display = dd.style.display === "none" ? "" : "none";
+    });
+    dd.addEventListener("click", (e) => {
+      const item = e.target.closest(".disc-dd-item[data-idx]");
+      if (!item) return;
+      const idx = parseInt(item.dataset.idx, 10);
+      if (activeDiscoverUserIdxs.has(idx)) activeDiscoverUserIdxs.delete(idx);
+      else activeDiscoverUserIdxs.add(idx);
+      document.querySelectorAll(".sbar-user")
+        .forEach((el, j) => el.classList.toggle("active", activeDiscoverUserIdxs.has(j)));
+      _updateDiscoverIndicator();
+    });
+  }
+
+  btn.querySelector(".disc-user-summary").textContent = summary;
+  dd.innerHTML = itemsHtml;
 }
+
+// Close dropdown when clicking outside
+document.addEventListener("click", () => {
+  document.querySelectorAll(".disc-user-dd").forEach(dd => { dd.style.display = "none"; });
+});
 
 async function triggerDiscover() {
   if (!extraUsers.length) return;
@@ -2732,17 +2784,23 @@ async function renderSecondaryUsers() {
   const el = document.getElementById("secondary-users-list");
   if (!el) return;
   const primaryUser = heardCache?.user?.toLowerCase();
-  const visible = sessions
-    .filter((s) => s.user.toLowerCase() !== primaryUser)
-    .sort((a, b) => b.fetched_at - a.fetched_at);
 
-  // Memory-only users: active in extraUsers but not saved in IDB
-  const idbSet = new Set(visible.map((s) => s.user.toLowerCase()));
+  // Sort: primary first, then rest by date
+  const sorted = sessions.slice().sort((a, b) => {
+    const aIsPrim = a.user.toLowerCase() === primaryUser;
+    const bIsPrim = b.user.toLowerCase() === primaryUser;
+    if (aIsPrim && !bIsPrim) return -1;
+    if (!aIsPrim && bIsPrim) return 1;
+    return b.fetched_at - a.fetched_at;
+  });
+
+  // Memory-only users: active but not in IDB
+  const idbSet = new Set(sorted.map((s) => s.user.toLowerCase()));
   const memOnly = extraUsers.filter(
     (u) => u.user.toLowerCase() !== primaryUser && !idbSet.has(u.user.toLowerCase()),
   );
 
-  // Build image lookup from localStorage for inactive users (previously-active extras)
+  // Image lookup from localStorage for inactive users
   let _savedImageMap = {};
   try {
     const _saved = JSON.parse(localStorage.getItem("ml_extra_users") || "[]");
@@ -2750,20 +2808,33 @@ async function renderSecondaryUsers() {
   } catch (_) {}
 
   const _renderIdbRow = (s) => {
-    const eu = extraUsers.find((u) => u.user.toLowerCase() === s.user.toLowerCase());
-    const isActive = !!eu;
+    const lc = s.user.toLowerCase();
+    const isPrimary = lc === primaryUser;
+    const eu = extraUsers.find((u) => u.user.toLowerCase() === lc);
+    const isActive = isPrimary || !!eu;
     const _ts = s.last_scrobble_ts || s.fetched_at;
     const dateStr = new Date(_ts * 1000).toLocaleDateString();
     const lastLbl = s.last_scrobble_artist ? ` · ${s.last_scrobble_artist}` : "";
-    const incompleteTag =
-      s.complete === false
-        ? ' <span style="color:var(--red);font-size:0.7rem" title="Descarga incompleta — usa ↻ Sync">⚠</span>'
-        : "";
-    const _rowImg = eu?.image || s.image || _savedImageMap[s.user.toLowerCase()] || _sessionCache.get(s.user.toLowerCase())?.image || "";
+    const incompleteTag = s.complete === false
+      ? ' <span style="color:var(--red);font-size:0.7rem" title="Descarga incompleta — usa ↻ Sync">⚠</span>' : "";
+    const _rowImg = (isPrimary ? heardCache?.image : null)
+      || eu?.image || s.image || _savedImageMap[lc] || _sessionCache.get(lc)?.image || "";
     const avatar = _rowImg
       ? `<img class="eu-avatar" src="${escH(_rowImg)}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="eager">`
       : `<div class="eu-dot" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${eu?.color || "var(--ink3)"}"></div>`;
-    return `<div class="sec-user-row${isActive ? " active" : ""}">
+
+    const btns = isPrimary
+      ? `<button class="btn-sm" data-action="sync-primary" data-user="${escH(s.user)}" title="Sincronizar">↻ Sync</button>
+         <button class="btn-sm principal" data-action="noop" data-user="${escH(s.user)}">PRINCIPAL</button>
+         <button class="btn-sm" data-action="download" data-user="${escH(s.user)}" title="Guardar JSON">↓ JSON</button>
+         <button class="eu-del" data-action="unload-primary" data-user="${escH(s.user)}" title="Descargar usuario">✕</button>`
+      : `<button class="btn-sm" data-action="sync" data-user="${escH(s.user)}" title="Sincronizar">↻ Sync</button>
+         <button class="btn-sm${isActive ? " act" : ""}" data-action="toggle" data-user="${escH(s.user)}">${isActive ? "ACTIVO" : "CARGAR"}</button>
+         <button class="btn-sm" data-action="download" data-user="${escH(s.user)}" title="Guardar JSON">↓ JSON</button>
+         <button class="btn-sm" data-action="set-primary" data-user="${escH(s.user)}" title="Cargar como principal">→ Prin.</button>
+         <button class="eu-del" data-action="delete" data-user="${escH(s.user)}" title="Eliminar">✕</button>`;
+
+    return `<div class="sec-user-row${isActive ? " active" : ""}${isPrimary ? " primary" : ""}">
       <div class="sec-user-left">
         ${avatar}
         <div class="sec-user-info">
@@ -2771,13 +2842,7 @@ async function renderSecondaryUsers() {
           <div class="sec-user-meta">${s.count.toLocaleString()} álb. · ${dateStr}${escH(lastLbl)}${incompleteTag}</div>
         </div>
       </div>
-      <div class="sec-user-btns">
-        <button class="btn-sm" data-action="sync" data-user="${escH(s.user)}" title="Sincronizar desde Last.fm">↻ Sync</button>
-        <button class="btn-sm${isActive ? " act" : ""}" data-action="toggle" data-user="${escH(s.user)}">${isActive ? "ACTIVO" : "CARGAR"}</button>
-        <button class="btn-sm" data-action="download" data-user="${escH(s.user)}" title="Guardar JSON">↓ JSON</button>
-        <button class="btn-sm" data-action="set-primary" data-user="${escH(s.user)}" title="Cargar como usuario principal">→ Prin.</button>
-        <button class="eu-del" data-action="delete" data-user="${escH(s.user)}" title="Eliminar">✕</button>
-      </div>
+      <div class="sec-user-btns">${btns}</div>
     </div>`;
   };
 
@@ -2790,7 +2855,7 @@ async function renderSecondaryUsers() {
         ${avatar}
         <div class="sec-user-info">
           <div class="sec-user-name">${escH(u.user)} <span style="font-size:.68rem;color:var(--ink3)" title="Solo esta sesión — exporta JSON para guardar">⚡ sesión</span></div>
-          <div class="sec-user-meta">${u.count.toLocaleString()} álb. · sin guardar en navegador</div>
+          <div class="sec-user-meta">${u.count.toLocaleString()} álb. · sin guardar</div>
         </div>
       </div>
       <div class="sec-user-btns">
@@ -2800,11 +2865,11 @@ async function renderSecondaryUsers() {
     </div>`;
   };
 
-  if (!visible.length && !memOnly.length) {
+  if (!sorted.length && !memOnly.length) {
     el.innerHTML = '<div class="idb-empty">Sin sesiones guardadas</div>';
     return;
   }
-  el.innerHTML = visible.map(_renderIdbRow).join("") +
+  el.innerHTML = sorted.map(_renderIdbRow).join("") +
     (memOnly.length ? memOnly.map(_renderMemRow).join("") : "");
 }
 
@@ -2844,21 +2909,9 @@ function idbDownloadSession(username) {
     const yt_ids = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || "{}");
     const covers = JSON.parse(localStorage.getItem(ENRICH_CACHE_KEY) || "{}");
     const blob = new Blob(
-      [
-        JSON.stringify(
-          {
-            version: 1,
-            user: data.user,
-            count: data.count,
-            fetched_at: data.fetched_at,
-            heard: data.heard,
-            yt_ids,
-            covers,
-          },
-          null,
-          0,
-        ),
-      ],
+      [JSON.stringify({ version: 1, user: data.user, count: data.count,
+          fetched_at: data.fetched_at, heard: data.heard,
+          songs: data.songs || [], yt_ids, covers }, null, 0)],
       { type: "application/json" },
     );
     const a = document.createElement("a");
@@ -2870,48 +2923,17 @@ function idbDownloadSession(username) {
 }
 
 // ── User badge (header) ────────────────────────────────────────────────────
-function showUserBadge(
-  username,
-  img,
-  albumCount,
-  lastTs,
-  lastArtist,
-  lastTrack,
-) {
+function showUserBadge(username, img, albumCount, lastTs, lastArtist, lastTrack) {
   _updateTopbarAvatar(img || "");
   const av = document.getElementById("badge-avatar");
   if (av) { av.src = img || ""; av.style.display = img ? "" : "none"; }
-  const umAv = document.getElementById("um-avatar");
-  if (umAv) { umAv.src = img || ""; umAv.style.display = img ? "" : "none"; }
   document.getElementById("badge-name").textContent = username;
   document.getElementById("badge-inline").style.display = "flex";
-  const countStr =
-    typeof albumCount === "number"
-      ? albumCount.toLocaleString() + " álb."
-      : albumCount;
-  const dateStr = lastTs ? new Date(lastTs * 1000).toLocaleDateString() : "";
-  const lastStr = lastArtist && lastTrack ? `${lastArtist} — ${lastTrack}` : "";
-  const metaStr = [countStr, dateStr].filter(Boolean).join(" · ");
-  const umUser = document.getElementById("um-username");
-  const umMeta = document.getElementById("um-usermeta");
-  if (umUser) umUser.textContent = username;
-  if (umMeta)
-    umMeta.textContent = lastStr
-      ? `${countStr} · ${dateStr} · ${lastStr}`
-      : metaStr;
-  const secPrim = document.getElementById("um-sec-primary");
-  if (secPrim) secPrim.style.display = "";
-  const saveSess = document.getElementById("btn-save-session");
-  if (saveSess) saveSess.style.display = "";
   renderSecondaryUsers();
 }
 function hideUserBadge() {
   _updateTopbarAvatar("");
   document.getElementById("badge-inline").style.display = "none";
-  const secPrim = document.getElementById("um-sec-primary");
-  if (secPrim) secPrim.style.display = "none";
-  const saveSess = document.getElementById("btn-save-session");
-  if (saveSess) saveSess.style.display = "none";
   renderSecondaryUsers();
 }
 
@@ -3184,36 +3206,7 @@ function loadHeardCache(data) {
   dismissWelcome();
 }
 
-// ── Session: guardar JSON ─────────────────────────────────────────────────
-document.getElementById("btn-save-session").addEventListener("click", () => {
-  if (!heardCache) return;
-  const yt_ids = JSON.parse(localStorage.getItem(YT_CACHE_KEY) || "{}");
-  const covers = JSON.parse(localStorage.getItem(ENRICH_CACHE_KEY) || "{}");
-  const blob = new Blob(
-    [
-      JSON.stringify(
-        {
-          version: 1,
-          user: heardCache.user,
-          count: heardCache.count,
-          fetched_at: heardCache.fetched_at,
-          heard: heardCache.pairs,
-          songs: heardCache.songs || [],
-          yt_ids,
-          covers,
-        },
-        null,
-        0,
-      ),
-    ],
-    { type: "application/json" },
-  );
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `tumtumpa_${heardCache.user}_${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-});
+// btn-save-session removed — primary user download now goes through idbDownloadSession
 
 // ── Session: importar JSON (routes to primary or secondary) ───────────────
 document
@@ -3308,65 +3301,35 @@ inpSession.addEventListener("change", async (e) => {
   e.target.value = "";
 });
 
-// ── Session: sync incremental ──────────────────────────────────────────────
-document
-  .getElementById("btn-sync-session")
-  .addEventListener("click", async () => {
-    if (!heardCache) return;
-    const btn = document.getElementById("btn-sync-session");
-    const prog = document.getElementById("um-progress");
-    btn.disabled = true;
-    btn.textContent = "↻ ...";
-    prog.textContent = "Sincronizando…";
-    try {
-      {
-        const data = await syncSinceClient(
-          heardCache.user,
-          heardCache.fetched_at || 0,
-          heardCache.source || "lfm",
-        );
-        if (data.error) throw new Error(data.error);
-        const existing = new Set(
-          heardCache.pairs.map((p) => p[0] + "|" + p[1]),
-        );
-        const added = (data.new_pairs || []).filter(
-          (p) => !existing.has(p[0] + "|" + p[1]),
-        );
-        heardCache.pairs = [...heardCache.pairs, ...added];
-        heardCache.count = heardCache.pairs.length;
-        heardCache.fetched_at = data.fetched_at;
-        if (
-          data.last_scrobble_ts &&
-          data.last_scrobble_ts > (heardCache.last_scrobble_ts || 0)
-        ) {
-          heardCache.last_scrobble_ts = data.last_scrobble_ts;
-          heardCache.last_scrobble_artist = data.last_scrobble_artist || "";
-          heardCache.last_scrobble_track = data.last_scrobble_track || "";
-        }
-        showUserBadge(
-          heardCache.user,
-          "",
-          heardCache.count,
-          heardCache.last_scrobble_ts,
-          heardCache.last_scrobble_artist,
-          heardCache.last_scrobble_track,
-        );
-        prog.textContent = added.length
-          ? `✓ +${added.length} nuevos (total ${heardCache.count.toLocaleString()})`
-          : "✓ Al día";
-      }
-    } catch (e) {
-      prog.textContent = "Error: " + e.message;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "↻ Sync";
+// ── Sync primary user ─────────────────────────────────────────────────────
+async function syncPrimaryUser(triggerBtn) {
+  if (!heardCache) return;
+  const prog = document.getElementById("um-extra-progress");
+  if (triggerBtn) { triggerBtn.disabled = true; triggerBtn.textContent = "↻ ..."; }
+  if (prog) prog.textContent = "Sincronizando…";
+  try {
+    const data = await syncSinceClient(heardCache.user, heardCache.fetched_at || 0, heardCache.source || "lfm");
+    if (data.error) throw new Error(data.error);
+    const existing = new Set(heardCache.pairs.map((p) => p[0] + "|" + p[1]));
+    const added = (data.new_pairs || []).filter((p) => !existing.has(p[0] + "|" + p[1]));
+    heardCache.pairs = [...heardCache.pairs, ...added];
+    heardCache.count = heardCache.pairs.length;
+    heardCache.fetched_at = data.fetched_at;
+    if (data.last_scrobble_ts && data.last_scrobble_ts > (heardCache.last_scrobble_ts || 0)) {
+      heardCache.last_scrobble_ts = data.last_scrobble_ts;
+      heardCache.last_scrobble_artist = data.last_scrobble_artist || "";
+      heardCache.last_scrobble_track = data.last_scrobble_track || "";
     }
-  });
-
-// ── Unload primary button ──────────────────────────────────────────────────
-document
-  .getElementById("btn-unload-primary")
-  .addEventListener("click", unloadPrimaryUser);
+    showUserBadge(heardCache.user, heardCache.image || "", heardCache.count,
+      heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+    if (prog) prog.textContent = added.length
+      ? `✓ +${added.length} nuevos (total ${heardCache.count.toLocaleString()})` : "✓ Al día";
+  } catch (e) {
+    if (prog) prog.textContent = "Error: " + e.message;
+  } finally {
+    if (triggerBtn) { triggerBtn.disabled = false; triggerBtn.textContent = "↻ Sync"; }
+  }
+}
 
 // ── Main: Cargar scrobbles ─────────────────────────────────────────────────
 btnGo.addEventListener("click", doLoadUser);
@@ -3590,7 +3553,7 @@ document.getElementById("sb-cache-notice").addEventListener("click", (e) => {
   }
 });
 
-// Delegation: secondary-users-list (sync / toggle / download / set-primary / delete)
+// Delegation: secondary-users-list
 document
   .getElementById("secondary-users-list")
   .addEventListener("click", (e) => {
@@ -3600,6 +3563,9 @@ document
     switch (btn.dataset.action) {
       case "sync":
         syncSecondaryIdb(user);
+        break;
+      case "sync-primary":
+        syncPrimaryUser(btn);
         break;
       case "toggle":
         toggleSecondaryUser(user);
@@ -3615,6 +3581,11 @@ document
         break;
       case "mem-export":
         _exportMemoryUser(user);
+        break;
+      case "unload-primary":
+        unloadPrimaryUser();
+        break;
+      case "noop":
         break;
     }
   });

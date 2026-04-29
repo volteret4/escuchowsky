@@ -2165,6 +2165,86 @@ input::placeholder {
     padding: 0.1rem 1.5rem 3rem;
 }
 
+/* ── Principal badge button ────────────────────────────────────────── */
+.btn-sm.principal {
+    background: transparent;
+    border-color: var(--accent);
+    color: var(--accent);
+    cursor: default;
+    pointer-events: none;
+}
+/* Primary user row highlight */
+.sec-user-row.primary {
+    border-left: 2px solid var(--accent);
+    padding-left: 0.4rem;
+}
+
+/* ── Ctrl-bar user dropdown ────────────────────────────────────────── */
+.disc-user-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--ink2);
+    padding: 0.18rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-family: var(--mono);
+    cursor: pointer;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.disc-user-btn:hover { border-color: var(--accent); color: var(--ink); }
+.disc-dd-arrow { font-size: 0.6rem; flex-shrink: 0; }
+.disc-user-summary { overflow: hidden; text-overflow: ellipsis; }
+.disc-user-dd {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    z-index: 50;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+    min-width: 160px;
+    max-width: 260px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+    padding: 0.2rem 0;
+}
+.disc-dd-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.65rem;
+    cursor: pointer;
+    font-size: 0.72rem;
+    font-family: var(--mono);
+    color: var(--ink2);
+    user-select: none;
+}
+.disc-dd-item:hover { background: var(--bg3); color: var(--ink); }
+.disc-dd-item.sel { color: var(--ink); }
+.disc-dd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disc-chk {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 1.5px solid var(--ink3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    flex-shrink: 0;
+    color: transparent;
+}
+.disc-chk.sel {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
 /* ── Responsive ────────────────────────────────────────────────────── */
 @media (max-width: 800px) {
     #grid {
@@ -2211,13 +2291,15 @@ input::placeholder {
         display: flex;
         flex-direction: column;
     }
-    #user-modal .um-section:last-child {
+    /* Usuarios section expands; Amigos stays compact at bottom */
+    #user-modal #um-sec-secondary {
         flex: 1;
         display: flex;
         flex-direction: column;
         min-height: 0;
+        overflow: hidden;
     }
-    #user-modal .um-section:last-child #friends-list {
+    #user-modal #um-sec-secondary #secondary-users-list {
         flex: 1;
         max-height: none;
         overflow-y: auto;

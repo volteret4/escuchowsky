@@ -1043,24 +1043,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="um-progress" id="um-progress"></div>
     </div>
 
-    <!-- Usuario principal (destacado) -->
-    <div class="um-section" id="um-sec-primary" style="display:none">
-      <div class="um-section-title">Usuario principal</div>
-      <div class="um-primary-card">
-        <img id="um-avatar" src="" alt="" style="width:36px;height:36px;border-radius:50%;object-fit:cover;background:var(--bg3);flex-shrink:0;display:none">
-        <div style="flex:1;min-width:0;overflow:hidden">
-          <div class="um-user-name" id="um-username" style="color:var(--ink)"></div>
-          <div class="um-user-meta" id="um-usermeta" style="font-size:0.65rem"></div>
-        </div>
-        <button class="btn-sm" id="btn-sync-session" title="Sincronizar">↻</button>
-        <button class="btn-sm" id="btn-save-session" style="display:none" title="Guardar JSON">↓ JSON</button>
-        <button class="btn-sm" id="btn-unload-primary" title="Descargar usuario">✕</button>
-      </div>
-    </div>
-
-    <!-- Usuarios secundarios -->
+    <!-- Usuarios (principal + secundarios unificados) -->
     <div class="um-section" id="um-sec-secondary">
-      <div class="um-section-title">Usuarios secundarios</div>
+      <div class="um-section-title">Usuarios</div>
       <div id="secondary-users-list"></div>
       <div id="sb-cache-notice" style="display:none"></div>
       <div class="um-progress" id="um-extra-progress"></div>
