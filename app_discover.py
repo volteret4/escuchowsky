@@ -1186,9 +1186,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="empty-step"><span class="empty-num">04</span><span><b>Comparte:</b> permite encontrar alguna de tus joyas para recomendar al resto.</span></div>
           <div class="empty-step"><span class="empty-num">05</span><span><b>Disfruta:</b> muestra placeres compartidos, permitiendo afinar recomendaciones.</span></div>
           <div class="empty-step"><span class="empty-num">06</span><span>Pulsa <b>uno o varios usuarios</b> para mostrar los <b>artistas</b>, <b>álbumes</b> o <b>canciones</b> que comparten todos.</span></div>
-          <div class="empty-step"><span class="empty-num">07</span><span>Pulsa en cada elemento del grid para obtener información sobre el mismo y poder escuchar algo del mismo.</span></div>
+          <div class="empty-step"><span class="empty-num">07</span><span>Pulsa en cada elemento del grid para obtener información y poder escuchar algo del mismo.</span></div>
         </div>
-        <div id="empty-hint">Los datos se guardan en tu navegador (IndexedDB). Pero se llena rápidamente con varios usuarios, recuerda erxportar / importa sesiones como JSON.</div>
+        <div id="empty-hint">Los datos se guardan en tu navegador (IndexedDB). Pero se llena rápidamente con varios usuarios, recuerda exportar / importar sesiones como JSON.</div>
       </div>
 
       <!-- Discover view (sin ctrl bar — ahora está fuera) -->
