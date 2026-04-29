@@ -1138,14 +1138,15 @@ input::placeholder {
     display: block;
 }
 #discover-ctrl-bar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
     display: flex;
     flex-direction: column;
     gap: 0;
     background: var(--bg);
     padding: 0.08rem 1.5rem 0.05rem;
     border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    margin-top: -1px;
 }
 #disc-rel-tabs {
     display: flex;
@@ -1442,12 +1443,15 @@ input::placeholder {
     text-transform: uppercase;
 }
 
-/* ── App shell ─────────────────────────────────────────────────────── */
+/* ── App shell — único contenedor de scroll ─────────────────────────── */
 .app-shell {
     height: calc(100dvh - 52px);
-    overflow: hidden;
-    display: flex;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    display: block;
 }
+.app-shell::-webkit-scrollbar { display: none; }
 
 /* ── Sidebar (eliminado — mantenido por si hay referencias residuales) ─ */
 #sidebar {
@@ -2155,20 +2159,10 @@ input::placeholder {
 
 /* ── Main content area ─────────────────────────────────────────────── */
 #main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
+    display: block;
 }
 .main-inner {
-    flex: 1;
-    overflow-y: auto;
     padding: 0.1rem 1.5rem 3rem;
-    min-height: 0;
-    scrollbar-width: none;
-}
-.main-inner::-webkit-scrollbar {
-    display: none;
 }
 
 /* ── Responsive ────────────────────────────────────────────────────── */
@@ -2232,7 +2226,6 @@ input::placeholder {
     #discover-ctrl-bar {
         padding-left: 0.75rem;
         padding-right: 0.75rem;
-        overflow: hidden;
     }
     #disc-rel-tabs {
         overflow-x: auto;
@@ -2247,15 +2240,17 @@ input::placeholder {
     #disc-ctrl-row #disc-user-indicator {
         flex: none;
         width: 100%;
-        flex-wrap: wrap;
     }
     #disc-ctrl-row .disc-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
         width: 100%;
-        flex-shrink: 0;
     }
     #disc-ctrl-row .disc-controls select {
-        flex: 1;
+        flex: 1 1 auto;
         min-width: 0;
+        max-width: 150px;
     }
     .main-inner {
         padding-left: 0.75rem;
