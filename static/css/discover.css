@@ -621,7 +621,7 @@ input::placeholder { color: var(--ink3); }
   display: flex; flex-direction: column; gap: 0;
   background: var(--bg); padding: 0.08rem 1.5rem 0.05rem;
   border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+  flex-shrink: 0; margin-top: -1px;
 }
 #disc-rel-tabs {
   display: flex; gap: 0; margin-bottom: 0.1rem;
@@ -1157,7 +1157,9 @@ input::placeholder { color: var(--ink3); }
   scrollbar-gutter: stable;
   padding: 0.5rem 1.5rem 3rem;
   min-height: 0;
+  scrollbar-width: none;
 }
+.main-inner::-webkit-scrollbar { display: none; }
 
 /* ── Responsive ────────────────────────────────────────────────────── */
 @media (max-width: 800px) {
