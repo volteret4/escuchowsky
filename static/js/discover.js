@@ -2742,6 +2742,13 @@ async function renderSecondaryUsers() {
     (u) => u.user.toLowerCase() !== primaryUser && !idbSet.has(u.user.toLowerCase()),
   );
 
+  // Build image lookup from localStorage for inactive users (previously-active extras)
+  let _savedImageMap = {};
+  try {
+    const _saved = JSON.parse(localStorage.getItem("ml_extra_users") || "[]");
+    for (const _u of _saved) { if (_u.user && _u.image) _savedImageMap[_u.user.toLowerCase()] = _u.image; }
+  } catch (_) {}
+
   const _renderIdbRow = (s) => {
     const eu = extraUsers.find((u) => u.user.toLowerCase() === s.user.toLowerCase());
     const isActive = !!eu;
@@ -2752,8 +2759,9 @@ async function renderSecondaryUsers() {
       s.complete === false
         ? ' <span style="color:var(--red);font-size:0.7rem" title="Descarga incompleta — usa ↻ Sync">⚠</span>'
         : "";
-    const avatar = eu?.image
-      ? `<img class="eu-avatar" src="${escH(eu.image)}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0">`
+    const _rowImg = eu?.image || s.image || _savedImageMap[s.user.toLowerCase()] || _sessionCache.get(s.user.toLowerCase())?.image || "";
+    const avatar = _rowImg
+      ? `<img class="eu-avatar" src="${escH(_rowImg)}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="eager">`
       : `<div class="eu-dot" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${eu?.color || "var(--ink3)"}"></div>`;
     return `<div class="sec-user-row${isActive ? " active" : ""}">
       <div class="sec-user-left">
@@ -2871,18 +2879,10 @@ function showUserBadge(
   lastTrack,
 ) {
   _updateTopbarAvatar(img || "");
-  if (img) {
-    const av = document.getElementById("badge-avatar");
-    if (av) {
-      av.src = img;
-      av.style.display = "";
-    }
-    const umAv = document.getElementById("um-avatar");
-    if (umAv) {
-      umAv.src = img;
-      umAv.style.display = "";
-    }
-  }
+  const av = document.getElementById("badge-avatar");
+  if (av) { av.src = img || ""; av.style.display = img ? "" : "none"; }
+  const umAv = document.getElementById("um-avatar");
+  if (umAv) { umAv.src = img || ""; umAv.style.display = img ? "" : "none"; }
   document.getElementById("badge-name").textContent = username;
   document.getElementById("badge-inline").style.display = "flex";
   const countStr =
@@ -3160,6 +3160,7 @@ function loadHeardCache(data) {
   );
   const _idbPayload = {
     user: heardCache.user,
+    image: heardCache.image || "",
     count: heardCache.count,
     fetched_at: heardCache.fetched_at,
     heard: heardCache.pairs,

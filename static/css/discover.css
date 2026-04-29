@@ -618,18 +618,18 @@ input::placeholder { color: var(--ink3); }
 #discover-view { display: none; }
 #discover-view.visible { display: block; }
 #discover-ctrl-bar {
-  display: flex; flex-direction: column; gap: 0; margin-bottom: 0.7rem;
+  display: flex; flex-direction: column; gap: 0; margin-bottom: 0.3rem;
   position: sticky; top: 0; z-index: 90;
-  background: var(--bg); padding: 0.4rem 0 0.1rem;
+  background: var(--bg); padding: 0.08rem 0 0.05rem;
   border-bottom: 1px solid var(--border);
   margin-top: -0.5rem; margin-left: -1.5rem; margin-right: -1.5rem;
   padding-left: 1.5rem; padding-right: 1.5rem;
 }
 #disc-rel-tabs {
-  display: flex; gap: 0; margin-bottom: 0.4rem;
+  display: flex; gap: 0; margin-bottom: 0.1rem;
 }
 .disc-tab {
-  padding: .38rem 1rem; border: none; border-bottom: 2px solid transparent;
+  padding: .2rem 0.75rem; border: none; border-bottom: 2px solid transparent;
   background: transparent; color: var(--ink3); cursor: pointer;
   font-size: .8rem; font-family: var(--sans); transition: color .15s, border-color .15s;
 }
@@ -945,7 +945,7 @@ input::placeholder { color: var(--ink3); }
 /* ── Discover compact controls ───────────────────────────────────────────── */
 .disc-controls {
   display: flex; align-items: center; gap: 0.35rem;
-  padding: 0.5rem 0.9rem 0.4rem;
+  padding: 0.2rem 0 0.15rem;
 }
 .disc-controls input[type=number] {
   width: 46px; background: var(--bg3); border: 1px solid var(--border);
@@ -1152,11 +1152,13 @@ input::placeholder { color: var(--ink3); }
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  scrollbar-gutter: stable;
 }
 .main-inner {
   padding: 0.5rem 1.5rem 3rem;
   max-width: 1400px;
   width: 100%;
+  margin: 0 auto;
 }
 
 /* ── Responsive ────────────────────────────────────────────────────── */
