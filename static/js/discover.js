@@ -249,6 +249,7 @@ function _updateDiscoverIndicator() {
       dd.style.display = dd.style.display === "none" ? "" : "none";
     });
     dd.addEventListener("click", (e) => {
+      e.stopPropagation();
       const item = e.target.closest(".disc-dd-item[data-idx]");
       if (!item) return;
       const idx = parseInt(item.dataset.idx, 10);
