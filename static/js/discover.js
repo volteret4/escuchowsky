@@ -29,6 +29,7 @@ let discoverAlbums = [];
 let discoverOffset = 0;
 let discoverSearching = false;
 let discoverEs = null;
+let discoverGeneration = 0;
 let discoverDecadeFilter = new Set();
 let discoverPage = 0;
 let discoverLimit = 20;
@@ -170,10 +171,12 @@ function buildExtraUsersList() {
     // No active users: hide discover results if shown
     const _dv = document.getElementById("discover-view");
     if (_dv) _dv.classList.remove("visible");
+    ++discoverGeneration;
     if (discoverEs) {
       discoverEs.close();
       discoverEs = null;
     }
+    discoverSearching = false;
     discoverMode = false;
   }
   renderSecondaryUsers();
@@ -1634,6 +1637,7 @@ function _applyEnrichCover(cover_url, mbid, artist, album, needed) {
 }
 
 async function _enrichSongCovers() {
+  const myGen = discoverGeneration;
   const needed = {};
   discoverAlbums.forEach((a, i) => {
     if (a.type !== "song" || a.cover_url || !a.orig_album) return;
@@ -1646,6 +1650,7 @@ async function _enrichSongCovers() {
   if (!pairs.length) return;
 
   for (const { orig_a: artist, orig_album: album } of pairs) {
+    if (discoverGeneration !== myGen) return;
     let cover_url = "",
       mbid = "";
     try {
@@ -1662,6 +1667,8 @@ async function _enrichSongCovers() {
         cover_url = `https://coverartarchive.org/release/${lfmMbid}/front-500`;
     } catch (e) {}
 
+    if (discoverGeneration !== myGen) return;
+
     if (!cover_url) {
       try {
         const mb = await mbSearchRelGroup(artist, album);
@@ -1672,7 +1679,8 @@ async function _enrichSongCovers() {
       } catch (e) {}
     }
 
-    if (cover_url) _applyEnrichCover(cover_url, mbid, artist, album, needed);
+    if (cover_url && discoverGeneration === myGen)
+      _applyEnrichCover(cover_url, mbid, artist, album, needed);
   }
 }
 
@@ -1681,6 +1689,7 @@ function _loadDiscoverPage() {
   discoverOffset = 0;
   discoverSearching = false;
   discoverDecadeFilter.clear();
+  ++discoverGeneration;
   if (discoverEs) {
     discoverEs.close();
     discoverEs = null;
@@ -1719,13 +1728,11 @@ function _loadDiscoverPage() {
       `${discoverAlbums.length} artistas · ${uName} (pág. ${discoverPage + 1})`;
 
     // Artist images: sequential client-side LFM calls with cancellation
-    let active = true;
-    if (discoverEs) discoverEs.close();
-    discoverEs = { close() { active = false; } };
+    const myGen = discoverGeneration;
     (async () => {
       const u2 = extraUsers[discoverUserIdxs[0]];
       for (let i = 0; i < discoverAlbums.length; i++) {
-        if (!active) break;
+        if (discoverGeneration !== myGen) break;
         const a = discoverAlbums[i];
         // 1. Enrich cache
         const hit = enrichCacheGet(a.orig_a, "");
@@ -1748,14 +1755,13 @@ function _loadDiscoverPage() {
         try {
           const data = await lfmGet('artist.getInfo', { artist: a.orig_a, autocorrect: 1 });
           const imgUrl = _lfmBestImg(data.artist?.image);
-          if (imgUrl && active) {
+          if (imgUrl && discoverGeneration === myGen) {
             discoverAlbums[i].cover_url = imgUrl;
             enrichCacheSet(a.orig_a, "", { cover_url: imgUrl });
             _applyArtistCover(i, imgUrl);
           }
         } catch(e) {}
       }
-      if (active) discoverEs = null;
     })();
 
   } else if (discoverModeType === "songs") {
@@ -1856,16 +1862,10 @@ async function loadMoreDiscover() {
 
   prog.textContent = `Consultando… (0 / ${uncachedJs.length})`;
 
-  let active = true;
-  if (discoverEs) discoverEs.close();
-  discoverEs = {
-    close() {
-      active = false;
-    },
-  };
+  const myGen = discoverGeneration;
 
   for (let i = 0; i < uncachedJs.length; i++) {
-    if (!active) break;
+    if (discoverGeneration !== myGen) return;
     const j = uncachedJs[i];
     const c = batch[j];
     const aIdx = startIdx + j;
@@ -1895,7 +1895,7 @@ async function loadMoreDiscover() {
         cover_url = `https://coverartarchive.org/release/${lfmMbid}/front-500`;
     } catch (e) {}
 
-    if (!active) break;
+    if (discoverGeneration !== myGen) return;
 
     if (!cover_url) {
       try {
@@ -1910,6 +1910,8 @@ async function loadMoreDiscover() {
       } catch (e) {}
     }
 
+    if (discoverGeneration !== myGen) return;
+
     if (discoverAlbums[aIdx]) {
       const enriched = { mbid, cover_url, mb_title, mb_artist, date };
       Object.assign(discoverAlbums[aIdx], enriched);
@@ -1919,11 +1921,10 @@ async function loadMoreDiscover() {
     prog.textContent = `Buscando… (${i + 1} / ${uncachedJs.length})`;
   }
 
-  if (active) {
+  if (discoverGeneration === myGen) {
     discoverOffset += batch.length;
     prog.textContent = `✓ ${discoverAlbums.length} álbumes encontrados`;
   }
-  discoverEs = null;
   discoverSearching = false;
 }
 
