@@ -285,6 +285,16 @@ def render_html(
   <div id="tree-wrap">
     <svg id="tree-svg"></svg>
     <div id="tree-placeholder">Selecciona un género para ver su árbol</div>
+    <div id="sb-bar">
+      <div class="sb-wrap">
+        <input id="sb-genre-inp" class="sb-inp" type="text" placeholder="Buscar género…" autocomplete="off">
+        <div class="sb-dd" id="sb-genre-dd"></div>
+      </div>
+      <div class="sb-wrap">
+        <input id="sb-artist-inp" class="sb-inp" type="text" placeholder="Buscar artista…" autocomplete="off">
+        <div class="sb-dd" id="sb-artist-dd"></div>
+      </div>
+    </div>
     <div class="genre-picker" id="genrePicker">
       <button class="genre-picker-btn" id="gpBtn">
         <span id="gpLabel">Selecciona un género…</span>

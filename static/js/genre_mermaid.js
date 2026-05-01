@@ -13,10 +13,30 @@ let   HEARD      = {};              // chart_slug → heard count (computed from
 function cslug(s) { return 'rym_chart_all_time_' + s.replace(/-/g,'_'); }
 function isScraped(s) { return !!CHARTS[cslug(s)]; }
 
+// ── Genre and Artist indexes for search ───────────────────────────────────
+const GENRE_META = {};
+(function buildMeta(nodes, parent) {
+  for (const n of nodes) {
+    GENRE_META[n.s] = {name: n.n, parent: parent || null};
+    buildMeta(n.c || [], n.s);
+  }
+})(__d.tree, null);
+
+const ARTIST_INDEX = {};
+for (const [slug, pd] of Object.entries(PANEL_DATA)) {
+  for (const alb of (pd.albums || [])) {
+    if (!alb.yt_id) continue;
+    const key = alb.artist.toLowerCase().trim();
+    if (!ARTIST_INDEX[key]) ARTIST_INDEX[key] = {display: alb.artist, genres: []};
+    if (!ARTIST_INDEX[key].genres.includes(slug)) ARTIST_INDEX[key].genres.push(slug);
+  }
+}
+
 // ── Tree state ────────────────────────────────────────────────────────────
 // Each node in our working tree: {slug, name, children:null|[], _raw, expanded}
 let treeRoot = null;
 let activeSlug = null;
+let highlightedSlug = null;
 
 function makeNode(compactNode, expanded=false) {
   return {
@@ -247,6 +267,10 @@ function render() {
     const isOpen  = d.data.node.children !== null;
     const hasKids = (d.data.node._raw.c || []).length > 0;
     d3.select(this).select('._expand_txt').text(!hasKids ? '' : isOpen ? '−' : '+');
+    const isHl = highlightedSlug && d.data.node.slug === highlightedSlug;
+    d3.select(this).select('rect')
+      .attr('stroke', isHl ? '#ff9' : NODE_STR(d.depth, isScraped(d.data.node.slug)))
+      .attr('stroke-width', isHl ? 3 : NODE_STW(d.depth));
   });
 
   // ── exit ───────────────────────────────────────────────────────────────
@@ -389,6 +413,136 @@ function closePanel() {
   document.getElementById('panel').classList.remove('open');
   document.getElementById('tree-wrap').classList.remove('panel-open');
 }
+
+// ── Genre/Artist search navigation ────────────────────────────────────────
+function ancestorPath(slug) {
+  const path = [];
+  let cur = slug;
+  while (cur) { path.unshift(cur); cur = GENRE_META[cur]?.parent; }
+  return path;
+}
+
+function expandPathInTree(node, path, depth) {
+  if (node.slug !== path[depth]) return false;
+  if (depth === path.length - 1) return true;
+  if (node.children === null) expandNode(node);
+  for (const child of (node.children || [])) {
+    if (expandPathInTree(child, path, depth + 1)) return true;
+  }
+  return false;
+}
+
+function navigateToGenre(slug) {
+  if (!GENRE_META[slug]) return;
+  const path = ancestorPath(slug);
+  const topSlug = path[0];
+  highlightedSlug = slug;
+  selectGenre(topSlug);
+  if (path.length > 1 && treeRoot) {
+    expandPathInTree(treeRoot, path, 0);
+    render();
+  }
+  const wrap = document.getElementById('tree-wrap');
+  svg.transition().duration(400).call(
+    zoomBehavior.transform,
+    d3.zoomIdentity.translate(80, wrap.clientHeight / 2).scale(1)
+  );
+}
+
+function navigateToArtist(key) {
+  const entry = ARTIST_INDEX[key];
+  if (!entry || !entry.genres.length) return;
+  const slug = entry.genres[0];
+  navigateToGenre(slug);
+  showPanel(slug);
+}
+
+// ── Generic autocomplete ──────────────────────────────────────────────────
+function _esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function setupSb(inpId, ddId, getResults, onPick) {
+  const inp = document.getElementById(inpId);
+  const dd  = document.getElementById(ddId);
+  let selIdx = -1;
+
+  function showDd(items) {
+    dd.innerHTML = '';
+    if (!items.length) { dd.classList.remove('open'); return; }
+    items.slice(0, 30).forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'sb-item';
+      el.innerHTML = item.html;
+      el.addEventListener('mousedown', e => {
+        e.preventDefault();
+        onPick(item.key);
+        inp.value = '';
+        dd.classList.remove('open');
+      });
+      dd.appendChild(el);
+    });
+    selIdx = -1;
+    dd.classList.add('open');
+  }
+
+  inp.addEventListener('input', () => {
+    const q = inp.value.trim();
+    if (!q) { dd.classList.remove('open'); return; }
+    showDd(getResults(q));
+  });
+
+  inp.addEventListener('keydown', e => {
+    const items = dd.querySelectorAll('.sb-item');
+    if (e.key === 'ArrowDown') { selIdx = Math.min(selIdx + 1, items.length - 1); }
+    else if (e.key === 'ArrowUp') { selIdx = Math.max(selIdx - 1, 0); }
+    else if (e.key === 'Enter' && selIdx >= 0) {
+      items[selIdx].dispatchEvent(new MouseEvent('mousedown'));
+      inp.value = ''; dd.classList.remove('open'); e.preventDefault(); return;
+    } else if (e.key === 'Escape') { dd.classList.remove('open'); inp.blur(); return; }
+    items.forEach((el, i) => el.classList.toggle('sb-sel', i === selIdx));
+  });
+
+  inp.addEventListener('blur', () => setTimeout(() => dd.classList.remove('open'), 150));
+  document.addEventListener('click', e => {
+    if (!inp.contains(e.target) && !dd.contains(e.target)) dd.classList.remove('open');
+  });
+}
+
+setupSb('sb-genre-inp', 'sb-genre-dd',
+  q => {
+    const tokens = q.toLowerCase().trim().split(/[ \t]+/);
+    return Object.entries(GENRE_META)
+      .filter(([, m]) => tokens.every(t => m.name.toLowerCase().includes(t)))
+      .slice(0, 30)
+      .map(([slug, m]) => ({
+        key: slug,
+        html: `<span>${_esc(m.name)}</span><span class="sb-item-sub">${slug}</span>`,
+      }));
+  },
+  slug => navigateToGenre(slug)
+);
+
+setupSb('sb-artist-inp', 'sb-artist-dd',
+  q => {
+    const tokens = q.toLowerCase().trim().split(/[ \t]+/);
+    const results = [];
+    for (const [key, entry] of Object.entries(ARTIST_INDEX)) {
+      if (!tokens.every(t => key.includes(t))) continue;
+      for (const slug of entry.genres) {
+        results.push({
+          key: key + '\x00' + slug,
+          html: `<span>${_esc(entry.display)}</span><span class="sb-item-sub">${_esc(GENRE_META[slug]?.name || slug)}</span>`,
+        });
+      }
+    }
+    return results.slice(0, 30);
+  },
+  combined => {
+    const sep = combined.indexOf('\x00');
+    const slug = combined.slice(sep + 1);
+    navigateToGenre(slug);
+    showPanel(slug);
+  }
+);
 
 // Close genre picker on outside click
 document.addEventListener('click', e => {

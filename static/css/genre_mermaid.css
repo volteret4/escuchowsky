@@ -207,6 +207,37 @@
   .no-data { font-family:'DM Mono',monospace; font-size:.65rem; color:#2a2a2a;
                text-align:center; padding:20px 0; }
 
+  /* ── Genre / Artist search bars ── */
+  #sb-bar {
+    position:absolute; top:12px; left:12px; z-index:50;
+    display:flex; gap:8px; pointer-events:none;
+  }
+  .sb-wrap { position:relative; pointer-events:all; }
+  .sb-inp {
+    padding:5px 10px; background:rgba(10,10,10,.9); border:1px solid #333;
+    border-radius:5px; color:var(--text); font-family:'DM Mono',monospace;
+    font-size:.72rem; outline:none; width:160px; backdrop-filter:blur(8px);
+    transition:border-color .12s;
+  }
+  .sb-inp::placeholder { color:#555; }
+  .sb-inp:focus { border-color:var(--accent); }
+  .sb-dd {
+    display:none; position:absolute; top:calc(100% + 4px); left:0;
+    background:#0d0d0d; border:1px solid var(--border); border-radius:6px;
+    padding:4px 0; min-width:210px; max-height:52vh; overflow-y:auto;
+    box-shadow:0 6px 24px rgba(0,0,0,.7); z-index:200;
+    scrollbar-width:thin; scrollbar-color:var(--border) transparent;
+  }
+  .sb-dd.open { display:block; }
+  .sb-item {
+    padding:7px 14px; font-size:.78rem; cursor:pointer;
+    font-family:'DM Sans',sans-serif; color:var(--muted);
+    transition:background .1s, color .1s; border-bottom:1px solid #111;
+  }
+  .sb-item:last-child { border-bottom:none; }
+  .sb-item:hover, .sb-item.sb-sel { background:rgba(201,162,39,.08); color:var(--text); }
+  .sb-item-sub { font-family:'DM Mono',monospace; font-size:.6rem; color:#444; display:block; margin-top:1px; }
+
   @media (max-width:700px) {
     :root { --panel-w:100vw; }
     .mh-na.on { display:none; }
@@ -220,4 +251,8 @@
       overflow-y:auto;
     }
     #tree-wrap.panel-open { right:0; }
+    #sb-bar { top:auto; bottom:16px; left:8px; right:8px; flex-direction:row; }
+    .sb-wrap { flex:1; }
+    .sb-inp { width:100%; box-sizing:border-box; }
+    .sb-dd { top:auto; bottom:calc(100% + 4px); }
   }
