@@ -2937,11 +2937,16 @@ function showUserBadge(username, img, albumCount, lastTs, lastArtist, lastTrack)
 function hideUserBadge() {
   _updateTopbarAvatar("");
   document.getElementById("badge-inline").style.display = "none";
+  localStorage.removeItem("tt_primary_user");
   renderSecondaryUsers();
 }
 
 // ── Unload primary user ────────────────────────────────────────────────────
 function unloadPrimaryUser() {
+  if (heardCache) {
+    const lc = heardCache.user.toLowerCase();
+    _sessionCache.set(lc, { ...(_sessionCache.get(lc) || {}), image: heardCache.image || "" });
+  }
   heardCache = null;
   loadedUser = null;
   inpUser.value = "";
@@ -3137,14 +3142,15 @@ async function syncSecondaryIdb(username) {
 async function setPrimaryFromSecondary(username) {
   const data = await idbLoad(username);
   if (!data) return;
-  // Remove from extraUsers if present
-  const idx = extraUsers.findIndex(
-    (u) => u.user.toLowerCase() === username.toLowerCase(),
-  );
+  // Remove from extraUsers if present, pulling their image into data if IDB lacks it
+  const lc = username.toLowerCase();
+  const idx = extraUsers.findIndex((u) => u.user.toLowerCase() === lc);
   if (idx !== -1) {
+    if (!data.image) data.image = extraUsers[idx].image || "";
     extraUsers.splice(idx, 1);
     saveExtraUsersLS();
   }
+  if (!data.image) data.image = _sessionCache.get(lc)?.image || "";
   loadHeardCache(data);
   document.getElementById("um-progress").textContent =
     `✓ ${data.user} cargado como principal`;
@@ -3174,6 +3180,7 @@ function loadHeardCache(data) {
   // song_set: fast lookup for songs mode — key is norm_a + '|' + norm_track
   heardCache.song_set = new Set(heardCache.songs.map((s) => s[0] + "|" + s[1]));
   loadedUser = data.user.toLowerCase();
+  localStorage.setItem("tt_primary_user", data.user.toLowerCase());
   inpUser.value = data.user;
   showUserBadge(
     data.user,
@@ -3487,6 +3494,18 @@ if ("serviceWorker" in navigator) {
     } catch (e) {}
     await hydrateExtraUsersFromIdb();
   }
+
+  // Restore principal user from last session
+  const savedPrimary = localStorage.getItem("tt_primary_user");
+  if (savedPrimary) {
+    const primaryData = await idbLoad(savedPrimary).catch(() => null);
+    if (primaryData) {
+      loadHeardCache(primaryData);
+    } else {
+      localStorage.removeItem("tt_primary_user");
+    }
+  }
+
   await renderSecondaryUsers();
   buildExtraUsersList();
 
