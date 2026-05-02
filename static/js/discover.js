@@ -90,8 +90,17 @@ function _avatarHtml(username, imgSrc, sizePx, color, source) {
   const fbDiv = isLb
     ? `<div style="width:${sz}px;height:${sz}px;border-radius:50%;flex-shrink:0;background:${bg};display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:700;color:#fff;line-height:1;font-family:var(--serif)">${((username || "?")[0] || "?").toUpperCase()}</div>`
     : `<div style="width:${sz}px;height:${sz}px;border-radius:50%;flex-shrink:0;background:var(--bg3)"></div>`;
-  return `<img src="${escH(imgSrc)}" alt="" data-fb="${escH(fbDiv)}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="eager" onerror="this.outerHTML=this.dataset.fb">`;
+  return `<img src="${escH(imgSrc)}" alt="" data-fb="${escH(fbDiv)}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="eager">`;
 }
+
+// Global error handler for avatar fallbacks — replaces broken img with data-fb content.
+// Uses capture phase because image error events don't bubble.
+document.addEventListener("error", (e) => {
+  const el = e.target;
+  if (el.tagName === "IMG" && el.dataset.fb) {
+    el.outerHTML = el.dataset.fb;
+  }
+}, true);
 
 // ── Topbar avatar button ───────────────────────────────────────────────────
 function _updateTopbarAvatar(imgSrc, username, source) {
