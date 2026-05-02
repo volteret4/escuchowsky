@@ -69,12 +69,23 @@ document.addEventListener("keydown", (e) => {
     closeAboutModal();
 });
 
+// ── Avatar helper: img with initial fallback ───────────────────────────────
+function _avatarHtml(username, imgSrc, sizePx, color) {
+  const sz = sizePx || 22;
+  const bg = color || "var(--accent)";
+  const initial = ((username || "?")[0] || "?").toUpperCase();
+  const fs = Math.max(7, Math.round(sz * 0.44));
+  const initDiv = `<div style="width:${sz}px;height:${sz}px;border-radius:50%;flex-shrink:0;background:${bg};display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:700;color:#fff;line-height:1;font-family:var(--serif)">${initial}</div>`;
+  if (!imgSrc) return initDiv;
+  return `<img src="${escH(imgSrc)}" alt="" data-fb="${escH(initDiv)}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="eager" onerror="this.outerHTML=this.dataset.fb">`;
+}
+
 // ── Topbar avatar button ───────────────────────────────────────────────────
-function _updateTopbarAvatar(imgSrc) {
+function _updateTopbarAvatar(imgSrc, username) {
   const btn = document.getElementById("btn-open-users");
   if (!btn) return;
-  if (imgSrc) {
-    btn.innerHTML = `<img src="${escH(imgSrc)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;display:block">`;
+  if (imgSrc || username) {
+    btn.innerHTML = _avatarHtml(username || "?", imgSrc || "", 28, "var(--accent)");
     btn.style.overflow = "hidden";
     btn.style.padding = "0";
   } else {
@@ -223,9 +234,7 @@ function _updateDiscoverIndicator() {
   // Build dropdown items HTML
   const itemsHtml = extraUsers.map((uu, i) => {
     const sel = activeDiscoverUserIdxs.has(i);
-    const dot = uu.image
-      ? `<img src="${escH(uu.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover;flex-shrink:0">`
-      : `<span style="width:8px;height:8px;border-radius:50%;background:${uu.color};display:inline-block;flex-shrink:0"></span>`;
+    const dot = _avatarHtml(uu.user, uu.image || "", 14, uu.color);
     return `<div class="disc-dd-item${sel ? " sel" : ""}" data-idx="${i}">
       <span class="disc-chk${sel ? " sel" : ""}">${sel ? "✓" : ""}</span>
       ${dot}
@@ -449,6 +458,21 @@ async function syncExtraUser(idx) {
       last_scrobble_artist: extraUsers[idx].last_scrobble_artist || "",
       last_scrobble_track: extraUsers[idx].last_scrobble_track || "",
     });
+    // Fetch avatar if missing
+    if (!extraUsers[idx].image) {
+      const _syncUser = extraUsers[idx].user;
+      const _syncSrc = extraUsers[idx].source || "lfm";
+      checkUserClient(_syncUser, _syncSrc).then((info) => {
+        if (!info?.ok || !info.image) return;
+        const eu = extraUsers.find((u) => u.user.toLowerCase() === _syncUser.toLowerCase());
+        if (eu) {
+          eu.image = info.image;
+          saveExtraUsersLS();
+          renderSecondaryUsers();
+          idbLoad(_syncUser).then((d) => { if (d) idbSave({ ...d, image: info.image }); }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
     await renderIdbExtraList();
     buildExtraUsersList();
     prog.textContent = `✓ ${u.user}: +${added.length} nuevos (total ${extraUsers[idx].count.toLocaleString()})`;
@@ -499,9 +523,7 @@ function renderFriendsList(friends) {
   listEl.innerHTML = friends
     .map((f) => {
       const added = alreadyAdded.has(f.username.toLowerCase());
-      const avatar = f.image
-        ? `<img class="fr-avatar" src="${escH(f.image)}" alt="">`
-        : `<span class="fr-avatar" style="background:var(--bg3);display:inline-block"></span>`;
+      const avatar = _avatarHtml(f.username, f.image || "", 22, "var(--accent)");
       return `<div class="fr-row" id="fr-row-${escH(f.username.toLowerCase().replace(/[^a-z0-9]/g, ""))}">
       ${avatar}
       <span class="fr-name">${escH(f.username)}</span>
@@ -1331,11 +1353,7 @@ function showFetchMethodModal(username, source) {
 function discoverCardHTML(a, i) {
   if (a.type === "song") {
     const userBadges = (a.users || [])
-      .map((u) =>
-        u.image
-          ? `<img class="rc-avatar" src="${escH(u.image)}" title="${escH(u.user)}: ${u.count} plays" alt="">`
-          : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`,
-      )
+      .map((u) => `<span title="${escH(u.user)}: ${u.count} plays">${_avatarHtml(u.user, u.image || "", 14, u.color)}</span>`)
       .join("");
     const cover = a.cover_url
       ? `<img class="card-cover" src="${escH(a.cover_url)}" loading="lazy" alt="">`
@@ -1356,11 +1374,7 @@ function discoverCardHTML(a, i) {
   }
   if (a.type === "artist") {
     const userBadges = (a.users || [])
-      .map((u) =>
-        u.image
-          ? `<img class="rc-avatar" src="${escH(u.image)}" title="${escH(u.user)}: ${u.count} plays" alt="">`
-          : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`,
-      )
+      .map((u) => `<span title="${escH(u.user)}: ${u.count} plays">${_avatarHtml(u.user, u.image || "", 14, u.color)}</span>`)
       .join("");
     const coverEl = a.cover_url
       ? `<img class="card-cover disc-artist-img" src="${escH(a.cover_url)}" alt="">`
@@ -1389,11 +1403,7 @@ function discoverCardHTML(a, i) {
       <circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
     </svg></div>`;
   const userBadges = (a.users || [])
-    .map((u) =>
-      u.image
-        ? `<img class="rc-avatar" src="${escH(u.image)}" title="${escH(u.user)}: ${u.count} plays" alt="">`
-        : `<div class="rc-dot" style="background:${u.color}" title="${escH(u.user)}: ${u.count} plays"></div>`,
-    )
+    .map((u) => `<span title="${escH(u.user)}: ${u.count} plays">${_avatarHtml(u.user, u.image || "", 14, u.color)}</span>`)
     .join("");
   return `<div class="card rec-card" data-disc="${i}" style="cursor:pointer">
     ${cover}${ph}
@@ -2103,9 +2113,7 @@ function openDetailPanel(ref) {
     extraSt.innerHTML = extraUsers
       .map((u, i) => {
         const h = extraHeard[i];
-        const icon = u.image
-          ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover;opacity:${h ? 1 : 0.3}">`
-          : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block;opacity:${h ? 1 : 0.25}"></span>`;
+        const icon = _avatarHtml(u.user, u.image || "", 14, u.color);
         return `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${h ? u.color : "var(--ink3)"}">
         ${icon} ${escH(u.user)}: ${h ? "✓" : "—"}</span>`;
       })
@@ -2118,20 +2126,12 @@ function openDetailPanel(ref) {
     if (a?.users?.length) {
       const extraLabel =
         ref.type === "discover_artist"
-          ? a.users.map(
-              (
-                u,
-              ) => `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
-            ${u.image ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover">` : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block"></span>`}
-            ${escH(u.user)}: ${a.total} plays · ${a.album_count} álbum${a.album_count !== 1 ? "es" : ""}</span>`,
-            )
-          : a.users.map(
-              (
-                u,
-              ) => `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
-            ${u.image ? `<img src="${escH(u.image)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover">` : `<span style="width:8px;height:8px;border-radius:50%;background:${u.color};display:inline-block"></span>`}
-            ${escH(u.user)}: ${u.count} plays</span>`,
-            );
+          ? a.users.map((u) => `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
+            ${_avatarHtml(u.user, u.image || "", 14, u.color)}
+            ${escH(u.user)}: ${a.total} plays · ${a.album_count} álbum${a.album_count !== 1 ? "es" : ""}</span>`)
+          : a.users.map((u) => `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
+            ${_avatarHtml(u.user, u.image || "", 14, u.color)}
+            ${escH(u.user)}: ${u.count} plays</span>`);
       extraSt.innerHTML = extraLabel.join("");
       extraSt.style.display = "flex";
     } else {
@@ -2822,9 +2822,8 @@ async function renderSecondaryUsers() {
       ? ' <span style="color:var(--red);font-size:0.7rem" title="Descarga incompleta — usa ↻ Sync">⚠</span>' : "";
     const _rowImg = (isPrimary ? heardCache?.image : null)
       || eu?.image || s.image || _savedImageMap[lc] || _sessionCache.get(lc)?.image || "";
-    const avatar = _rowImg
-      ? `<img class="eu-avatar" src="${escH(_rowImg)}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="eager">`
-      : `<div class="eu-dot" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${eu?.color || "var(--ink3)"}"></div>`;
+    const _rowColor = eu?.color || (isPrimary ? "var(--accent)" : "var(--ink3)");
+    const avatar = _avatarHtml(s.user, _rowImg, 22, _rowColor);
 
     const btns = isPrimary
       ? `<button class="btn-sm" data-action="sync-primary" data-user="${escH(s.user)}" title="Sincronizar">↻ Sync</button>
@@ -2850,9 +2849,7 @@ async function renderSecondaryUsers() {
   };
 
   const _renderMemRow = (u) => {
-    const avatar = u.image
-      ? `<img class="eu-avatar" src="${escH(u.image)}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0">`
-      : `<div class="eu-dot" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${u.color || "var(--ink3)"}"></div>`;
+    const avatar = _avatarHtml(u.user, u.image || "", 22, u.color || "var(--ink3)");
     return `<div class="sec-user-row active">
       <div class="sec-user-left">
         ${avatar}
@@ -2927,7 +2924,7 @@ function idbDownloadSession(username) {
 
 // ── User badge (header) ────────────────────────────────────────────────────
 function showUserBadge(username, img, albumCount, lastTs, lastArtist, lastTrack) {
-  _updateTopbarAvatar(img || "");
+  _updateTopbarAvatar(img || "", username);
   const av = document.getElementById("badge-avatar");
   if (av) { av.src = img || ""; av.style.display = img ? "" : "none"; }
   document.getElementById("badge-name").textContent = username;
@@ -3304,6 +3301,18 @@ inpSession.addEventListener("change", async (e) => {
       loadHeardCache(data);
       prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
       closeUserModal();
+      // Fetch avatar in background if JSON didn't include it
+      if (!heardCache?.image) {
+        const _impUser = data.user;
+        const _impSrc = data.source || "lfm";
+        checkUserClient(_impUser, _impSrc).then((info) => {
+          if (!info?.ok || !info.image || heardCache?.user?.toLowerCase() !== _impUser.toLowerCase()) return;
+          heardCache.image = info.image;
+          showUserBadge(heardCache.user, heardCache.image, heardCache.count,
+            heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+          idbLoad(_impUser).then((d) => { if (d) idbSave({ ...d, image: info.image }); }).catch(() => {});
+        }).catch(() => {});
+      }
     }
   } catch (err) {
     prog.textContent = "Error: " + err.message;
@@ -3332,6 +3341,18 @@ async function syncPrimaryUser(triggerBtn) {
     }
     showUserBadge(heardCache.user, heardCache.image || "", heardCache.count,
       heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+    // Fetch avatar if missing
+    if (!heardCache.image) {
+      const _pUser = heardCache.user;
+      const _pSrc = heardCache.source || "lfm";
+      checkUserClient(_pUser, _pSrc).then((info) => {
+        if (!info?.ok || !info.image || heardCache?.user?.toLowerCase() !== _pUser.toLowerCase()) return;
+        heardCache.image = info.image;
+        showUserBadge(heardCache.user, heardCache.image, heardCache.count,
+          heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+        idbLoad(_pUser).then((d) => { if (d) idbSave({ ...d, image: info.image }); }).catch(() => {});
+      }).catch(() => {});
+    }
     if (prog) prog.textContent = added.length
       ? `✓ +${added.length} nuevos (total ${heardCache.count.toLocaleString()})` : "✓ Al día";
   } catch (e) {
