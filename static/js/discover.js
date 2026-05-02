@@ -69,23 +69,36 @@ document.addEventListener("keydown", (e) => {
     closeAboutModal();
 });
 
-// ── Avatar helper: img with initial fallback ───────────────────────────────
-function _avatarHtml(username, imgSrc, sizePx, color) {
+// ── Avatar helper ──────────────────────────────────────────────────────────
+// source="lb"  → always show initial (LB has no profile pictures)
+// source="lfm" → show image if available, grey circle if missing (initial is fetched later)
+function _avatarHtml(username, imgSrc, sizePx, color, source) {
   const sz = sizePx || 22;
   const bg = color || "var(--accent)";
-  const initial = ((username || "?")[0] || "?").toUpperCase();
   const fs = Math.max(7, Math.round(sz * 0.44));
-  const initDiv = `<div style="width:${sz}px;height:${sz}px;border-radius:50%;flex-shrink:0;background:${bg};display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:700;color:#fff;line-height:1;font-family:var(--serif)">${initial}</div>`;
-  if (!imgSrc) return initDiv;
-  return `<img src="${escH(imgSrc)}" alt="" data-fb="${escH(initDiv)}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="eager" onerror="this.outerHTML=this.dataset.fb">`;
+  const isLb = source === "lb";
+
+  if (!imgSrc) {
+    if (isLb) {
+      const initial = ((username || "?")[0] || "?").toUpperCase();
+      return `<div style="width:${sz}px;height:${sz}px;border-radius:50%;flex-shrink:0;background:${bg};display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:700;color:#fff;line-height:1;font-family:var(--serif)">${initial}</div>`;
+    }
+    return `<div style="width:${sz}px;height:${sz}px;border-radius:50%;flex-shrink:0;background:var(--bg3)"></div>`;
+  }
+
+  // Build fallback: initial for LB, grey circle for LFM (broken image)
+  const fbDiv = isLb
+    ? `<div style="width:${sz}px;height:${sz}px;border-radius:50%;flex-shrink:0;background:${bg};display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:700;color:#fff;line-height:1;font-family:var(--serif)">${((username || "?")[0] || "?").toUpperCase()}</div>`
+    : `<div style="width:${sz}px;height:${sz}px;border-radius:50%;flex-shrink:0;background:var(--bg3)"></div>`;
+  return `<img src="${escH(imgSrc)}" alt="" data-fb="${escH(fbDiv)}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="eager" onerror="this.outerHTML=this.dataset.fb">`;
 }
 
 // ── Topbar avatar button ───────────────────────────────────────────────────
-function _updateTopbarAvatar(imgSrc, username) {
+function _updateTopbarAvatar(imgSrc, username, source) {
   const btn = document.getElementById("btn-open-users");
   if (!btn) return;
   if (imgSrc || username) {
-    btn.innerHTML = _avatarHtml(username || "?", imgSrc || "", 28, "var(--accent)");
+    btn.innerHTML = _avatarHtml(username || "?", imgSrc || "", 28, "var(--accent)", source || heardCache?.source || "lfm");
     btn.style.overflow = "hidden";
     btn.style.padding = "0";
   } else {
@@ -234,7 +247,7 @@ function _updateDiscoverIndicator() {
   // Build dropdown items HTML
   const itemsHtml = extraUsers.map((uu, i) => {
     const sel = activeDiscoverUserIdxs.has(i);
-    const dot = _avatarHtml(uu.user, uu.image || "", 14, uu.color);
+    const dot = _avatarHtml(uu.user, uu.image || "", 14, uu.color, uu.source || "lfm");
     return `<div class="disc-dd-item${sel ? " sel" : ""}" data-idx="${i}">
       <span class="disc-chk${sel ? " sel" : ""}">${sel ? "✓" : ""}</span>
       ${dot}
@@ -352,7 +365,9 @@ async function addExtraUser() {
     const result = await fetchScrobblesClient(
       userInfo.username || user,
       (msg) => {
-        prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+        prog.textContent = msg.reconnecting
+          ? `Reconectando… (${msg.page}/${msg.total_pages || '?'})`
+          : `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
       },
       src,
       method,
@@ -568,7 +583,9 @@ async function addExtraUserByName(username, btn) {
     const result = await fetchScrobblesClient(
       realUser,
       (msg) => {
-        prog.textContent = `${realUser}: ${msg.page}/${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
+        prog.textContent = msg.reconnecting
+          ? `Reconectando… (${msg.page}/${msg.total_pages || '?'})`
+          : `${realUser}: ${msg.page}/${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
       },
       src,
       method,
@@ -782,6 +799,21 @@ function _normClient(s) {
 const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const _LFM_NO_IMG = "2a96cbd8b46e442fc41c2b86b821562f";
 
+// ── Fetch retry helper ────────────────────────────────────────────────────
+// Wraps any async fn with up to maxAttempts retries + exponential backoff.
+// onRetry(attempt) is called before each retry so callers can update the UI.
+async function _retryFetch(fn, maxAttempts = 5, onRetry = null) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt >= maxAttempts - 1) throw e;
+      if (onRetry) onRetry(attempt + 1);
+      await _sleep(5000 * Math.pow(1.5, attempt) + Math.random() * 2000);
+    }
+  }
+}
+
 async function lfmGet(method, params, _retries = 4) {
   const p = new URLSearchParams({
     method,
@@ -789,7 +821,13 @@ async function lfmGet(method, params, _retries = 4) {
     format: "json",
     ...params,
   });
-  const r = await fetch("https://ws.audioscrobbler.com/2.0/?" + p);
+  let r;
+  try {
+    r = await fetch("https://ws.audioscrobbler.com/2.0/?" + p);
+  } catch (e) {
+    // Network error (offline, connection refused) — let _retryFetch handle at loop level
+    throw e;
+  }
   if (!r.ok) {
     // LFM returns genuine HTTP 500/503 transiently — retry with backoff
     if ((r.status === 500 || r.status === 503) && _retries > 0) {
@@ -899,12 +937,11 @@ async function _lfmFetchTopAlbums(user, onProgress) {
     totalPages = null;
 
   while (true) {
-    const data = await lfmGet("user.getTopAlbums", {
-      user,
-      limit: 200,
-      page,
-      period: "overall",
-    });
+    const data = await _retryFetch(
+      () => lfmGet("user.getTopAlbums", { user, limit: 200, page, period: "overall" }),
+      5,
+      () => onProgress({ page, total_pages: totalPages || 1, count: Object.keys(heard_counts).length, reconnecting: true }),
+    );
     const container = data.topalbums || {};
     const attrs = container["@attr"] || {};
     if (!totalPages)
@@ -978,11 +1015,11 @@ async function _lfmFetchFull(user, onProgress) {
     totalPages = null;
 
   while (true) {
-    const data = await lfmGet("user.getRecentTracks", {
-      user,
-      limit: 1000,
-      page,
-    });
+    const data = await _retryFetch(
+      () => lfmGet("user.getRecentTracks", { user, limit: 1000, page }),
+      5,
+      () => onProgress({ page, total_pages: totalPages || 1, count: Object.keys(heard_counts).length, reconnecting: true }),
+    );
     const rt = data.recenttracks || {};
     const attrs = rt["@attr"] || {};
     if (!totalPages)
@@ -1062,7 +1099,11 @@ async function _lbFetchAllClient(user, onProgress) {
     if (maxTs !== null) path += `&max_ts=${maxTs}`;
     let payload;
     try {
-      payload = (await lbGet(path)).payload || {};
+      payload = (await _retryFetch(
+        () => lbGet(path),
+        5,
+        () => onProgress({ page, total_pages: totalPages || page || 1, count: Object.keys(heard_counts).length, reconnecting: true }),
+      )).payload || {};
     } catch (e) {
       if (page === 0) throw e;
       break;
@@ -1353,7 +1394,7 @@ function showFetchMethodModal(username, source) {
 function discoverCardHTML(a, i) {
   if (a.type === "song") {
     const userBadges = (a.users || [])
-      .map((u) => `<span title="${escH(u.user)}: ${u.count} plays">${_avatarHtml(u.user, u.image || "", 14, u.color)}</span>`)
+      .map((u) => `<span title="${escH(u.user)}: ${u.count} plays">${_avatarHtml(u.user, u.image || "", 14, u.color, u.source || "lfm")}</span>`)
       .join("");
     const cover = a.cover_url
       ? `<img class="card-cover" src="${escH(a.cover_url)}" loading="lazy" alt="">`
@@ -1374,7 +1415,7 @@ function discoverCardHTML(a, i) {
   }
   if (a.type === "artist") {
     const userBadges = (a.users || [])
-      .map((u) => `<span title="${escH(u.user)}: ${u.count} plays">${_avatarHtml(u.user, u.image || "", 14, u.color)}</span>`)
+      .map((u) => `<span title="${escH(u.user)}: ${u.count} plays">${_avatarHtml(u.user, u.image || "", 14, u.color, u.source || "lfm")}</span>`)
       .join("");
     const coverEl = a.cover_url
       ? `<img class="card-cover disc-artist-img" src="${escH(a.cover_url)}" alt="">`
@@ -1403,7 +1444,7 @@ function discoverCardHTML(a, i) {
       <circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
     </svg></div>`;
   const userBadges = (a.users || [])
-    .map((u) => `<span title="${escH(u.user)}: ${u.count} plays">${_avatarHtml(u.user, u.image || "", 14, u.color)}</span>`)
+    .map((u) => `<span title="${escH(u.user)}: ${u.count} plays">${_avatarHtml(u.user, u.image || "", 14, u.color, u.source || "lfm")}</span>`)
     .join("");
   return `<div class="card rec-card" data-disc="${i}" style="cursor:pointer">
     ${cover}${ph}
@@ -1484,7 +1525,7 @@ function renderDiscoverGrid() {
 }
 
 function _priUser() {
-  return { user: heardCache?.user || '?', count: 0, color: 'var(--ink3)', image: '' };
+  return { user: heardCache?.user || '?', count: 0, color: 'var(--ink3)', image: '', source: heardCache?.source || 'lfm' };
 }
 
 function enterDiscoverMode(userIdxs, limit = 20, mode = "albums", relMode = 'discover') {
@@ -1517,7 +1558,7 @@ function enterDiscoverMode(userIdxs, limit = 20, mode = "albums", relMode = 'dis
       const amap = {};
       for (const k of [...userAMaps[0].keys()].filter(k => !primaryArtists.has(k) && userAMaps.every(m => m.has(k)))) {
         amap[k] = { norm_a: k, orig_a: userAMaps[0].get(k).orig_a, orig_t: "", total: 0, album_count: 0, users: [], type: "artist" };
-        users.forEach((u, i) => { const e = userAMaps[i].get(k); amap[k].total += e.total; amap[k].album_count += e.album_count; amap[k].users.push({ user: u.user, count: e.total, color: u.color, image: u.image||"" }); });
+        users.forEach((u, i) => { const e = userAMaps[i].get(k); amap[k].total += e.total; amap[k].album_count += e.album_count; amap[k].users.push({ user: u.user, count: e.total, color: u.color, image: u.image||"", source: u.source||"lfm" }); });
       }
       discoverAllCandidates = Object.values(amap).sort((a, b) => b.total - a.total);
     } else if (mode === "songs") {
@@ -1526,7 +1567,7 @@ function enterDiscoverMode(userIdxs, limit = 20, mode = "albums", relMode = 'dis
       for (const k of [...userSMaps[0].keys()].filter(k => !primarySongs.has(k) && userSMaps.every(m => m.has(k)))) {
         const s0 = userSMaps[0].get(k);
         smap[k] = { norm_a: s0[0], norm_t: s0[1], orig_a: s0[2]||s0[0], orig_album: s0[3]||"", orig_t: s0[4]||s0[1], total: 0, users: [], type: "song" };
-        users.forEach((u, i) => { const s = userSMaps[i].get(k); const c = s[5]||1; smap[k].total += c; smap[k].users.push({ user: u.user, count: c, color: u.color, image: u.image||"" }); });
+        users.forEach((u, i) => { const s = userSMaps[i].get(k); const c = s[5]||1; smap[k].total += c; smap[k].users.push({ user: u.user, count: c, color: u.color, image: u.image||"", source: u.source||"lfm" }); });
       }
       discoverAllCandidates = Object.values(smap).sort((a, b) => b.total - a.total);
     } else {
@@ -1535,7 +1576,7 @@ function enterDiscoverMode(userIdxs, limit = 20, mode = "albums", relMode = 'dis
       for (const k of [...userPMaps[0].keys()].filter(k => !primaryPairs.has(k) && userPMaps.every(m => m.has(k)))) {
         const p0 = userPMaps[0].get(k);
         cmap[k] = { norm_a: p0[0], norm_t: p0[1], orig_a: p0[2]||p0[0], orig_t: p0[3]||p0[1], total: 0, users: [] };
-        users.forEach((u, i) => { const p = userPMaps[i].get(k); const c = p[4]||1; cmap[k].total += c; cmap[k].users.push({ user: u.user, count: c, color: u.color, image: u.image||"" }); });
+        users.forEach((u, i) => { const p = userPMaps[i].get(k); const c = p[4]||1; cmap[k].total += c; cmap[k].users.push({ user: u.user, count: c, color: u.color, image: u.image||"", source: u.source||"lfm" }); });
       }
       discoverAllCandidates = Object.values(cmap).sort((a, b) => b.total - a.total);
     }
@@ -1581,7 +1622,7 @@ function enterDiscoverMode(userIdxs, limit = 20, mode = "albums", relMode = 'dis
         if (!amap[p[0]]) {
           const priEntry = { ...pri, count: 0 };
           amap[p[0]] = { norm_a: p[0], orig_a: p[2]||p[0], orig_t: "", total: 0, album_count: 0, type: "artist",
-            users: [priEntry, ...users.map((u, i) => { const e = secAMaps[i].get(p[0]); return { user: u.user, count: e?.total||0, color: u.color, image: u.image||"" }; })] };
+            users: [priEntry, ...users.map((u, i) => { const e = secAMaps[i].get(p[0]); return { user: u.user, count: e?.total||0, color: u.color, image: u.image||"", source: u.source||"lfm" }; })] };
         }
         amap[p[0]].total += p[4]||1; amap[p[0]].album_count++; amap[p[0]].users[0].count += p[4]||1;
       }
@@ -1593,7 +1634,7 @@ function enterDiscoverMode(userIdxs, limit = 20, mode = "albums", relMode = 'dis
         const k = s[0]+"|"+s[1]; if (!secSMaps.every(m => m.has(k))) continue;
         const c = s[5]||1;
         smap[k] = { norm_a: s[0], norm_t: s[1], orig_a: s[2]||s[0], orig_album: s[3]||"", orig_t: s[4]||s[1], type: "song", total: c,
-          users: [{ ...pri, count: c }, ...users.map((u, i) => { const ss = secSMaps[i].get(k); return { user: u.user, count: ss?.[5]||1, color: u.color, image: u.image||"" }; })] };
+          users: [{ ...pri, count: c }, ...users.map((u, i) => { const ss = secSMaps[i].get(k); return { user: u.user, count: ss?.[5]||1, color: u.color, image: u.image||"", source: u.source||"lfm" }; })] };
       }
       discoverAllCandidates = Object.values(smap).sort((a, b) => b.total - a.total);
     } else {
@@ -1603,7 +1644,7 @@ function enterDiscoverMode(userIdxs, limit = 20, mode = "albums", relMode = 'dis
         const k = p[0]+"|"+p[1]; if (!secPMaps.every(m => m.has(k))) continue;
         const c = p[4]||1;
         cmap[k] = { norm_a: p[0], norm_t: p[1], orig_a: p[2]||p[0], orig_t: p[3]||p[1], total: c,
-          users: [{ ...pri, count: c }, ...users.map((u, i) => { const sp = secPMaps[i].get(k); return { user: u.user, count: sp?.[4]||1, color: u.color, image: u.image||"" }; })] };
+          users: [{ ...pri, count: c }, ...users.map((u, i) => { const sp = secPMaps[i].get(k); return { user: u.user, count: sp?.[4]||1, color: u.color, image: u.image||"", source: u.source||"lfm" }; })] };
       }
       discoverAllCandidates = Object.values(cmap).sort((a, b) => b.total - a.total);
     }
@@ -2113,7 +2154,7 @@ function openDetailPanel(ref) {
     extraSt.innerHTML = extraUsers
       .map((u, i) => {
         const h = extraHeard[i];
-        const icon = _avatarHtml(u.user, u.image || "", 14, u.color);
+        const icon = _avatarHtml(u.user, u.image || "", 14, u.color, u.source || "lfm");
         return `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${h ? u.color : "var(--ink3)"}">
         ${icon} ${escH(u.user)}: ${h ? "✓" : "—"}</span>`;
       })
@@ -2127,10 +2168,10 @@ function openDetailPanel(ref) {
       const extraLabel =
         ref.type === "discover_artist"
           ? a.users.map((u) => `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
-            ${_avatarHtml(u.user, u.image || "", 14, u.color)}
+            ${_avatarHtml(u.user, u.image || "", 14, u.color, u.source || "lfm")}
             ${escH(u.user)}: ${a.total} plays · ${a.album_count} álbum${a.album_count !== 1 ? "es" : ""}</span>`)
           : a.users.map((u) => `<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:0.62rem;color:${u.color}">
-            ${_avatarHtml(u.user, u.image || "", 14, u.color)}
+            ${_avatarHtml(u.user, u.image || "", 14, u.color, u.source || "lfm")}
             ${escH(u.user)}: ${u.count} plays</span>`);
       extraSt.innerHTML = extraLabel.join("");
       extraSt.style.display = "flex";
@@ -2823,7 +2864,8 @@ async function renderSecondaryUsers() {
     const _rowImg = (isPrimary ? heardCache?.image : null)
       || eu?.image || s.image || _savedImageMap[lc] || _sessionCache.get(lc)?.image || "";
     const _rowColor = eu?.color || (isPrimary ? "var(--accent)" : "var(--ink3)");
-    const avatar = _avatarHtml(s.user, _rowImg, 22, _rowColor);
+    const _rowSrc = (isPrimary ? heardCache?.source : null) || eu?.source || s.source || "lfm";
+    const avatar = _avatarHtml(s.user, _rowImg, 22, _rowColor, _rowSrc);
 
     const btns = isPrimary
       ? `<button class="btn-sm" data-action="sync-primary" data-user="${escH(s.user)}" title="Sincronizar">↻ Sync</button>
@@ -2849,7 +2891,7 @@ async function renderSecondaryUsers() {
   };
 
   const _renderMemRow = (u) => {
-    const avatar = _avatarHtml(u.user, u.image || "", 22, u.color || "var(--ink3)");
+    const avatar = _avatarHtml(u.user, u.image || "", 22, u.color || "var(--ink3)", u.source || "lfm");
     return `<div class="sec-user-row active">
       <div class="sec-user-left">
         ${avatar}
@@ -2923,8 +2965,8 @@ function idbDownloadSession(username) {
 }
 
 // ── User badge (header) ────────────────────────────────────────────────────
-function showUserBadge(username, img, albumCount, lastTs, lastArtist, lastTrack) {
-  _updateTopbarAvatar(img || "", username);
+function showUserBadge(username, img, albumCount, lastTs, lastArtist, lastTrack, source) {
+  _updateTopbarAvatar(img || "", username, source);
   const av = document.getElementById("badge-avatar");
   if (av) { av.src = img || ""; av.style.display = img ? "" : "none"; }
   document.getElementById("badge-name").textContent = username;
@@ -3044,7 +3086,9 @@ async function syncSecondaryIdb(username) {
         username,
         (msg) => {
           if (prog)
-            prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
+            prog.textContent = msg.reconnecting
+              ? `Reconectando… (${msg.page}/${msg.total_pages || '?'})`
+              : `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álb.`;
         },
         euSrc,
         method,
@@ -3186,6 +3230,7 @@ function loadHeardCache(data) {
     heardCache.last_scrobble_ts,
     heardCache.last_scrobble_artist,
     heardCache.last_scrobble_track,
+    heardCache.source,
   );
   const _idbPayload = {
     user: heardCache.user,
@@ -3399,7 +3444,9 @@ async function doLoadUser() {
     const result = await fetchScrobblesClient(
       realUser,
       (msg) => {
-        prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+        prog.textContent = msg.reconnecting
+          ? `Reconectando… (${msg.page}/${msg.total_pages || '?'})`
+          : `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
       },
       src,
       method,
