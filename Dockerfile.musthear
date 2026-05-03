@@ -1,0 +1,33 @@
+FROM python:3.12-slim@sha256:804ddf3251a60bbf9c92e73b7566c40428d54d0e79d3428194edf40da6521286
+
+WORKDIR /app_escuchowsky
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY musthear_ignored.yaml .
+COPY app_musthear.py .
+COPY sops_env.py .
+COPY img ./img
+COPY static ./static
+
+# La DB se monta como volumen en runtime
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 5002
+
+# gunicorn: 2 procesos x 4 threads = 8 requests concurrentes
+# --timeout 1800: SSE streams de scrobbles para usuarios con 2000+ páginas (400k tracks)
+# toman ~600-1000s; 1800 es el límite real, por encima del timeout de nginx (600s)
+CMD ["sh", "-c", \
+     "mkdir -p /app/logs && exec gunicorn \
+      -w 2 \
+      --threads 4 \
+      -b 0.0.0.0:5002 \
+      --timeout 9000 \
+      --max-requests 1000 \
+      --max-requests-jitter 100 \
+      --forwarded-allow-ips 172.20.0.10 \
+      --access-logfile /app/logs/access.log \
+      --error-logfile /app/logs/error.log \
+      app_musthear:app"]

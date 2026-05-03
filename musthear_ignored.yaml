@@ -1,0 +1,9 @@
+# Colecciones a ocultar en la interfaz de musthear
+# Añade aquí los slugs exactos de las colecciones que no quieres ver
+#
+# Ejemplo:
+#   slugs:
+#     - aoty_2020
+#     - rolling_stone_500_greatest_albums
+
+slugs: []

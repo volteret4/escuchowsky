@@ -1,13 +1,13 @@
 """
-html_rym_genre_mermaid.py — Standalone RYM Genre Tree visualizer.
+html_genre_mermaid.py — Standalone RYM Genre Tree visualizer.
 
-Generates docs/must_hear/rym_genre_tree.html (or --output path).
+Generates docs/must_hear/genre_tree.html (or --output path).
 
 Usage:
-    python3 html_rym_genre_mermaid.py --mh-db db/must_hear_rym_new.db
-    python3 html_rym_genre_mermaid.py --mh-db db/must_hear_rym_new.db \\
-        --genres-json db/rym_genres.json \\
-        --output rym_genre_tree.html
+    python3 html_genre_mermaid.py --mh-db db/must_hear_rym_new.db
+    python3 html_genre_mermaid.py --mh-db db/must_hear_rym_new.db \\
+        --genres-json db/genres.json \\
+        --output genre_tree.html
 
 Can also be called from html_must_hear.py via --rym-genre-mermaid.
 
@@ -271,7 +271,7 @@ def render_html(
 <header>
   <div class="mh-title">Géneros RYM</div>
   <nav class="mh-nav">
-    <a class="mh-na on" href="rym_genre_tree.html">Géneros RYM</a>
+    <a class="mh-na on" href="genre_tree.html">Géneros RYM</a>
   </nav>
   <div id="user-form">
     <input id="user-input" type="text" placeholder="usuario last.fm"
@@ -339,17 +339,17 @@ def run(args: argparse.Namespace) -> None:
         genres_json = Path(args.genres_json)
     else:
         candidates = [
-            mh_db.parent.parent / "rym_genres.json",
-            mh_db.parent / "rym_genres.json",
+            mh_db.parent.parent / "genres.json",
+            mh_db.parent / "genres.json",
         ]
         genres_json = next((p for p in candidates if p.exists()), None)
         if genres_json is None:
             raise FileNotFoundError(
-                "rym_genres.json not found; pass --genres-json explicitly"
+                "genres.json not found; pass --genres-json explicitly"
             )
 
     out_path = Path(getattr(args, "output", "") or
-                    str(mh_db.parent.parent / "rym_genre_tree.html"))
+                    str(mh_db.parent.parent / "genre_tree.html"))
 
     print(f"📂 genres JSON : {genres_json}")
     print(f"🗄  must_hear DB: {mh_db}")
@@ -384,7 +384,7 @@ def run(args: argparse.Namespace) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description="Generate RYM Genre Tree interactive page")
     p.add_argument("--mh-db",       required=True, help="Path to must_hear DB")
-    p.add_argument("--genres-json", default="",    help="Path to rym_genres.json")
+    p.add_argument("--genres-json", default="",    help="Path to genres.json")
     p.add_argument("--output",      default="",    help="Output HTML path")
     p.add_argument("--yt-videos",   type=int, default=15,
                    help="Max YouTube videos to embed per genre panel (default: 15)")

@@ -19,7 +19,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 384M
     volumes:
       - ./db:/app/db
@@ -47,10 +47,38 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 256M
     volumes:
       - ./logs/tumtumpa:/app/logs
+    networks:
+      - musica
+
+  musthear:
+    build:
+      context: ./
+      dockerfile: Dockerfile.musthear
+    container_name: musthear
+    restart: unless-stopped
+    environment:
+      - LASTFM_API_KEY=${LASTFM_API_KEY}
+      - DB_PATH=/app/db/must_hear_rym_new.db
+      - PYTHONDONTWRITEBYTECODE=1
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
+    volumes:
+      - ./db:/app/db
+      - ./logs/musthear:/app/logs
     networks:
       - musica
 
@@ -107,7 +135,7 @@ services:
       # - NGINX_ALWAYS_TLS_REDIRECT=off
 
       # ── ModSecurity core ───────────────────────────────────────────────────
-      - MODSEC_RULE_ENGINE=On             # On | Off | DetectionOnly
+      - MODSEC_RULE_ENGINE=On # On | Off | DetectionOnly
       - MODSEC_AUDIT_ENGINE=RelevantOnly # On | Off | RelevantOnly
       - MODSEC_AUDIT_LOG=/var/log/nginx/modsec_audit.log
       - MODSEC_AUDIT_LOG_TYPE=Serial # Serial | Concurrent
@@ -169,6 +197,7 @@ services:
     depends_on:
       - escuchowsky
       - tumtumpa
+      - musthear
     volumes:
       - ./conf.d:/etc/nginx/conf.d
       - /home/docker_webs/contenedores/nginx/logs/nginx:/var/log/nginx
