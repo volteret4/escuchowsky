@@ -16,7 +16,7 @@ COPY static ./static
 
 RUN chmod +x entrypoint_escuchowsky.sh
 
-# La DB y rym_genres.json se montan como volumen en runtime
+# La DB y genres.json se montan como volumen en runtime
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 5001

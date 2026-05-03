@@ -1449,7 +1449,9 @@ input::placeholder {
     scrollbar-width: none;
     display: block;
 }
-.app-shell::-webkit-scrollbar { display: none; }
+.app-shell::-webkit-scrollbar {
+    display: none;
+}
 
 /* ── Sidebar (eliminado — mantenido por si hay referencias residuales) ─ */
 #sidebar {
@@ -1574,7 +1576,7 @@ input::placeholder {
     flex-shrink: 0;
 }
 
-/* ── Genre tree (RYM Charts) ───────────────────────────────────────── */
+/* ── Genre tree ───────────────────────────────────────── */
 .tree-genre {
 }
 .tree-genre-hdr {
@@ -2194,8 +2196,14 @@ input::placeholder {
     min-width: 0;
     overflow: hidden;
 }
-.disc-user-btn:hover { border-color: var(--accent); color: var(--ink); }
-.disc-dd-arrow { font-size: 0.6rem; flex-shrink: 0; }
+.disc-user-btn:hover {
+    border-color: var(--accent);
+    color: var(--ink);
+}
+.disc-dd-arrow {
+    font-size: 0.6rem;
+    flex-shrink: 0;
+}
 .disc-user-summary {
     flex: 1;
     overflow: hidden;
@@ -2213,7 +2221,7 @@ input::placeholder {
     border-radius: 3px;
     min-width: 160px;
     max-width: 260px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
     padding: 0.2rem 0;
 }
 .disc-dd-item {
@@ -2227,9 +2235,18 @@ input::placeholder {
     color: var(--ink2);
     user-select: none;
 }
-.disc-dd-item:hover { background: var(--bg3); color: var(--ink); }
-.disc-dd-item.sel { color: var(--ink); }
-.disc-dd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disc-dd-item:hover {
+    background: var(--bg3);
+    color: var(--ink);
+}
+.disc-dd-item.sel {
+    color: var(--ink);
+}
+.disc-dd-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .disc-chk {
     width: 12px;
     height: 12px;
@@ -2316,7 +2333,9 @@ input::placeholder {
         overflow-x: auto;
         scrollbar-width: none;
     }
-    #disc-rel-tabs::-webkit-scrollbar { display: none; }
+    #disc-rel-tabs::-webkit-scrollbar {
+        display: none;
+    }
     #disc-ctrl-row .disc-controls select {
         flex: 0 1 auto;
         min-width: 0;

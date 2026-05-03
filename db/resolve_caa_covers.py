@@ -20,7 +20,7 @@ from threading import Lock
 import urllib.request
 import urllib.error
 
-DB = "db/must_hear_rym_new.db"
+DB = "db/must_hear.db"
 CAA = "https://coverartarchive.org/release-group"
 RATE_LIMIT = 1.2   # segundos entre requests por thread
 db_lock = Lock()

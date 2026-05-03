@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 musthear — Flask backend
-Muestra colecciones no-RYM (Scaruffi, AOTY, Pitchfork…) agrupadas por fuente.
+Muestra colecciones (Scaruffi, AOTY, Pitchfork…) agrupadas por fuente.
 Compatible con el formato de sesión de tumtumpa (app_discover.py).
 
 Uso:
@@ -39,27 +39,27 @@ CAA         = "https://coverartarchive.org/release-group"
 
 _LFM_NO_IMG = "2a96cbd8b46e442fc41c2b86b821562f"
 
-# ── RYM genre index (para tags de álbumes que aparezcan en charts RYM) ────────
-_RYM_SLUG_PATH: dict = {}
-_RYM_SLUG_NAME: dict = {}
+# ── Genre index (para tags de álbumes) ────────
+_SLUG_PATH: dict = {}
+_SLUG_NAME: dict = {}
 
-def _rym_build_index(nodes: list, path: list) -> None:
+def _build_index(nodes: list, path: list) -> None:
     for n in nodes:
         p = path + [n["slug"]]
-        _RYM_SLUG_PATH[n["slug"]] = p
-        _RYM_SLUG_NAME[n["slug"]] = n["name"]
-        _rym_build_index(n.get("subgenres", []), p)
+        _SLUG_PATH[n["slug"]] = p
+        _SLUG_NAME[n["slug"]] = n["name"]
+        _build_index(n.get("subgenres", []), p)
 
-def _rym_load() -> None:
+def _load() -> None:
     for candidate in [
-        Path(__file__).parent / "db/rym_genres.json",
-        Path(__file__).parent / "docs/must_hear/rym_charts/rym_genres.json",
+        Path(__file__).parent / "db/genres.json",
+        Path(__file__).parent / "docs/must_hear/charts/genres.json",
     ]:
         if candidate.exists():
-            _rym_build_index(json.loads(candidate.read_text(encoding="utf-8")), [])
+            _build_index(json.loads(candidate.read_text(encoding="utf-8")), [])
             break
 
-_rym_load()
+_load()
 
 _ALLOWED_COVER_DOMAINS = (
     "coverartarchive.org", "archive.org",
@@ -176,8 +176,6 @@ def _collection_group(slug: str, name: str) -> str:
         ("bandcamp",         "Bandcamp"),
         ("kerrang",          "Kerrang!"),
         ("pitchfork",        "Pitchfork"),
-        ("rym_",             "Rate Your Music"),
-        ("rate_your_music",  "Rate Your Music"),
         ("sputnik_",         "Sputnikmusic"),
         ("sputnikmusic",     "Sputnikmusic"),
         ("resident_advisor", "Resident Advisor"),
@@ -236,7 +234,7 @@ def _get_all_musthear_raw() -> tuple:
 
 
 def _get_album_chart_genres(conn, album_ids: list) -> dict:
-    """Returns RYM genre ancestors for albums that appear in any RYM chart."""
+    """Returns genre ancestors for albums that appear in any chart."""
     if not album_ids:
         return {}
     placeholders = ",".join("?" * len(album_ids))
@@ -244,19 +242,19 @@ def _get_album_chart_genres(conn, album_ids: list) -> dict:
         SELECT ca.album_id, c.slug
         FROM collection_albums ca
         JOIN musthear c ON c.id = ca.collection_id
-        WHERE c.slug LIKE 'rym_chart_all_time_%'
+        WHERE c.slug LIKE 'genre_%'
         AND ca.album_id IN ({placeholders})
     """, album_ids).fetchall()
     tmp: dict[int, dict] = {}
     for r in rows:
         aid = r["album_id"]
-        json_slug = r["slug"].replace("rym_chart_all_time_", "").replace("_", "-")
-        path = _RYM_SLUG_PATH.get(json_slug)
+        json_slug = r["slug"].replace("genre_", "").replace("_", "-")
+        path = _SLUG_PATH.get(json_slug)
         seen = tmp.setdefault(aid, {})
         if path:
             for depth, s in enumerate(path, 1):
                 if s not in seen:
-                    seen[s] = {"name": _RYM_SLUG_NAME.get(s, s), "depth": depth}
+                    seen[s] = {"name": _SLUG_NAME.get(s, s), "depth": depth}
     return {aid: sorted(genres.values(), key=lambda x: x["depth"])
             for aid, genres in tmp.items()}
 
@@ -299,7 +297,7 @@ def api_musthear():
     ignore = _load_ignore_slugs()
     result = [
         c for c in _get_all_musthear_raw()
-        if not c["slug"].startswith("rym_chart_all_time_")
+        if not c["slug"].startswith("genre_")
         and c["slug"] not in ignore
     ]
     return jsonify(result)
@@ -947,7 +945,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     <h3>Filtros y ordenación</h3>
     <ul>
-      <li>Filtra por <b>género RYM</b> (si el álbum aparece en algún chart) o por <b>década</b>.</li>
+      <li>Filtra por <b>género</b> (si el álbum aparece en algún chart) o por <b>década</b>.</li>
       <li>Ordena por posición, año o artista.</li>
     </ul>
 
@@ -1003,7 +1001,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- Géneros (tags RYM de la colección activa) -->
+      <!-- Géneros (tags de la colección activa) -->
       <div class="sb-panel" id="panel-genres">
         <div class="sb-panel-hdr">
           <span class="sb-panel-title">Géneros</span>

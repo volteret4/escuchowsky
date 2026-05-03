@@ -1,15 +1,15 @@
 """
-html_genre_mermaid.py — Standalone RYM Genre Tree visualizer.
+html_genre_mermaid.py — Standalone Genre Tree visualizer.
 
 Generates docs/must_hear/genre_tree.html (or --output path).
 
 Usage:
-    python3 html_genre_mermaid.py --mh-db db/must_hear_rym_new.db
-    python3 html_genre_mermaid.py --mh-db db/must_hear_rym_new.db \\
+    python3 html_genre_mermaid.py --mh-db db/must_hear.db
+    python3 html_genre_mermaid.py --mh-db db/must_hear.db \\
         --genres-json db/genres.json \\
         --output genre_tree.html
 
-Can also be called from html_must_hear.py via --rym-genre-mermaid.
+Can also be called from html_must_hear.py via --genre-mermaid.
 
 Tree behaviour:
   - Left sidebar: main genres. Selecting one shows root + direct children.

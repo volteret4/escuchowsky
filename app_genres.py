@@ -30,7 +30,7 @@ CAA          = "https://coverartarchive.org/release-group"
 
 _LFM_NO_IMG  = "2a96cbd8b46e442fc41c2b86b821562f"  # Last.fm star placeholder hash
 
-# ── RYM genre hierarchy (genres.json) ─────────────────────────────────────
+# ── Genre hierarchy (genres.json) ─────────────────────────────────────
 _GENRES:    list = []
 _SLUG_PATH: dict = {}   # json_slug → [ancestor_slug, ..., self_slug]
 _SLUG_NAME: dict = {}   # json_slug → display name
@@ -202,10 +202,10 @@ def _collection_group(slug: str, name: str) -> str:
 
 
 def _tree_path(name: str) -> list[str] | None:
-    """'RYM Top — Blues — Chicago Blues' → ['Blues', 'Chicago Blues']. Else None."""
-    if not name.startswith("RYM Top \u2014 "):
+    """'Top — Blues — Chicago Blues' → ['Blues', 'Chicago Blues']. Else None."""
+    if not name.startswith("Top \u2014 "):
         return None
-    return name[len("RYM Top \u2014 "):].split(" \u2014 ")
+    return name[len("Top \u2014 "):].split(" \u2014 ")
 
 
 @lru_cache(maxsize=1)
@@ -311,13 +311,13 @@ def _load_ignore_slugs() -> set:
 @app.route("/api/collections")
 def api_collections():
     all_colls = get_all_collections()
-    rym = [c for c in all_colls if c["slug"].startswith("genre_")]
-    return jsonify(rym)
+    genre_slug = [c for c in all_colls if c["slug"].startswith("genre_")]
+    return jsonify(genre_slug)
 
 
 @app.route("/api/genre_tree")
 def api_genre_tree():
-    """Pruned RYM genre tree: only nodes that have a DB chart or a chart-descendant."""
+    """Pruned genre tree: only nodes that have a DB chart or a chart-descendant."""
     if not _GENRES:
         return jsonify([])
     conn = get_db()
@@ -1082,7 +1082,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- About + Géneros RYM link -->
+      <!-- About + Géneros link -->
       <a class="sb-about-btn" href="/genres" target="_blank" style="text-decoration:none;display:block;text-align:center">Árbol géneros ↗</a>
       <button class="sb-about-btn">about</button>
 

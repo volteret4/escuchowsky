@@ -1,6 +1,6 @@
 """
 Repuebla collection_albums para colecciones que quedaron vacías tras la deduplicación.
-Lee los rym_chart_cache.json y busca cada álbum en la BD por normalización artist+title.
+Lee los genres.json y busca cada álbum en la BD por normalización artist+title.
 """
 import sqlite3
 import json
@@ -8,7 +8,7 @@ import re
 import sys
 from pathlib import Path
 
-DB   = Path(__file__).parent / "must_hear_rym_new.db"
+DB   = Path(__file__).parent / "must_hear.db"
 CHARTS = Path.home() / "gits/pollo/rym_lastfm/docs/must_hear/rym_charts"
 
 def norm(s):
