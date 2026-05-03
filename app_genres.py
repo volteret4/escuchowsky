@@ -202,10 +202,10 @@ def _collection_group(slug: str, name: str) -> str:
 
 
 def _tree_path(name: str) -> list[str] | None:
-    """'Top — Blues — Chicago Blues' → ['Blues', 'Chicago Blues']. Else None."""
-    if not name.startswith("Top \u2014 "):
+    """'TOP Blues — Chicago Blues' → ['Blues', 'Chicago Blues']. Else None."""
+    if not name.startswith("TOP \u2014 "):
         return None
-    return name[len("Top \u2014 "):].split(" \u2014 ")
+    return name[len("TOP \u2014 "):].split(" \u2014 ")
 
 
 @lru_cache(maxsize=1)

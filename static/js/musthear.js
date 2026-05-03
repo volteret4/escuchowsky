@@ -1,3 +1,6 @@
+// ── API base (injected by nginx when served under a subpath) ──────────────
+const _B = document.documentElement.dataset.apiBase || '';
+
 // ── State ──────────────────────────────────────────────────────────────────
 try { localStorage.removeItem('coverProxyMbids'); } catch(e) {}
 
@@ -296,7 +299,7 @@ async function fetchAlbumInfo(artist, album, mbid) {
     }
     const p = new URLSearchParams({ artist, album });
     if (mbid) p.set('mbid', mbid);
-    const data = await fetch(`/api/album_info?${p}`).then(r => r.json());
+    const data = await fetch(`${_B}/api/album_info?${p}`).then(r => r.json());
     if (data.error) { loading.style.display = 'none'; return; }
     albumInfoCache.set(cacheKey, data);
     _applyAlbumInfoToPanel(data, artist);
@@ -356,7 +359,7 @@ async function idbAddAsExtra(username) {
   if (!data) return;
   if (extraUsers.some(u => u.user.toLowerCase() === username.toLowerCase())) return;
   const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
-  const userInfo = await fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null);
+  const userInfo = await fetch(`${_B}/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null);
   const image = userInfo?.ok ? (userInfo.image || '') : '';
   const pairs = (data.pairs || data.heard || []).map(p => [p[0],p[1],p[2]||'',p[3]||'',p[4]||1]);
   extraUsers.push({ user: data.user, pairs, color, count: pairs.length, fetched_at: data.fetched_at || 0, image });
@@ -497,7 +500,7 @@ async function addExtraUser() {
   prog.textContent = 'Conectando con Last.fm...';
   try {
     const [userInfo, lfmResult] = await Promise.all([
-      fetch(`/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
+      fetch(`${_B}/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
       fetchScrobblesSSE(user, msg => {
         prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
       }),
@@ -531,7 +534,7 @@ async function syncExtraUser(idx) {
   const prog = document.getElementById('um-extra-progress');
   prog.textContent = `Sincronizando ${u.user}...`;
   try {
-    const url = `/api/scrobbles/since?user=${encodeURIComponent(u.user)}&since=${u.fetched_at || 0}`;
+    const url = `${_B}/api/scrobbles/since?user=${encodeURIComponent(u.user)}&since=${u.fetched_at || 0}`;
     const r = await fetch(url);
     if (!r.ok) throw new Error(`Error ${r.status}`);
     const data = await r.json();
@@ -574,7 +577,7 @@ async function loadFriends() {
   btn.disabled = true;
   listEl.innerHTML = '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Cargando amigos…</div>';
   try {
-    const data = await fetch(`/api/friends?user=${encodeURIComponent(user)}`).then(r => r.json());
+    const data = await fetch(`${_B}/api/friends?user=${encodeURIComponent(user)}`).then(r => r.json());
     if (!data.ok || !data.friends.length) {
       listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">${escH(data.error || 'Sin amigos en Last.fm.')}</div>`;
       return;
@@ -616,7 +619,7 @@ async function addExtraUserByName(username, btn) {
   prog.textContent = `Cargando ${username}…`;
   try {
     const [userInfo, lfmResult] = await Promise.all([
-      fetch(`/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null),
+      fetch(`${_B}/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null),
       fetchScrobblesSSE(username, msg => {
         prog.textContent = `${username}: página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
       }),
@@ -678,7 +681,7 @@ function removeExtraUser(idx) {
 
 // ── SSE helper ─────────────────────────────────────────────────────────────
 async function fetchScrobblesSSE(user, onProgress) {
-  const response = await fetch(`/api/scrobbles?user=${encodeURIComponent(user)}`);
+  const response = await fetch(`${_B}/api/scrobbles?user=${encodeURIComponent(user)}`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const reader  = response.body.getReader();
   const decoder = new TextDecoder();
@@ -718,7 +721,7 @@ async function fetchScrobblesSSE(user, onProgress) {
     } catch(e) {}
   }
   try {
-    const cols = await fetch('/api/collections').then(r => r.json());
+    const cols = await fetch(_B + '/api/musthear').then(r => r.json());
     renderCollsSidebar(cols);
   } catch(e) {
     document.getElementById('colls-body').innerHTML = '<div class="sb-empty">Error cargando</div>';
@@ -868,7 +871,7 @@ document.getElementById('btn-sync-session').addEventListener('click', async () =
   btn.disabled = true; btn.textContent = '↻ ...';
   prog.textContent = 'Sincronizando con Last.fm...';
   try {
-    const url = `/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${heardCache.count || 0}`;
+    const url = `${_B}/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${heardCache.count || 0}`;
     const data = await fetch(url).then(r => r.json());
     if (data.error) { prog.textContent = 'Error: ' + data.error; return; }
     if (data.new_count === 0) { prog.textContent = '✓ Al día'; btn.textContent = '↻ Sync'; return; }
@@ -968,7 +971,7 @@ function enrichMissingCovers() {
   }
   if (!toEnrich.length) return;
   const albumsParam = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(toEnrich.map(a => [a.artist, a.title]))))));
-  _enrichEs = new EventSource(`/api/enrich_albums?albums=${albumsParam}`);
+  _enrichEs = new EventSource(`${_B}/api/enrich_albums?albums=${albumsParam}`);
   _enrichEs.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.done) { _enrichEs.close(); _enrichEs = null; enrichMissingCovers(); return; }
@@ -1008,7 +1011,7 @@ async function loadAndRender(slug) {
   grid.innerHTML = ''; hideError(); showLoading('Cargando colección...');
   try {
     if (!collCache[slug]) {
-      const r = await fetch(`/api/collection?slug=${encodeURIComponent(slug)}`, { signal });
+      const r = await fetch(`${_B}/api/collection?slug=${encodeURIComponent(slug)}`, { signal });
       const cData = await r.json();
       if (cData.error) throw new Error(cData.error);
       collCache[slug] = cData.albums;

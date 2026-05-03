@@ -218,7 +218,7 @@ def _get_all_musthear_raw() -> tuple:
     conn = get_db()
     rows = conn.execute("""
         SELECT c.id, c.slug, c.name, c.total_albums, c.source_type
-        FROM musthear c
+        FROM collections c
         JOIN collection_albums ca ON ca.collection_id = c.id
         GROUP BY c.id
         HAVING COUNT(ca.album_id) > 0

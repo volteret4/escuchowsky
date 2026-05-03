@@ -1,3 +1,6 @@
+// ── API base (injected by nginx when served under a subpath) ──────────────
+const _B = document.documentElement.dataset.apiBase || '';
+
 // ── IndexedDB constants (must be before any async init that uses them) ──────
 const IDB_NAME = "mustlisten";
 const IDB_STORE = "sessions";
@@ -527,7 +530,7 @@ async function loadFriends() {
     '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Cargando amigos…</div>';
   try {
     const data = await fetch(
-      `/api/friends?user=${encodeURIComponent(user)}`,
+      `${_B}/api/friends?user=${encodeURIComponent(user)}`,
     ).then((r) => r.json());
     if (!data.ok || !data.friends.length) {
       listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">${escH(data.error || "Este usuario no tiene amigos en Last.fm.")}</div>`;
@@ -754,17 +757,17 @@ function sbSource() {
   return umSource();
 } // sidebar eliminado, usar modal
 function scrobblesEndpoint(user, source) {
-  const base = source === "lb" ? "/api/scrobbles/lb" : "/api/scrobbles";
+  const base = source === "lb" ? `${_B}/api/scrobbles/lb` : `${_B}/api/scrobbles`;
   return `${base}?user=${encodeURIComponent(user)}`;
 }
 function sinceEndpoint(user, since, source) {
   const base =
-    source === "lb" ? "/api/scrobbles/lb/since" : "/api/scrobbles/since";
+    source === "lb" ? `${_B}/api/scrobbles/lb/since` : `${_B}/api/scrobbles/since`;
   return `${base}?user=${encodeURIComponent(user)}&since=${since}`;
 }
 function checkUserEndpoint(user, source) {
   const suffix = source === "lb" ? "&source=lb" : "";
-  return `/api/check_user?user=${encodeURIComponent(user)}${suffix}`;
+  return `${_B}/api/check_user?user=${encodeURIComponent(user)}${suffix}`;
 }
 
 // Sync placeholder text and .checked label class when source radio changes
@@ -795,7 +798,7 @@ let LFM_CLIENT_KEY = "";
 
 async function initClientKey() {
   try {
-    const cfg = await fetch("/api/config").then((r) => r.json());
+    const cfg = await fetch(_B + "/api/config").then((r) => r.json());
     LFM_CLIENT_KEY = cfg.lfm_key || "";
   } catch (e) {}
 }
@@ -2070,7 +2073,7 @@ async function fetchAndEmbedYT(artist, album) {
   }
   try {
     const r = await fetch(
-      `/api/yt_search?${new URLSearchParams({ artist, album })}`,
+      `${_B}/api/yt_search?${new URLSearchParams({ artist, album })}`,
     );
     if (!r.ok) return;
     const data = await r.json();
