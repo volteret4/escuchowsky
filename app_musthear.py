@@ -241,7 +241,7 @@ def _get_album_chart_genres(conn, album_ids: list) -> dict:
     rows = conn.execute(f"""
         SELECT ca.album_id, c.slug
         FROM collection_albums ca
-        JOIN musthear c ON c.id = ca.collection_id
+        JOIN collections c ON c.id = ca.collection_id
         WHERE c.slug LIKE 'genre_%'
         AND ca.album_id IN ({placeholders})
     """, album_ids).fetchall()
@@ -268,7 +268,7 @@ def get_collection_albums(slug: str) -> list[dict]:
             ca.rank, al.cover_url, al.yt_id,
             al.aoty_critic_score, al.scaruffi_rating
         FROM collection_albums ca
-        JOIN musthear c  ON c.id  = ca.collection_id
+        JOIN collections c  ON c.id  = ca.collection_id
         JOIN albums al       ON al.id = ca.album_id
         JOIN artists ar      ON ar.id = al.artist_id
         WHERE c.slug = ?
