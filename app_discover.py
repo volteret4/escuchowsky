@@ -928,7 +928,7 @@ def manifest():
 @app.route("/sw.js")
 def service_worker():
     sw = (
-        "const CACHE='tumtumpa-v2';\n"
+        "const CACHE='tumtumpa-v3';\n"
         "self.addEventListener('install',e=>{self.skipWaiting();});\n"
         "self.addEventListener('activate',e=>{"
         "e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));"
@@ -936,8 +936,8 @@ def service_worker():
         "self.addEventListener('fetch',e=>{"
         "if(e.request.method!=='GET')return;"
         "const u=new URL(e.request.url);"
-        "if(u.origin!==self.location.origin)return;"  # never intercept cross-origin (fonts, images, scripts)
-        "if(u.pathname.startsWith('/api/'))return;"   # never intercept API/SSE calls
+        "if(u.origin!==self.location.origin)return;"
+        "if(u.pathname.includes('/api/'))return;"   # skip all /api/ paths regardless of prefix
         "e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));"
         "});\n"
     )
