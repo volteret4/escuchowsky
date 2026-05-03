@@ -44,6 +44,91 @@ let discoverRelMode         = 'discover'; // 'discover' | 'share' | 'enjoy'
 // album info cache (artist|||title → data)
 const albumInfoCache = new Map();
 
+// ── i18n ──────────────────────────────────────────────────────────────────
+const TRANSLATIONS = {
+  es: {
+    'um.search.title':        'Buscar usuario',
+    'um.search.btn':          'Buscar',
+    'um.primary.placeholder': 'Usuario Last.fm',
+    'um.users.title':         'Usuarios',
+    'um.friends.title':       'Amigos del usuario principal',
+    'um.friends.load':        'Cargar',
+    'lang.label':             'Idioma',
+    'btn.add':                'Añadir',
+    'btn.added':              'añadido',
+    'btn.load':               'Cargar',
+    'btn.discover':           'Descubrir',
+    'idb.abbr.albums':        'álb.',
+    'msg.connecting':         'Conectando con Last.fm...',
+    'msg.page':               'Página {p} / {t} — {c} álbumes',
+    'msg.user.loaded':        '✓ {u} — {n} álbumes',
+    'msg.user.loaded.songs':  '✓ {u} — {n} álbumes, {s} canciones',
+    'msg.albums.loaded':      '✓ {n} álbumes cargados',
+    'msg.imported':           '✓ {u} importado — {n} álbumes',
+    'msg.imported.secondary': '✓ {u} importado como secundario — {n} álbumes',
+    'msg.loading.friends':    'Cargando amigos…',
+    'msg.no.friends':         'Este usuario no tiene amigos en Last.fm.',
+    'msg.load.primary':       'Carga primero el usuario principal.',
+    'msg.loading.user':       'Cargando {u}…',
+    'msg.user.added':         '✓ {u} añadido — {n} álbumes',
+    'msg.user.added.songs':   '✓ {u} añadido — {n} álbumes, {s} canciones',
+    'msg.no.candidates':      'Sin candidatos para este usuario',
+    'msg.searching':          'Buscando {n} álbumes · {u}…',
+    'msg.found.albums':       '✓ {n} álbumes',
+    'msg.found.albums.all':   '✓ {n} álbumes encontrados',
+    'msg.user.loading':       'Página {p} / {t} — {c} álbumes',
+    'msg.secondary.added':    '✓ {u}: {n} álbumes',
+  },
+  en: {
+    'um.search.title':        'Search user',
+    'um.search.btn':          'Search',
+    'um.primary.placeholder': 'Last.fm username',
+    'um.users.title':         'Users',
+    'um.friends.title':       "Main user's friends",
+    'um.friends.load':        'Load',
+    'lang.label':             'Language',
+    'btn.add':                'Add',
+    'btn.added':              'added',
+    'btn.load':               'Load',
+    'btn.discover':           'Discover',
+    'idb.abbr.albums':        'alb.',
+    'msg.connecting':         'Connecting to Last.fm...',
+    'msg.page':               'Page {p} / {t} — {c} albums',
+    'msg.user.loaded':        '✓ {u} — {n} albums',
+    'msg.user.loaded.songs':  '✓ {u} — {n} albums, {s} songs',
+    'msg.albums.loaded':      '✓ {n} albums loaded',
+    'msg.imported':           '✓ {u} imported — {n} albums',
+    'msg.imported.secondary': '✓ {u} imported as secondary — {n} albums',
+    'msg.loading.friends':    'Loading friends…',
+    'msg.no.friends':         'This user has no friends on Last.fm.',
+    'msg.load.primary':       'Load the main user first.',
+    'msg.loading.user':       'Loading {u}…',
+    'msg.user.added':         '✓ {u} added — {n} albums',
+    'msg.user.added.songs':   '✓ {u} added — {n} albums, {s} songs',
+    'msg.no.candidates':      'No candidates for this user',
+    'msg.searching':          'Searching {n} albums · {u}…',
+    'msg.found.albums':       '✓ {n} albums',
+    'msg.found.albums.all':   '✓ {n} albums found',
+    'msg.user.loading':       'Page {p} / {t} — {c} albums',
+    'msg.secondary.added':    '✓ {u}: {n} albums',
+  }
+};
+
+function getLang()    { return localStorage.getItem('ui-lang') || 'es'; }
+function setLang(l)   { localStorage.setItem('ui-lang', l); applyTranslations(); }
+function t(key, vars) {
+  let s = (TRANSLATIONS[getLang()] ?? TRANSLATIONS.es)[key] ?? TRANSLATIONS.es[key] ?? key;
+  if (vars) Object.entries(vars).forEach(([k, v]) => { s = s.replaceAll(`{${k}}`, v); });
+  return s;
+}
+function applyTranslations() {
+  const lang = getLang();
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll('input[name="ui-lang"]').forEach(r => { r.checked = r.value === lang; });
+}
+
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const inpUser = document.getElementById("inp-user");
 const btnGo = document.getElementById("btn-go");
@@ -372,14 +457,14 @@ async function addExtraUser() {
   if (method === null) return;
   btn.disabled = true;
   inp.disabled = true;
-  prog.textContent = "Conectando…";
+  prog.textContent = t('msg.connecting');
   try {
     const result = await fetchScrobblesClient(
       userInfo.username || user,
       (msg) => {
         prog.textContent = msg.reconnecting
           ? `Reconectando… (${msg.page}/${msg.total_pages || '?'})`
-          : `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+          : t('msg.page', {p: msg.page, t: msg.total_pages, c: msg.count.toLocaleString()});
       },
       src,
       method,
@@ -426,7 +511,9 @@ async function addExtraUser() {
     await renderIdbExtraList();
     buildExtraUsersList();
     inp.value = "";
-    prog.textContent = `✓ ${realUser} — ${result.heard.length.toLocaleString()} álbumes${result.tracks_loaded ? ", " + (result.heard_songs?.length || 0).toLocaleString() + " canciones" : ""}`;
+    prog.textContent = result.tracks_loaded
+      ? t('msg.user.loaded.songs', {u: realUser, n: result.heard.length.toLocaleString(), s: (result.heard_songs?.length||0).toLocaleString()})
+      : t('msg.user.loaded', {u: realUser, n: result.heard.length.toLocaleString()});
   } catch (e) {
     prog.textContent = "Error: " + e.message;
   } finally {
@@ -522,18 +609,18 @@ async function loadFriends() {
     heardCache?.user || document.getElementById("inp-user").value.trim();
   if (!user) {
     listEl.innerHTML =
-      '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Carga primero el usuario principal.</div>';
+      `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">${t('msg.load.primary')}</div>`;
     return;
   }
   btn.disabled = true;
   listEl.innerHTML =
-    '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Cargando amigos…</div>';
+    `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">${t('msg.loading.friends')}</div>`;
   try {
     const data = await fetch(
       `${_B}/api/friends?user=${encodeURIComponent(user)}`,
     ).then((r) => r.json());
     if (!data.ok || !data.friends.length) {
-      listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">${escH(data.error || "Este usuario no tiene amigos en Last.fm.")}</div>`;
+      listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">${escH(data.error || t('msg.no.friends'))}</div>`;
       return;
     }
     renderFriendsList(data.friends);
@@ -555,7 +642,7 @@ function renderFriendsList(friends) {
       ${avatar}
       <span class="fr-name">${escH(f.username)}</span>
       <button class="btn-sm fr-add" ${added ? "disabled" : ""} data-username="${escH(f.username)}">
-        ${added ? "✓" : "Añadir"}
+        ${added ? "✓" : t('btn.add')}
       </button>
     </div>`;
     })
@@ -677,7 +764,7 @@ document
       if (
         extraUsers.some((u) => u.user.toLowerCase() === data.user.toLowerCase())
       ) {
-        prog.textContent = `${data.user} ya está en la lista.`;
+        prog.textContent = `${data.user} ya está en la lista.`; // intentionally not translated (rare edge case)
         return;
       }
       const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
@@ -702,7 +789,7 @@ document
         songs: importedSongs,
       });
       buildExtraUsersList();
-      prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
+      prog.textContent = t('msg.imported', {u: data.user, n: data.heard.length.toLocaleString()});
     } catch (err) {
       prog.textContent = "Error: " + err.message;
     }
@@ -1844,7 +1931,7 @@ function _loadDiscoverPage() {
   } else {
     document.getElementById("discover-footer").style.display = "";
     document.getElementById("discover-progress").textContent =
-      `Buscando ${discoverCandidates.length} álbumes · ${uName}…`;
+      t('msg.searching', {n: discoverCandidates.length, u: uName});
     loadMoreDiscover();
   }
 }
@@ -1919,7 +2006,7 @@ async function loadMoreDiscover() {
   if (!uncachedJs.length) {
     discoverOffset += batch.length;
     discoverSearching = false;
-    prog.textContent = `✓ ${discoverAlbums.length} álbumes`;
+    prog.textContent = t('msg.found.albums', {n: discoverAlbums.length});
     return;
   }
 
@@ -1986,7 +2073,7 @@ async function loadMoreDiscover() {
 
   if (discoverGeneration === myGen) {
     discoverOffset += batch.length;
-    prog.textContent = `✓ ${discoverAlbums.length} álbumes encontrados`;
+    prog.textContent = t('msg.found.albums.all', {n: discoverAlbums.length});
   }
   discoverSearching = false;
 }
@@ -2359,6 +2446,7 @@ async function fetchAlbumInfo(artist, album, mbid) {
         artist,
         album,
         autocorrect: 1,
+        lang: getLang(),
       });
       if (alData.album) {
         const al = alData.album;
@@ -2377,7 +2465,7 @@ async function fetchAlbumInfo(artist, album, mbid) {
 
     // LFM artist.getInfo
     try {
-      const arData = await lfmGet("artist.getInfo", { artist, autocorrect: 1 });
+      const arData = await lfmGet("artist.getInfo", { artist, autocorrect: 1, lang: getLang() });
       if (arData.artist) {
         const ar = arData.artist;
         result.artist = {
@@ -3334,7 +3422,7 @@ inpSession.addEventListener("change", async (e) => {
         songs: data.songs || [],
       });
       buildExtraUsersList();
-      prog.textContent = `✓ ${data.user} importado como secundario — ${data.heard.length.toLocaleString()} álbumes`;
+      prog.textContent = t('msg.imported.secondary', {u: data.user, n: data.heard.length.toLocaleString()});
       // Fetch avatar in background
       checkUserClient(data.user, data.source || "lfm")
         .then((info) => {
@@ -3356,7 +3444,7 @@ inpSession.addEventListener("change", async (e) => {
         .catch(() => {});
     } else {
       loadHeardCache(data);
-      prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
+      prog.textContent = t('msg.imported', {u: data.user, n: data.heard.length.toLocaleString()});
       closeUserModal();
       // Fetch avatar in background if JSON didn't include it
       if (!heardCache?.image) {
@@ -3458,7 +3546,7 @@ async function doLoadUser() {
       (msg) => {
         prog.textContent = msg.reconnecting
           ? `Reconectando… (${msg.page}/${msg.total_pages || '?'})`
-          : `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+          : t('msg.page', {p: msg.page, t: msg.total_pages, c: msg.count.toLocaleString()});
       },
       src,
       method,
@@ -3512,7 +3600,9 @@ async function doLoadUser() {
         heard_artists: result.heard_artists || [],
       });
       buildExtraUsersList();
-      prog.textContent = `✓ ${realUser} añadido — ${result.heard.length.toLocaleString()} álbumes${result.tracks_loaded ? ", " + (result.heard_songs?.length || 0).toLocaleString() + " canciones" : ""}`;
+      prog.textContent = result.tracks_loaded
+        ? t('msg.user.added.songs', {u: realUser, n: result.heard.length.toLocaleString(), s: (result.heard_songs?.length||0).toLocaleString()})
+        : t('msg.user.added', {u: realUser, n: result.heard.length.toLocaleString()});
       inpUser.value = "";
     } else {
       loadHeardCache({
@@ -3530,7 +3620,7 @@ async function doLoadUser() {
         source: src,
         tracks_loaded: result.tracks_loaded || false,
       });
-      prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados${result.tracks_loaded ? " + canciones" : ""}`;
+      prog.textContent = t('msg.albums.loaded', {n: result.heard.length.toLocaleString()});
       closeUserModal();
     }
   } catch (e) {
@@ -3702,3 +3792,10 @@ document.getElementById("disc-rel-tabs").addEventListener("click", e => {
   document.querySelectorAll(".disc-tab").forEach(b => b.classList.toggle("active", b.dataset.rel === rel));
   if (discoverMode) triggerDiscover();
 });
+
+// Language toggle
+document.getElementById('user-modal').addEventListener('change', e => {
+  if (e.target.name === 'ui-lang') setLang(e.target.value);
+});
+
+applyTranslations();

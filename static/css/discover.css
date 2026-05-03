@@ -1283,6 +1283,14 @@ input::placeholder {
 .um-section.collapsed .um-section-toggle {
     transform: rotate(-90deg);
 }
+.um-lang-row {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 0.6rem 0.6rem 0.3rem;
+    border-top: 1px solid var(--border);
+    margin-top: 0.3rem;
+}
 
 /* ── Modal close button ────────────────────────────────────────────── */
 .modal-close {

@@ -699,7 +699,8 @@ def api_cover():
 @app.route("/api/enrich_albums")
 def api_enrich_albums():
     """SSE: busca portadas para lista de [[artist, album], ...]."""
-    raw = request.args.get("albums", "")
+    raw  = request.args.get("albums", "")
+    lang = request.args.get("lang",   "es").strip()[:2]
     try:
         if not raw:
             albums = []
@@ -727,7 +728,7 @@ def api_enrich_albums():
             date      = ""
             used_mb   = False
 
-            lfm    = lfm_get("album.getInfo", {"artist": artist, "album": album, "autocorrect": 1})
+            lfm    = lfm_get("album.getInfo", {"artist": artist, "album": album, "autocorrect": 1, "lang": lang})
             lfm_al = lfm.get("album", {})
             lfm_img  = _lfm_image(lfm_al.get("image", []))
             lfm_mbid = (lfm_al.get("mbid") or "").strip()
@@ -770,12 +771,13 @@ def api_album_info():
     artist = request.args.get("artist", "").replace('\n', ' ').replace('\r', '').strip()
     album  = request.args.get("album",  "").replace('\n', ' ').replace('\r', '').strip()
     mbid   = request.args.get("mbid",   "").strip()
+    lang   = request.args.get("lang",   "es").strip()[:2]
     if not artist and not album:
         return jsonify({"error": "artist/album requeridos"}), 400
 
     result = {}
 
-    al_data = lfm_get("album.getInfo", {"artist": artist, "album": album, "autocorrect": 1})
+    al_data = lfm_get("album.getInfo", {"artist": artist, "album": album, "autocorrect": 1, "lang": lang})
     if "album" in al_data:
         al = al_data["album"] if isinstance(al_data.get("album"), dict) else {}
         _tags_raw = al.get("tags", {})
@@ -794,7 +796,7 @@ def api_album_info():
         if not mbid and al.get("mbid"):
             mbid = al["mbid"]
 
-    ar_data = lfm_get("artist.getInfo", {"artist": artist, "autocorrect": 1})
+    ar_data = lfm_get("artist.getInfo", {"artist": artist, "autocorrect": 1, "lang": lang})
     if "artist" in ar_data:
         ar = ar_data["artist"] if isinstance(ar_data.get("artist"), dict) else {}
         _bio_raw   = ar.get("bio", {})
@@ -868,7 +870,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <span id="badge-name" style="font-family:var(--mono);font-size:0.75rem;color:var(--accent);"></span>
     <span id="badge-plays" style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3);"></span>
   </div>
-  <button id="btn-usuario">USUARIO</button>
+  <button id="btn-usuario" data-i18n="btn.user">USUARIO</button>
 </header>
 
 <input type="file" id="inp-session"       accept=".json" style="display:none">
@@ -881,7 +883,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     <!-- Usuario principal -->
     <div class="um-section">
-      <div class="um-section-title">Usuario principal</div>
+      <div class="um-section-title" data-i18n="um.primary.title">Usuario principal</div>
       <div id="um-current-user">
         <img id="um-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover;background:var(--bg3);flex-shrink:0">
         <div style="flex:1;min-width:0">
@@ -891,40 +893,51 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn-sm" id="btn-sync-session">↻ Sync</button>
       </div>
       <div class="um-row">
-        <input id="inp-user" type="text" placeholder="Usuario Last.fm" autocomplete="off" spellcheck="false">
+        <input id="inp-user" type="text" placeholder="Usuario Last.fm" data-i18n-ph="um.primary.placeholder" autocomplete="off" spellcheck="false">
         <button class="btn" id="btn-go" style="padding:0.4rem 1rem;font-size:0.72rem;">Last.fm</button>
       </div>
       <div class="um-progress" id="um-progress"></div>
       <div class="um-actions">
-        <button class="btn-sm" id="btn-import">↑ Importar JSON</button>
-        <button class="btn-sm" id="btn-save-session" style="display:none">↓ Guardar JSON</button>
+        <button class="btn-sm" id="btn-import" data-i18n="um.import">↑ Importar JSON</button>
+        <button class="btn-sm" id="btn-save-session" style="display:none" data-i18n="um.save">↓ Guardar JSON</button>
       </div>
-      <div class="um-sep">Sesiones guardadas en este navegador</div>
+      <div class="um-sep" data-i18n="um.sep.saved">Sesiones guardadas en este navegador</div>
       <div id="idb-list"><span class="idb-empty">Sin sesiones guardadas</span></div>
     </div>
 
     <!-- Usuarios adicionales (colapsable) -->
     <div class="um-section collapsed" id="um-sec-extra">
       <div class="um-section-title" style="display:flex;align-items:center;cursor:pointer">
-        Usuarios secundarios
+        <span data-i18n="um.secondary.title">Usuarios secundarios</span>
         <button class="um-section-toggle" tabindex="-1">▾</button>
       </div>
       <div class="um-section-body">
         <div id="extra-users-list"></div>
         <div class="um-row" style="margin-top:0.5rem">
-          <input id="inp-extra-user" type="text" placeholder="usuario last.fm" autocomplete="off" spellcheck="false">
+          <input id="inp-extra-user" type="text" placeholder="usuario last.fm" data-i18n-ph="um.secondary.placeholder" autocomplete="off" spellcheck="false">
           <button class="btn-sm" id="btn-extra-lfm">Last.fm</button>
           <button class="btn-sm" id="btn-extra-json">↑ JSON</button>
         </div>
         <div class="um-progress" id="um-extra-progress"></div>
         <div class="um-sep" style="display:flex;align-items:center;justify-content:space-between">
-          Amigos del usuario principal
-          <button class="btn-sm" id="btn-load-friends" style="font-size:0.65rem">Cargar</button>
+          <span data-i18n="um.friends.title">Amigos del usuario principal</span>
+          <button class="btn-sm" id="btn-load-friends" style="font-size:0.65rem" data-i18n="um.friends.load">Cargar</button>
         </div>
         <div id="friends-list"></div>
-        <div id="idb-extra-sep" class="um-sep" style="display:none">Desde sesiones guardadas en este navegador</div>
+        <div id="idb-extra-sep" class="um-sep" style="display:none" data-i18n="idb.extra.sep">Desde sesiones guardadas en este navegador</div>
         <div id="idb-extra-list"></div>
       </div>
+    </div>
+
+    <!-- Language selector -->
+    <div class="um-lang-row">
+      <span data-i18n="lang.label" style="font-size:0.7rem;color:var(--ink3);font-family:var(--mono)">Idioma</span>
+      <label style="font-size:0.72rem;cursor:pointer;display:flex;align-items:center;gap:0.25rem">
+        <input type="radio" name="ui-lang" value="es"> Español
+      </label>
+      <label style="font-size:0.72rem;cursor:pointer;display:flex;align-items:center;gap:0.25rem">
+        <input type="radio" name="ui-lang" value="en"> English
+      </label>
     </div>
   </div>
 </div>
@@ -993,7 +1006,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <!-- Colecciones (agrupadas por fuente) -->
       <div class="sb-panel open" id="panel-colls">
         <div class="sb-panel-hdr">
-          <span class="sb-panel-title">Colecciones</span>
+          <span class="sb-panel-title" data-i18n="sb.collections">Colecciones</span>
           <span class="sb-panel-arrow">▶</span>
         </div>
         <div class="sb-panel-body" id="colls-body">
@@ -1004,7 +1017,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <!-- Géneros (tags de la colección activa) -->
       <div class="sb-panel" id="panel-genres">
         <div class="sb-panel-hdr">
-          <span class="sb-panel-title">Géneros</span>
+          <span class="sb-panel-title" data-i18n="sb.genres">Géneros</span>
           <span class="sb-panel-arrow">▶</span>
         </div>
         <div class="sb-panel-body">
@@ -1017,7 +1030,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <!-- Fechas -->
       <div class="sb-panel open" id="panel-dates">
         <div class="sb-panel-hdr">
-          <span class="sb-panel-title">Fechas</span>
+          <span class="sb-panel-title" data-i18n="sb.dates">Fechas</span>
           <span class="sb-panel-arrow">▶</span>
         </div>
         <div class="sb-panel-body">
@@ -1027,7 +1040,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
       </div>
 
-      <button class="sb-about-btn">about</button>
+      <button class="sb-about-btn" data-i18n="sb.about">about</button>
 
     </div><!-- .sb-scroll -->
   </aside>
@@ -1052,17 +1065,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-sep"></div>
         <div class="stat">
           <div class="stat-val accent" id="s-heard">—</div>
-          <div class="stat-lbl">Escuchados</div>
+          <div class="stat-lbl" data-i18n="stats.heard">Escuchados</div>
         </div>
         <div class="stat-sep"></div>
         <div class="stat">
           <div class="stat-val" id="s-missing">—</div>
-          <div class="stat-lbl">Pendientes</div>
+          <div class="stat-lbl" data-i18n="stats.pending">Pendientes</div>
         </div>
         <div class="stat-sep"></div>
         <div class="stat">
           <div class="stat-val" id="s-pct">—</div>
-          <div class="stat-lbl">Completado</div>
+          <div class="stat-lbl" data-i18n="stats.complete">Completado</div>
         </div>
         <div class="stat-sep"></div>
         <div class="prog-wrap">
@@ -1073,23 +1086,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <!-- Filters -->
       <div id="filters">
-        <button class="filter-btn active" data-filter="all">Todos</button>
-        <button class="filter-btn" data-filter="missing">Pendientes</button>
-        <button class="filter-btn" data-filter="heard">Escuchados</button>
+        <button class="filter-btn active" data-filter="all" data-i18n="filter.all">Todos</button>
+        <button class="filter-btn" data-filter="missing" data-i18n="filter.pending">Pendientes</button>
+        <button class="filter-btn" data-filter="heard" data-i18n="filter.heard">Escuchados</button>
         <div id="filter-extra-users"></div>
         <div class="filter-sep"></div>
         <label for="sort-select" style="margin:0">
           <select id="sort-select">
-            <option value="rank">Orden lista</option>
-            <option value="year_asc">Año ↑</option>
-            <option value="year_desc">Año ↓</option>
-            <option value="artist">Artista A–Z</option>
+            <option value="rank" data-i18n="sort.rank">Orden lista</option>
+            <option value="year_asc" data-i18n="sort.year.asc">Año ↑</option>
+            <option value="year_desc" data-i18n="sort.year.desc">Año ↓</option>
+            <option value="artist" data-i18n="sort.artist">Artista A–Z</option>
           </select>
         </label>
       </div>
 
       <div id="grid"></div>
-      <div id="empty"><p>No hay álbumes para mostrar</p></div>
+      <div id="empty"><p data-i18n="empty">No hay álbumes para mostrar</p></div>
 
     </div><!-- .main-inner -->
   </div><!-- #main -->
@@ -1111,12 +1124,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
   <div class="dp-body">
-    <div class="dp-loading" id="dp-loading" style="display:none">Consultando Last.fm…</div>
+    <div class="dp-loading" id="dp-loading" style="display:none" data-i18n="dp.loading">Consultando Last.fm…</div>
     <div class="dp-stats"   id="dp-stats"   style="display:none"></div>
     <div class="dp-tags"    id="dp-tags"></div>
     <div class="dp-yt"      id="dp-yt"      style="display:none"></div>
     <div class="dp-section" id="dp-album-wiki" style="display:none">
-      <div class="dp-section-title">Álbum</div>
+      <div class="dp-section-title" data-i18n="dp.album">Álbum</div>
       <div class="dp-text" id="dp-wiki-text"></div>
     </div>
     <div class="dp-section" id="dp-artist-bio" style="display:none">

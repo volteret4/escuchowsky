@@ -801,13 +801,14 @@ def api_album_info():
     artist = request.args.get("artist", "").strip()
     album  = request.args.get("album",  "").strip()
     mbid   = request.args.get("mbid",   "").strip()
+    lang   = request.args.get("lang",   "es").strip()[:2]
     if not artist and not album:
         return jsonify({"error": "artist/album requeridos"}), 400
 
     result = {}
 
     # Last.fm album.getInfo
-    al_params = {"artist": artist, "album": album, "autocorrect": 1}
+    al_params = {"artist": artist, "album": album, "autocorrect": 1, "lang": lang}
     al_data = lfm_get("album.getInfo", al_params)
     if "album" in al_data:
         al = al_data["album"]
@@ -826,7 +827,7 @@ def api_album_info():
 
     time.sleep(0.3 + random.random() * 0.2)
     # Last.fm artist.getInfo
-    ar_data = lfm_get("artist.getInfo", {"artist": artist, "autocorrect": 1})
+    ar_data = lfm_get("artist.getInfo", {"artist": artist, "autocorrect": 1, "lang": lang})
     if "artist" in ar_data:
         ar = ar_data["artist"]
         result["artist"] = {
@@ -861,9 +862,10 @@ def api_album_info():
 def api_artist_info():
     """Imagen y bio del artista desde Last.fm artist.getInfo."""
     artist = request.args.get("artist", "").strip()
+    lang   = request.args.get("lang",   "es").strip()[:2]
     if not artist:
         return jsonify({"error": "artist requerido"}), 400
-    ar_data = lfm_get("artist.getInfo", {"artist": artist, "autocorrect": 1})
+    ar_data = lfm_get("artist.getInfo", {"artist": artist, "autocorrect": 1, "lang": lang})
     if "artist" not in ar_data:
         return jsonify({}), 200
     ar = ar_data["artist"]
@@ -1030,10 +1032,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     <!-- Buscador universal -->
     <div class="um-section">
-      <div class="um-section-title">Buscar usuario</div>
+      <div class="um-section-title" data-i18n="um.search.title">Buscar usuario</div>
       <div class="um-row">
-        <input id="inp-user" type="text" placeholder="Usuario Last.fm" autocomplete="off" spellcheck="false">
-        <button class="btn-sm primary" id="btn-go">Buscar</button>
+        <input id="inp-user" type="text" placeholder="Usuario Last.fm" data-i18n-ph="um.primary.placeholder" autocomplete="off" spellcheck="false">
+        <button class="btn-sm primary" id="btn-go" data-i18n="um.search.btn">Buscar</button>
         <button class="btn-sm" id="btn-import">↑ JSON</button>
       </div>
       <div class="source-radios">
@@ -1045,7 +1047,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     <!-- Usuarios (principal + secundarios unificados) -->
     <div class="um-section" id="um-sec-secondary">
-      <div class="um-section-title">Usuarios</div>
+      <div class="um-section-title" data-i18n="um.users.title">Usuarios</div>
       <div id="secondary-users-list"></div>
       <div id="sb-cache-notice" style="display:none"></div>
       <div class="um-progress" id="um-extra-progress"></div>
@@ -1054,10 +1056,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <!-- Amigos -->
     <div class="um-section">
       <div class="um-section-title" style="display:flex;align-items:center;justify-content:space-between">
-        Amigos del usuario principal
-        <button class="btn-sm" id="btn-load-friends" style="font-size:0.62rem">Cargar</button>
+        <span data-i18n="um.friends.title">Amigos del usuario principal</span>
+        <button class="btn-sm" id="btn-load-friends" style="font-size:0.62rem" data-i18n="um.friends.load">Cargar</button>
       </div>
       <div id="friends-list" style="max-height:200px;overflow-y:auto;scrollbar-width:thin"></div>
+    </div>
+
+    <!-- Language selector -->
+    <div class="um-lang-row">
+      <span data-i18n="lang.label" style="font-size:0.7rem;color:var(--ink3);font-family:var(--mono)">Idioma</span>
+      <label style="font-size:0.72rem;cursor:pointer;display:flex;align-items:center;gap:0.25rem">
+        <input type="radio" name="ui-lang" value="es"> Español
+      </label>
+      <label style="font-size:0.72rem;cursor:pointer;display:flex;align-items:center;gap:0.25rem">
+        <input type="radio" name="ui-lang" value="en"> English
+      </label>
     </div>
   </div>
 </div>

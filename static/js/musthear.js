@@ -22,6 +22,152 @@ let _enrichEs = null;
 
 const albumInfoCache = new Map();
 
+// ── i18n ──────────────────────────────────────────────────────────────────
+const TRANSLATIONS = {
+  es: {
+    'btn.user':               'USUARIO',
+    'um.primary.title':       'Usuario principal',
+    'um.primary.placeholder': 'Usuario Last.fm',
+    'um.import':              '↑ Importar JSON',
+    'um.save':                '↓ Guardar JSON',
+    'um.sep.saved':           'Sesiones guardadas en este navegador',
+    'idb.empty':              'Sin sesiones guardadas',
+    'um.secondary.title':     'Usuarios secundarios',
+    'um.secondary.placeholder': 'usuario last.fm',
+    'um.friends.title':       'Amigos del usuario principal',
+    'um.friends.load':        'Cargar',
+    'idb.extra.sep':          'Desde sesiones guardadas en este navegador',
+    'lang.label':             'Idioma',
+    'sb.collections':         'Colecciones',
+    'sb.genres':              'Géneros',
+    'sb.dates':               'Fechas',
+    'sb.about':               'about',
+    'sb.select':              'Selecciona una colección',
+    'sb.search':              'Buscar colección…',
+    'sb.no.collections':      'Sin colecciones',
+    'sb.no.genres':           'Sin géneros',
+    'stats.heard':            'Escuchados',
+    'stats.pending':          'Pendientes',
+    'stats.complete':         'Completado',
+    'filter.all':             'Todos',
+    'filter.pending':         'Pendientes',
+    'filter.heard':           'Escuchados',
+    'sort.rank':              'Orden lista',
+    'sort.year.asc':          'Año ↑',
+    'sort.year.desc':         'Año ↓',
+    'sort.artist':            'Artista A–Z',
+    'empty':                  'No hay álbumes para mostrar',
+    'loading':                'Cargando...',
+    'loading.collection':     'Cargando colección...',
+    'loading.sidebar':        'Cargando…',
+    'card.heard':             'Escuchado',
+    'card.pending':           'Pendiente',
+    'dp.album':               'Álbum',
+    'dp.loading':             'Consultando Last.fm…',
+    'btn.load':               'Cargar',
+    'btn.add':                'Añadir',
+    'btn.added':              'añadido',
+    'idb.abbr.albums':        'álb.',
+    'msg.connecting':         'Conectando con Last.fm...',
+    'msg.page':               'Página {p} / {t} — {c} álbumes',
+    'msg.page.unique':        'Página {p} / {t} — {c} álbumes únicos',
+    'msg.user.loaded':        '✓ {u} cargado — {n} álbumes',
+    'msg.albums.loaded':      '✓ {n} álbumes cargados',
+    'msg.loaded.db':          '✓ {u} cargado desde BD',
+    'msg.load.primary':       'Carga primero el usuario principal.',
+    'msg.loading.friends':    'Cargando amigos…',
+    'msg.loading.user':       'Cargando {u}…',
+    'msg.user.loading':       '{u}: página {p} / {t} — {c} álbumes',
+    'msg.imported':           '✓ {u} importado — {n} álbumes',
+    'msg.already.in.list':    '{u} ya está en la lista.',
+    'msg.syncing':            'Sincronizando {u}...',
+    'msg.sync.lfm':           'Sincronizando con Last.fm...',
+    'msg.up.to.date':         '✓ Al día',
+    'msg.new.albums':         '✓ +{n} álbumes nuevos',
+    'msg.sync.result':        '✓ {u}: +{nw} nuevos (total {tot})',
+    'msg.added':              '✓ {u} añadido',
+    'msg.error.loading':      'Error cargando',
+  },
+  en: {
+    'btn.user':               'USER',
+    'um.primary.title':       'Main user',
+    'um.primary.placeholder': 'Last.fm username',
+    'um.import':              '↑ Import JSON',
+    'um.save':                '↓ Save JSON',
+    'um.sep.saved':           'Sessions saved in this browser',
+    'idb.empty':              'No saved sessions',
+    'um.secondary.title':     'Secondary users',
+    'um.secondary.placeholder': 'last.fm user',
+    'um.friends.title':       "Main user's friends",
+    'um.friends.load':        'Load',
+    'idb.extra.sep':          'From sessions saved in this browser',
+    'lang.label':             'Language',
+    'sb.collections':         'Collections',
+    'sb.genres':              'Genres',
+    'sb.dates':               'Dates',
+    'sb.about':               'about',
+    'sb.select':              'Select a collection',
+    'sb.search':              'Search collection…',
+    'sb.no.collections':      'No collections',
+    'sb.no.genres':           'No genres',
+    'stats.heard':            'Heard',
+    'stats.pending':          'Pending',
+    'stats.complete':         'Complete',
+    'filter.all':             'All',
+    'filter.pending':         'Pending',
+    'filter.heard':           'Heard',
+    'sort.rank':              'List order',
+    'sort.year.asc':          'Year ↑',
+    'sort.year.desc':         'Year ↓',
+    'sort.artist':            'Artist A–Z',
+    'empty':                  'No albums to show',
+    'loading':                'Loading...',
+    'loading.collection':     'Loading collection...',
+    'loading.sidebar':        'Loading…',
+    'card.heard':             'Heard',
+    'card.pending':           'Pending',
+    'dp.album':               'Album',
+    'dp.loading':             'Fetching Last.fm…',
+    'btn.load':               'Load',
+    'btn.add':                'Add',
+    'btn.added':              'added',
+    'idb.abbr.albums':        'alb.',
+    'msg.connecting':         'Connecting to Last.fm...',
+    'msg.page':               'Page {p} / {t} — {c} albums',
+    'msg.page.unique':        'Page {p} / {t} — {c} unique albums',
+    'msg.user.loaded':        '✓ {u} loaded — {n} albums',
+    'msg.albums.loaded':      '✓ {n} albums loaded',
+    'msg.loaded.db':          '✓ {u} loaded from storage',
+    'msg.load.primary':       'Load the main user first.',
+    'msg.loading.friends':    'Loading friends…',
+    'msg.loading.user':       'Loading {u}…',
+    'msg.user.loading':       '{u}: page {p} / {t} — {c} albums',
+    'msg.imported':           '✓ {u} imported — {n} albums',
+    'msg.already.in.list':    '{u} is already in the list.',
+    'msg.syncing':            'Syncing {u}...',
+    'msg.sync.lfm':           'Syncing with Last.fm...',
+    'msg.up.to.date':         '✓ Up to date',
+    'msg.new.albums':         '✓ +{n} new albums',
+    'msg.sync.result':        '✓ {u}: +{nw} new (total {tot})',
+    'msg.added':              '✓ {u} added',
+    'msg.error.loading':      'Error loading',
+  }
+};
+
+function getLang()    { return localStorage.getItem('ui-lang') || 'es'; }
+function setLang(l)   { localStorage.setItem('ui-lang', l); applyTranslations(); }
+function t(key, vars) {
+  let s = (TRANSLATIONS[getLang()] ?? TRANSLATIONS.es)[key] ?? TRANSLATIONS.es[key] ?? key;
+  if (vars) Object.entries(vars).forEach(([k, v]) => { s = s.replaceAll(`{${k}}`, v); });
+  return s;
+}
+function applyTranslations() {
+  const lang = getLang();
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll('input[name="ui-lang"]').forEach(r => { r.checked = r.value === lang; });
+}
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const inpUser    = document.getElementById('inp-user');
@@ -184,10 +330,10 @@ function openDetailPanel(ref) {
   const st = document.getElementById('dp-status');
   if (heard) {
     st.className = 'dp-status heard';
-    st.innerHTML = `<svg width="10" height="10" viewBox="0 0 12 9" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4l3.5 3.5L11 1"/></svg> Escuchado`;
+    st.innerHTML = `<svg width="10" height="10" viewBox="0 0 12 9" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4l3.5 3.5L11 1"/></svg> ${t('card.heard')}`;
   } else {
     st.className = 'dp-status missing';
-    st.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg> Pendiente`;
+    st.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg> ${t('card.pending')}`;
   }
   st.style.display = '';
 
@@ -297,7 +443,7 @@ async function fetchAlbumInfo(artist, album, mbid) {
       loading.style.display = 'none';
       return;
     }
-    const p = new URLSearchParams({ artist, album });
+    const p = new URLSearchParams({ artist, album, lang: getLang() });
     if (mbid) p.set('mbid', mbid);
     const data = await fetch(`${_B}/api/album_info?${p}`).then(r => r.json());
     if (data.error) { loading.style.display = 'none'; return; }
@@ -308,7 +454,7 @@ async function fetchAlbumInfo(artist, album, mbid) {
 }
 
 // ── UI helpers ─────────────────────────────────────────────────────────────
-function showLoading(msg) { loadTxt.textContent = msg || 'Cargando...'; loading.classList.add('visible'); }
+function showLoading(msg) { loadTxt.textContent = msg || t('loading'); loading.classList.add('visible'); }
 function hideLoading()    { loading.classList.remove('visible'); }
 function showError(msg)   { errMsg.textContent = msg; errMsg.classList.add('visible'); }
 function hideError()      { errMsg.classList.remove('visible'); }
@@ -345,11 +491,11 @@ async function renderIdbExtraList() {
       return `<div class="idb-entry">
         <div class="idb-entry-info">
           <div class="idb-entry-user">${escH(s.user)}</div>
-          <div class="idb-entry-meta">${(s.count||s.heard?.length||0).toLocaleString()} álb. · ${new Date(_ts*1000).toLocaleDateString()}${_lbl}</div>
+          <div class="idb-entry-meta">${(s.count||s.heard?.length||0).toLocaleString()} ${t('idb.abbr.albums')} · ${new Date(_ts*1000).toLocaleDateString()}${_lbl}</div>
         </div>
         ${already
-          ? `<span style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3)">añadido</span>`
-          : `<button class="btn-sm primary" data-action="add-extra" data-user="${escH(s.user)}">Añadir</button>`}
+          ? `<span style="font-family:var(--mono);font-size:0.65rem;color:var(--ink3)">${t('btn.added')}</span>`
+          : `<button class="btn-sm primary" data-action="add-extra" data-user="${escH(s.user)}">${t('btn.add')}</button>`}
       </div>`;
     }).join('');
 }
@@ -366,7 +512,7 @@ async function idbAddAsExtra(username) {
   saveExtraUsersLS();
   buildExtraUsersList();
   renderIdbExtraList();
-  document.getElementById('um-extra-progress').textContent = `✓ ${data.user} añadido`;
+  document.getElementById('um-extra-progress').textContent = t('msg.added', {u: data.user});
   if (allAlbums.length) applyCollection();
 }
 
@@ -421,7 +567,7 @@ async function renderIdbList() {
   const sessions = await idbList();
   const listEl   = document.getElementById('idb-list');
   if (!sessions.length) {
-    listEl.innerHTML = '<span class="idb-empty">Sin sesiones guardadas</span>';
+    listEl.innerHTML = `<span class="idb-empty">${t('idb.empty')}</span>`;
     return;
   }
   listEl.innerHTML = sessions
@@ -432,9 +578,9 @@ async function renderIdbList() {
       return `<div class="idb-entry">
         <div class="idb-entry-info">
           <div class="idb-entry-user">${escH(s.user)}</div>
-          <div class="idb-entry-meta">${(s.count||s.heard?.length||0).toLocaleString()} álb. · ${new Date(_ts*1000).toLocaleDateString()}${escH(_lbl)}</div>
+          <div class="idb-entry-meta">${(s.count||s.heard?.length||0).toLocaleString()} ${t('idb.abbr.albums')} · ${new Date(_ts*1000).toLocaleDateString()}${escH(_lbl)}</div>
         </div>
-        <button class="btn-sm primary" data-action="load" data-user="${escH(s.user)}">Cargar</button>
+        <button class="btn-sm primary" data-action="load" data-user="${escH(s.user)}">${t('btn.load')}</button>
         <button class="btn-sm" data-action="download" data-user="${escH(s.user)}">↓ JSON</button>
         <button class="btn-sm" data-action="delete" data-user="${escH(s.user)}">✕</button>
       </div>`;
@@ -445,7 +591,7 @@ async function idbLoadSession(username) {
   const data = await idbLoad(username);
   if (!data) return;
   loadHeardCache(data);
-  document.getElementById('um-progress').textContent = `✓ ${data.user} cargado desde BD`;
+  document.getElementById('um-progress').textContent = t('msg.loaded.db', {u: data.user});
   if (activeSlug) { closeUserModal(); await loadAndRender(activeSlug); }
   else closeUserModal();
 }
@@ -497,12 +643,12 @@ async function addExtraUser() {
   if (extraUsers.some(u => u.user.toLowerCase() === user.toLowerCase())) { inp.value = ''; return; }
   const btn = document.getElementById('btn-extra-lfm');
   btn.disabled = true; inp.disabled = true;
-  prog.textContent = 'Conectando con Last.fm...';
+  prog.textContent = t('msg.connecting');
   try {
     const [userInfo, lfmResult] = await Promise.all([
       fetch(`${_B}/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
       fetchScrobblesSSE(user, msg => {
-        prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+        prog.textContent = t('msg.page', {p: msg.page, t: msg.total_pages, c: msg.count.toLocaleString()});
       }),
     ]);
     const heard      = lfmResult.heard;
@@ -519,7 +665,7 @@ async function addExtraUser() {
     await renderIdbExtraList();
     buildExtraUsersList();
     inp.value = '';
-    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes`;
+    prog.textContent = t('msg.user.loaded', {u: realUser, n: heard.length.toLocaleString()});
     if (allAlbums.length) applyCollection();
   } catch(e) {
     prog.textContent = 'Error: ' + e.message;
@@ -532,7 +678,7 @@ async function syncExtraUser(idx) {
   const u = extraUsers[idx];
   if (!u) return;
   const prog = document.getElementById('um-extra-progress');
-  prog.textContent = `Sincronizando ${u.user}...`;
+  prog.textContent = t('msg.syncing', {u: u.user});
   try {
     const url = `${_B}/api/scrobbles/since?user=${encodeURIComponent(u.user)}&since=${u.fetched_at || 0}`;
     const r = await fetch(url);
@@ -553,7 +699,7 @@ async function syncExtraUser(idx) {
     await idbSave({ user: extraUsers[idx].user, count: extraUsers[idx].count, fetched_at: extraUsers[idx].fetched_at, heard: extraUsers[idx].pairs, last_scrobble_ts: extraUsers[idx].last_scrobble_ts || 0, last_scrobble_artist: extraUsers[idx].last_scrobble_artist || '', last_scrobble_track: extraUsers[idx].last_scrobble_track || '' });
     await renderIdbExtraList();
     buildExtraUsersList();
-    prog.textContent = `✓ ${u.user}: +${added.length} nuevos (total ${extraUsers[idx].count.toLocaleString()})`;
+    prog.textContent = t('msg.sync.result', {u: u.user, nw: added.length, tot: extraUsers[idx].count.toLocaleString()});
     if (allAlbums.length) applyCollection();
   } catch(e) {
     prog.textContent = 'Error: ' + e.message;
@@ -571,11 +717,11 @@ async function loadFriends() {
   const btn    = document.getElementById('btn-load-friends');
   const user   = heardCache?.user || document.getElementById('inp-user').value.trim();
   if (!user) {
-    listEl.innerHTML = '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Carga primero el usuario principal.</div>';
+    listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">${t('msg.load.primary')}</div>`;
     return;
   }
   btn.disabled = true;
-  listEl.innerHTML = '<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">Cargando amigos…</div>';
+  listEl.innerHTML = `<div class="um-progress" style="padding:0.3rem 0;color:var(--ink3)">${t('msg.loading.friends')}</div>`;
   try {
     const data = await fetch(`${_B}/api/friends?user=${encodeURIComponent(user)}`).then(r => r.json());
     if (!data.ok || !data.friends.length) {
@@ -602,7 +748,7 @@ function renderFriendsList(friends) {
       ${avatar}
       <span class="fr-name">${escH(f.username)}</span>
       <button class="btn-sm fr-add" ${added ? 'disabled' : ''} data-username="${escH(f.username)}">
-        ${added ? '✓' : 'Añadir'}
+        ${added ? '✓' : t('btn.add')}
       </button>
     </div>`;
   }).join('');
@@ -616,12 +762,12 @@ async function addExtraUserByName(username, btn) {
   if (extraUsers.some(u => u.user.toLowerCase() === username.toLowerCase())) return;
   const prog = document.getElementById('um-extra-progress');
   btn.disabled = true; btn.textContent = '…';
-  prog.textContent = `Cargando ${username}…`;
+  prog.textContent = t('msg.loading.user', {u: username});
   try {
     const [userInfo, lfmResult] = await Promise.all([
       fetch(`${_B}/api/check_user?user=${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>null),
       fetchScrobblesSSE(username, msg => {
-        prog.textContent = `${username}: página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes`;
+        prog.textContent = t('msg.user.loading', {u: username, p: msg.page, t: msg.total_pages, c: msg.count.toLocaleString()});
       }),
     ]);
     const heard      = lfmResult.heard;
@@ -638,10 +784,10 @@ async function addExtraUserByName(username, btn) {
     await renderIdbExtraList();
     buildExtraUsersList();
     btn.textContent = '✓';
-    prog.textContent = `✓ ${realUser} cargado — ${heard.length.toLocaleString()} álbumes`;
+    prog.textContent = t('msg.user.loaded', {u: realUser, n: heard.length.toLocaleString()});
     if (allAlbums.length) applyCollection();
   } catch(e) {
-    btn.disabled = false; btn.textContent = 'Añadir';
+    btn.disabled = false; btn.textContent = t('btn.add');
     prog.textContent = 'Error: ' + e.message;
   }
 }
@@ -657,7 +803,7 @@ document.getElementById('inp-extra-json').addEventListener('change', async e => 
     const data = JSON.parse(await file.text());
     if (!data.heard || !data.user) throw new Error('Formato inválido');
     if (extraUsers.some(u => u.user.toLowerCase() === data.user.toLowerCase())) {
-      prog.textContent = `${data.user} ya está en la lista.`; return;
+      prog.textContent = t('msg.already.in.list', {u: data.user}); return;
     }
     const color = USER_COLORS[extraUsers.length % USER_COLORS.length];
     const ft = data.fetched_at || 0;
@@ -666,7 +812,7 @@ document.getElementById('inp-extra-json').addEventListener('change', async e => 
     await idbSave({ user: data.user, count: data.heard.length, fetched_at: ft, heard: data.heard });
     await renderIdbExtraList();
     buildExtraUsersList();
-    prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
+    prog.textContent = t('msg.imported', {u: data.user, n: data.heard.length.toLocaleString()});
     if (allAlbums.length) applyCollection();
   } catch(err) {
     prog.textContent = 'Error: ' + err.message;
@@ -724,7 +870,7 @@ async function fetchScrobblesSSE(user, onProgress) {
     const cols = await fetch(_B + '/api/musthear').then(r => r.json());
     renderCollsSidebar(cols);
   } catch(e) {
-    document.getElementById('colls-body').innerHTML = '<div class="sb-empty">Error cargando</div>';
+    document.getElementById('colls-body').innerHTML = `<div class="sb-empty">${t('msg.error.loading')}</div>`;
   }
   await renderIdbList();
   await renderIdbExtraList();
@@ -742,13 +888,13 @@ function renderCollsSidebar(cols) {
   }
 
   if (!groups.size) {
-    document.getElementById('colls-body').innerHTML = '<div class="sb-empty">Sin colecciones</div>';
+    document.getElementById('colls-body').innerHTML = `<div class="sb-empty">${t('sb.no.collections')}</div>`;
     return;
   }
 
   // Search box
   let html = `<div style="padding:0.4rem 0.7rem 0.3rem">
-    <input id="coll-search" type="text" placeholder="Buscar colección…"
+    <input id="coll-search" type="text" placeholder="${t('sb.search')}"
       style="width:100%;font-size:0.72rem;padding:0.3rem 0.6rem;background:var(--bg3);border:1px solid var(--border2);color:var(--ink);border-radius:2px;outline:none">
   </div>`;
 
@@ -855,7 +1001,7 @@ inpSession.addEventListener('change', async e => {
     const data = JSON.parse(await file.text());
     if (!data.heard || !data.user) throw new Error('Formato inválido');
     loadHeardCache(data);
-    prog.textContent = `✓ ${data.user} importado — ${data.heard.length.toLocaleString()} álbumes`;
+    prog.textContent = t('msg.imported', {u: data.user, n: data.heard.length.toLocaleString()});
     if (activeSlug) { closeUserModal(); await loadAndRender(activeSlug); }
   } catch(err) {
     prog.textContent = 'Error: ' + err.message;
@@ -869,18 +1015,18 @@ document.getElementById('btn-sync-session').addEventListener('click', async () =
   const btn  = document.getElementById('btn-sync-session');
   const prog = document.getElementById('um-progress');
   btn.disabled = true; btn.textContent = '↻ ...';
-  prog.textContent = 'Sincronizando con Last.fm...';
+  prog.textContent = t('msg.sync.lfm');
   try {
     const url = `${_B}/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${heardCache.count || 0}`;
     const data = await fetch(url).then(r => r.json());
     if (data.error) { prog.textContent = 'Error: ' + data.error; return; }
-    if (data.new_count === 0) { prog.textContent = '✓ Al día'; btn.textContent = '↻ Sync'; return; }
+    if (data.new_count === 0) { prog.textContent = t('msg.up.to.date'); btn.textContent = '↻ Sync'; return; }
     if (data.full_replace) {
       const prev = heardCache.count;
       heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
       showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
       if (activeSlug && collCache[activeSlug]) applyCollection();
-      prog.textContent = heardCache.count - prev > 0 ? `✓ +${heardCache.count - prev} álbumes nuevos` : '✓ Al día';
+      prog.textContent = heardCache.count - prev > 0 ? t('msg.new.albums', {n: heardCache.count - prev}) : t('msg.up.to.date');
     }
   } catch(e) {
     prog.textContent = 'Error: ' + e.message;
@@ -939,10 +1085,10 @@ async function doLoadUser() {
   const prog = document.getElementById('um-progress');
   btnGo.disabled = true;
   try {
-    prog.textContent = 'Conectando con Last.fm...';
+    prog.textContent = t('msg.connecting');
     hideResults();
     const result = await fetchScrobblesSSE(user, msg => {
-      prog.textContent = `Página ${msg.page} / ${msg.total_pages} — ${msg.count.toLocaleString()} álbumes únicos`;
+      prog.textContent = t('msg.page.unique', {p: msg.page, t: msg.total_pages, c: msg.count.toLocaleString()});
     });
     loadHeardCache({
       user, heard: result.heard,
@@ -951,7 +1097,7 @@ async function doLoadUser() {
       last_scrobble_artist: result.last_scrobble_artist || '',
       last_scrobble_track:  result.last_scrobble_track  || '',
     });
-    prog.textContent = `✓ ${result.heard.length.toLocaleString()} álbumes cargados`;
+    prog.textContent = t('msg.albums.loaded', {n: result.heard.length.toLocaleString()});
     if (activeSlug) { closeUserModal(); await loadAndRender(activeSlug); }
     else closeUserModal();
   } catch(e) {
@@ -971,7 +1117,7 @@ function enrichMissingCovers() {
   }
   if (!toEnrich.length) return;
   const albumsParam = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(toEnrich.map(a => [a.artist, a.title]))))));
-  _enrichEs = new EventSource(`${_B}/api/enrich_albums?albums=${albumsParam}`);
+  _enrichEs = new EventSource(`${_B}/api/enrich_albums?albums=${albumsParam}&lang=${getLang()}`);
   _enrichEs.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.done) { _enrichEs.close(); _enrichEs = null; enrichMissingCovers(); return; }
@@ -1008,7 +1154,7 @@ async function loadAndRender(slug) {
   if (_loadController) _loadController.abort();
   _loadController = new AbortController();
   const signal = _loadController.signal;
-  grid.innerHTML = ''; hideError(); showLoading('Cargando colección...');
+  grid.innerHTML = ''; hideError(); showLoading(t('loading.collection'));
   try {
     if (!collCache[slug]) {
       const r = await fetch(`${_B}/api/collection?slug=${encodeURIComponent(slug)}`, { signal });
@@ -1061,7 +1207,7 @@ function buildGenrePills() {
       freq[g.name] = (freq[g.name] || 0) + 1;
   const top = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,20).map(e=>e[0]);
   if (!top.length) {
-    document.getElementById('genre-pills').innerHTML = '<div class="sb-empty">Sin géneros</div>';
+    document.getElementById('genre-pills').innerHTML = `<div class="sb-empty">${t('sb.no.genres')}</div>`;
     return;
   }
   document.getElementById('genre-pills').innerHTML = top.map(g =>
@@ -1226,3 +1372,10 @@ document.getElementById('decade-pills').addEventListener('click', e => {
   const pill = e.target.closest('.pill[data-decade]');
   if (pill) toggleDecade(Number(pill.dataset.decade));
 });
+
+// Language toggle
+document.getElementById('user-modal').addEventListener('change', e => {
+  if (e.target.name === 'ui-lang') setLang(e.target.value);
+});
+
+applyTranslations();
