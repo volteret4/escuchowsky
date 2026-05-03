@@ -861,7 +861,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <!-- ── Header ─────────────────────────────────────────────────────────── -->
 <header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:sticky;top:0;z-index:100;">
-  <div class="logo" style="font-size:1.3rem">col<em>lections</em></div>
+  <a class="logo" href="/" style="font-size:1.3rem;text-decoration:none;color:inherit">col<em>lections</em></a>
   <div style="flex:1"></div>
   <div id="badge-inline" style="display:none;align-items:center;gap:0.45rem;cursor:pointer;">
     <img id="badge-avatar" src="" alt="" style="width:26px;height:26px;border-radius:50%;object-fit:cover;background:var(--bg3);">

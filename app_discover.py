@@ -1012,7 +1012,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <!-- ── Header ─────────────────────────────────────────────────────────── -->
 <header style="height:52px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.2rem;gap:1rem;flex-shrink:0;position:sticky;top:0;z-index:100;">
-  <div class="logo" style="font-family:var(--serif);font-size:1.3rem;font-weight:800"><span style="color:var(--accent)">tumtum</span><span style="color:#fff">pa!</span></div>
+  <a class="logo" href="/" style="font-family:var(--serif);font-size:1.3rem;font-weight:800;text-decoration:none"><span style="color:var(--accent)">tumtum</span><span style="color:#fff">pa!</span></a>
   <div style="flex:1"></div>
   <div id="badge-inline" style="display:none;align-items:center;gap:0.5rem;">
     <img id="badge-avatar" src="" alt="" style="width:24px;height:24px;border-radius:50%;object-fit:cover;background:var(--bg3);display:none">
