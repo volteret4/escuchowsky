@@ -29,7 +29,7 @@ from pathlib import Path
 # ── helpers ────────────────────────────────────────────────────────────────
 
 def _chart_slug(genre_slug: str) -> str:
-    return "rym_chart_all_time_" + genre_slug.replace("-", "_")
+    return "genre_" + genre_slug.replace("-", "_")
 
 
 def _count_all(node: dict) -> int:
@@ -50,7 +50,7 @@ def get_scraped_collections(
         SELECT c.slug, COUNT(ca.album_id) AS total
         FROM collections c
         JOIN collection_albums ca ON ca.collection_id = c.id
-        WHERE c.slug LIKE 'rym_chart_all_time_%'
+        WHERE c.slug LIKE 'genre_%'
         GROUP BY c.id
     """).fetchall()
     result = {r[0]: {"total": r[1]} for r in rows}
@@ -58,11 +58,11 @@ def get_scraped_collections(
     # Also scan charts_dir for cache JSONs not yet imported into DB
     if charts_dir and charts_dir.is_dir():
         for d in charts_dir.iterdir():
-            if not (d.is_dir() and d.name.startswith("rym_chart_all_time_")):
+            if not (d.is_dir() and d.name.startswith("genre_")):
                 continue
             if d.name in result:
                 continue
-            cache = d / "rym_chart_cache.json"
+            cache = d / "chart_cache.json"
             if cache.exists():
                 try:
                     albums = json.loads(cache.read_text(encoding="utf-8"))
@@ -98,7 +98,7 @@ def get_all_album_pairs_per_collection(
         for slug in collection_slugs:
             if slug in db_slugs:
                 continue
-            cache = charts_dir / slug / "rym_chart_cache.json"
+            cache = charts_dir / slug / "chart_cache.json"
             if not cache.exists():
                 continue
             try:
@@ -160,7 +160,7 @@ def get_top_albums_per_collection(
         for slug in collection_slugs:
             if slug in db_slugs:
                 continue
-            cache = charts_dir / slug / "rym_chart_cache.json"
+            cache = charts_dir / slug / "chart_cache.json"
             if not cache.exists():
                 continue
             try:
@@ -258,7 +258,7 @@ def render_html(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RYM Genre Tree</title>
+<title>Genre Tree</title>
 <link rel="icon" type="image/png" href="/img/boar.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="icon" type="image/png" href="/images/discount.png" />
@@ -269,9 +269,9 @@ def render_html(
 </head>
 <body>
 <header>
-  <div class="mh-title">Géneros RYM</div>
+  <div class="mh-title">Géneros</div>
   <nav class="mh-nav">
-    <a class="mh-na on" href="genre_tree.html">Géneros RYM</a>
+    <a class="mh-na on" href="genre_tree.html">Géneros</a>
   </nav>
   <div id="user-form">
     <input id="user-input" type="text" placeholder="usuario last.fm"
@@ -357,7 +357,7 @@ def run(args: argparse.Namespace) -> None:
     genre_tree = load_genre_tree(genres_json)
     print(f"🌳 {len(genre_tree)} main genres")
 
-    charts_dir = out_path.parent / "rym_charts"
+    charts_dir = out_path.parent / "genre_charts"
 
     n_yt = getattr(args, "yt_videos", 15)
 
@@ -382,7 +382,7 @@ def run(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Generate RYM Genre Tree interactive page")
+    p = argparse.ArgumentParser(description="Generate Genre Tree interactive page")
     p.add_argument("--mh-db",       required=True, help="Path to must_hear DB")
     p.add_argument("--genres-json", default="",    help="Path to genres.json")
     p.add_argument("--output",      default="",    help="Output HTML path")

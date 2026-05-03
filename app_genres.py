@@ -35,14 +35,14 @@ _GENRES:    list = []
 _SLUG_PATH: dict = {}   # json_slug → [ancestor_slug, ..., self_slug]
 _SLUG_NAME: dict = {}   # json_slug → display name
 
-def _rym_build_index(nodes: list, path: list) -> None:
+def _build_genre_index(nodes: list, path: list) -> None:
     for n in nodes:
         p = path + [n["slug"]]
         _SLUG_PATH[n["slug"]] = p
         _SLUG_NAME[n["slug"]] = n["name"]
-        _rym_build_index(n.get("subgenres", []), p)
+        _build_genre_index(n.get("subgenres", []), p)
 
-def _rym_load() -> None:
+def _genres_load() -> None:
     global _GENRES
     candidates = [
         Path(__file__).parent / "db/genres.json",
@@ -50,10 +50,10 @@ def _rym_load() -> None:
     for p in candidates:
         if p.exists():
             _GENRES = json.loads(p.read_text(encoding="utf-8"))
-            _rym_build_index(_GENRES, [])
+            _build_genre_index(_GENRES, [])
             break
 
-_rym_load()
+_genres_load()
 
 # Solo se permiten portadas de CAA y Discogs; el resto se descarta
 _ALLOWED_COVER_DOMAINS = ("coverartarchive.org", "archive.org", "discogs.com", "discogs-images.com", "lastfm.freetls.fastly.net", "lastfm.freetls")
@@ -187,8 +187,6 @@ def _collection_group(slug: str, name: str) -> str:
         ("bandcamp",         "Bandcamp"),
         ("kerrang",          "Kerrang!"),
         ("pitchfork",        "Pitchfork"),
-        ("rym_",             "Rate Your Music"),
-        ("rate_your_music",  "Rate Your Music"),
         ("sputnik_",         "Sputnikmusic"),
         ("sputnikmusic",     "Sputnikmusic"),
         ("resident_advisor", "Resident Advisor"),
@@ -203,7 +201,7 @@ def _collection_group(slug: str, name: str) -> str:
     return "Otros"
 
 
-def _rym_tree_path(name: str) -> list[str] | None:
+def _tree_path(name: str) -> list[str] | None:
     """'RYM Top — Blues — Chicago Blues' → ['Blues', 'Chicago Blues']. Else None."""
     if not name.startswith("RYM Top \u2014 "):
         return None
@@ -226,7 +224,7 @@ def get_all_collections() -> list[dict]:
     for r in rows:
         d = dict(r)
         d["group"]     = _collection_group(d["slug"], d["name"])
-        d["tree_path"] = _rym_tree_path(d["name"])
+        d["tree_path"] = _tree_path(d["name"])
         result.append(d)
     return result
 
@@ -240,14 +238,14 @@ def _get_album_chart_genres(conn, album_ids: list) -> dict:
         SELECT ca.album_id, c.slug
         FROM collection_albums ca
         JOIN collections c ON c.id = ca.collection_id
-        WHERE c.slug LIKE 'rym_chart_all_time_%'
+        WHERE c.slug LIKE 'genre_%'
         AND ca.album_id IN ({placeholders})
     """, album_ids).fetchall()
     # album_id → {json_slug: {name, depth}} — using dict to deduplicate across multiple collections
     tmp: dict[int, dict] = {}
     for r in rows:
         aid = r["album_id"]
-        json_slug = r["slug"].replace("rym_chart_all_time_", "").replace("_", "-")
+        json_slug = r["slug"].replace("genre_", "").replace("_", "-")
         path = _SLUG_PATH.get(json_slug)
         seen = tmp.setdefault(aid, {})
         if path:
@@ -256,7 +254,7 @@ def _get_album_chart_genres(conn, album_ids: list) -> dict:
                     seen[s] = {"name": _SLUG_NAME.get(s, s), "depth": depth}
         else:
             # Fallback: use collection name path
-            tp = _rym_tree_path(r["slug"])
+            tp = _tree_path(r["slug"])
             label = tp[-1] if tp else json_slug
             if json_slug not in seen:
                 seen[json_slug] = {"name": label, "depth": len(tp) if tp else 1}
@@ -313,7 +311,7 @@ def _load_ignore_slugs() -> set:
 @app.route("/api/collections")
 def api_collections():
     all_colls = get_all_collections()
-    rym = [c for c in all_colls if c["slug"].startswith("rym_chart_all_time_")]
+    rym = [c for c in all_colls if c["slug"].startswith("genre_")]
     return jsonify(rym)
 
 
@@ -327,13 +325,13 @@ def api_genre_tree():
         SELECT c.slug
         FROM collections c
         JOIN collection_albums ca ON ca.collection_id = c.id
-        WHERE c.slug LIKE 'rym_chart_all_time_%'
+        WHERE c.slug LIKE 'genre_%'
         GROUP BY c.id
         HAVING COUNT(ca.album_id) > 0
     """).fetchall()
     conn.close()
     db_slugs = frozenset(
-        r["slug"].replace("rym_chart_all_time_", "").replace("_", "-") for r in rows
+        r["slug"].replace("genre_", "").replace("_", "-") for r in rows
     )
 
     def prune(nodes):
@@ -1047,7 +1045,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <aside id="sidebar">
     <div class="sb-scroll">
 
-      <!-- Géneros (árbol de RYM charts) -->
+      <!-- Géneros (árbol de géneros) -->
       <div class="sb-panel open" id="panel-colls">
         <div class="sb-panel-hdr">
           <span class="sb-panel-title">Géneros</span>

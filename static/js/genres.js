@@ -802,12 +802,12 @@ function renderCollsSidebar(cols, tree) {
   // Build lookup: json_slug → collection object (for album counts and DB slug)
   const byJsonSlug = {};
   for (const c of cols) {
-    const js = c.slug.replace('rym_chart_all_time_', '').replace(/_/g, '-');
+    const js = c.slug.replace('genre_', '').replace(/_/g, '-');
     byJsonSlug[js] = c;
   }
   const html = tree && tree.length
     ? renderJsonTree(tree, byJsonSlug, 1, '')
-    : buildRymTreeFallback(cols);
+    : buildGenreTreeFallback(cols);
   document.getElementById('colls-body').innerHTML = html;
 }
 
@@ -832,7 +832,7 @@ function renderJsonTree(nodes, byJsonSlug, depth, pathPrefix) {
   return html;
 }
 
-function buildRymTreeFallback(cols) {
+function buildGenreTreeFallback(cols) {
   // Fallback: build 2-level tree from collection tree_path when JSON tree unavailable
   const root = { self: null, children: new Map() };
   for (const c of cols) {

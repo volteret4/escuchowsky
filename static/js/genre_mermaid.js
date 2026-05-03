@@ -10,7 +10,7 @@ let   HEARD      = {};              // chart_slug → heard count (computed from
   for (const n of nodes) { TREE_IDX[n.s] = n; idx(n.c || []); }
 })(__d.tree);
 
-function cslug(s) { return 'rym_chart_all_time_' + s.replace(/-/g,'_'); }
+function cslug(s) { return 'genre_' + s.replace(/-/g,'_'); }
 function isScraped(s) { return !!CHARTS[cslug(s)]; }
 
 // ── Genre and Artist indexes for search ───────────────────────────────────

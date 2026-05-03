@@ -727,7 +727,7 @@ input::placeholder { color: var(--ink3); }
   flex-shrink: 0;
 }
 
-/* ── Genre tree (RYM Charts) ───────────────────────────────────────── */
+/* ── Genre tree ────────────────────────────────────────────────────── */
 .tree-genre { }
 .tree-genre-hdr {
   display: flex;
