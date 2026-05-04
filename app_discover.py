@@ -1186,18 +1186,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <!-- Controles sticky: fuera de .main-inner para pegarse al header sin huecos -->
     <div id="discover-ctrl-bar" style="display:none">
       <div id="disc-rel-tabs">
-        <button class="disc-tab active" data-rel="discover">Escucha</button>
-        <button class="disc-tab" data-rel="share">Comparte</button>
-        <button class="disc-tab" data-rel="enjoy">Disfruta</button>
+        <button class="disc-tab active" data-rel="discover" data-i18n="disc.tab.discover">Escucha</button>
+        <button class="disc-tab" data-rel="share" data-i18n="disc.tab.share">Comparte</button>
+        <button class="disc-tab" data-rel="enjoy" data-i18n="disc.tab.enjoy">Disfruta</button>
       </div>
       <div id="disc-ctrl-row">
         <div id="disc-user-indicator"></div>
         <div class="disc-controls">
           <input type="number" id="disc-limit-global" min="5" max="100" value="20">
           <select id="disc-mode-select">
-            <option value="albums">Álbumes</option>
-            <option value="artists">Artistas</option>
-            <option value="songs">Canciones</option>
+            <option value="albums" data-i18n="disc.mode.albums">Álbumes</option>
+            <option value="artists" data-i18n="disc.mode.artists">Artistas</option>
+            <option value="songs" data-i18n="disc.mode.songs">Canciones</option>
           </select>
           <button id="disc-play-btn" title="Descubrir">▶</button>
         </div>

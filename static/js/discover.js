@@ -87,6 +87,12 @@ const TRANSLATIONS = {
     'empty.step.6':           'Pulsa <b>uno o varios usuarios</b> para mostrar los <b>artistas</b>, <b>álbumes</b> o <b>canciones</b> que comparten todos.',
     'empty.step.7':           'Pulsa en cada elemento del grid para obtener información y poder escuchar algo del mismo.',
     'empty.hint':             'Los datos se guardan en tu navegador (IndexedDB). Pero se llena rápidamente con varios usuarios, recuerda exportar / importar sesiones como JSON.',
+    'disc.tab.discover':      'Escucha',
+    'disc.tab.share':         'Comparte',
+    'disc.tab.enjoy':         'Disfruta',
+    'disc.mode.albums':       'Álbumes',
+    'disc.mode.artists':      'Artistas',
+    'disc.mode.songs':        'Canciones',
   },
   en: {
     'um.search.title':        'Search user',
@@ -129,6 +135,12 @@ const TRANSLATIONS = {
     'empty.step.6':           'Select <b>one or more users</b> to show the <b>artists</b>, <b>albums</b> or <b>songs</b> they all share.',
     'empty.step.7':           'Click any grid item to get info and listen to something related.',
     'empty.hint':             'Data is stored in your browser (IndexedDB). It fills up fast with multiple users — remember to export / import JSON sessions.',
+    'disc.tab.discover':      'Listen',
+    'disc.tab.share':         'Share',
+    'disc.tab.enjoy':         'Enjoy',
+    'disc.mode.albums':       'Albums',
+    'disc.mode.artists':      'Artists',
+    'disc.mode.songs':        'Songs',
   }
 };
 
