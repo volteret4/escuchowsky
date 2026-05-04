@@ -1218,17 +1218,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <!-- Empty state — shown when no discover results yet -->
       <div id="empty-state">
         <div id="empty-logo"><span style="color:var(--accent)">tumtum</span><span style="color:var(--ink2)">pa!</span></div>
-        <p id="empty-tagline">Alégrate el día o mejora el de alguién con una joya musical.</p>
+        <p id="empty-tagline" data-i18n="empty.tagline">Alégrate el día o mejora el de alguién con una joya musical.</p>
         <div id="empty-steps">
-          <div class="empty-step"><span class="empty-num">01</span><span>Pulsa <b>👤</b> arriba a la derecha y busca tu usuario de <b>Last.fm</b> o <b>Listenbrainz</b>.</span></div>
-          <div class="empty-step"><span class="empty-num">02</span><span>Añade <b>usuarios secundarios</b>. Es recomendable descargar el json para futuras sesiones.</span></div>
-          <div class="empty-step"><span class="empty-num">03</span><span><b>Escuchar:</b> ver que han escuchado los demás que tu aun no.</span></div>
-          <div class="empty-step"><span class="empty-num">04</span><span><b>Comparte:</b> permite encontrar alguna de tus joyas para recomendar al resto.</span></div>
-          <div class="empty-step"><span class="empty-num">05</span><span><b>Disfruta:</b> muestra placeres compartidos, permitiendo afinar recomendaciones.</span></div>
-          <div class="empty-step"><span class="empty-num">06</span><span>Pulsa <b>uno o varios usuarios</b> para mostrar los <b>artistas</b>, <b>álbumes</b> o <b>canciones</b> que comparten todos.</span></div>
-          <div class="empty-step"><span class="empty-num">07</span><span>Pulsa en cada elemento del grid para obtener información y poder escuchar algo del mismo.</span></div>
+          <div class="empty-step"><span class="empty-num">01</span><span data-i18n-html="empty.step.1">Pulsa <b>👤</b> arriba a la derecha y busca tu usuario de <b>Last.fm</b> o <b>Listenbrainz</b>.</span></div>
+          <div class="empty-step"><span class="empty-num">02</span><span data-i18n-html="empty.step.2">Añade <b>usuarios secundarios</b>. Es recomendable descargar el json para futuras sesiones.</span></div>
+          <div class="empty-step"><span class="empty-num">03</span><span data-i18n-html="empty.step.3"><b>Escuchar:</b> ver que han escuchado los demás que tu aun no.</span></div>
+          <div class="empty-step"><span class="empty-num">04</span><span data-i18n-html="empty.step.4"><b>Comparte:</b> permite encontrar alguna de tus joyas para recomendar al resto.</span></div>
+          <div class="empty-step"><span class="empty-num">05</span><span data-i18n-html="empty.step.5"><b>Disfruta:</b> muestra placeres compartidos, permitiendo afinar recomendaciones.</span></div>
+          <div class="empty-step"><span class="empty-num">06</span><span data-i18n-html="empty.step.6">Pulsa <b>uno o varios usuarios</b> para mostrar los <b>artistas</b>, <b>álbumes</b> o <b>canciones</b> que comparten todos.</span></div>
+          <div class="empty-step"><span class="empty-num">07</span><span data-i18n-html="empty.step.7">Pulsa en cada elemento del grid para obtener información y poder escuchar algo del mismo.</span></div>
         </div>
-        <div id="empty-hint">Los datos se guardan en tu navegador (IndexedDB). Pero se llena rápidamente con varios usuarios, recuerda exportar / importar sesiones como JSON.</div>
+        <div id="empty-hint" data-i18n="empty.hint">Los datos se guardan en tu navegador (IndexedDB). Pero se llena rápidamente con varios usuarios, recuerda exportar / importar sesiones como JSON.</div>
       </div>
 
       <!-- Discover view (sin ctrl bar — ahora está fuera) -->

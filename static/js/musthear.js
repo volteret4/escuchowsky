@@ -87,6 +87,18 @@ const TRANSLATIONS = {
     'msg.sync.result':        '✓ {u}: +{nw} nuevos (total {tot})',
     'msg.added':              '✓ {u} añadido',
     'msg.error.loading':      'Error cargando',
+    'about.intro':            'Cruza tu historial de <b>Last.fm</b> con listas de álbumes imprescindibles agrupadas por fuente (Scaruffi, AOTY, Pitchfork, etc.).',
+    'about.h3.start':         'Primeros pasos',
+    'about.start.1':          'Introduce tu usuario de Last.fm y pulsa <b>Last.fm</b> para descargar tus scrobbles.',
+    'about.start.2':          'Puedes importar un JSON exportado desde <em>tumtumpa</em> o <em>mustlisten</em>.',
+    'about.start.3':          'Selecciona una <b>colección</b> en el panel izquierdo para ver qué álbumes has escuchado y cuáles te faltan.',
+    'about.h3.filters':       'Filtros y ordenación',
+    'about.filters.1':        'Filtra por <b>género</b> (si el álbum aparece en algún chart) o por <b>década</b>.',
+    'about.filters.2':        'Ordena por posición, año o artista.',
+    'about.h3.sessions':      'Sesiones',
+    'about.sessions.1':       'Los scrobbles se guardan en <b>IndexedDB</b>: la próxima vez no hace falta re-descargar.',
+    'about.sessions.2':       'Los JSON son compatibles con tumtumpa y mustlisten.',
+    'about.h3.services':      'Servicios',
   },
   en: {
     'btn.user':               'USER',
@@ -151,6 +163,18 @@ const TRANSLATIONS = {
     'msg.sync.result':        '✓ {u}: +{nw} new (total {tot})',
     'msg.added':              '✓ {u} added',
     'msg.error.loading':      'Error loading',
+    'about.intro':            'Cross your <b>Last.fm</b> history with curated album lists grouped by source (Scaruffi, AOTY, Pitchfork, etc.).',
+    'about.h3.start':         'Getting started',
+    'about.start.1':          'Enter your Last.fm username and click <b>Last.fm</b> to download your scrobbles.',
+    'about.start.2':          'You can import a JSON exported from <em>tumtumpa</em> or <em>mustlisten</em>.',
+    'about.start.3':          'Select a <b>collection</b> in the left panel to see which albums you\'ve heard and which are missing.',
+    'about.h3.filters':       'Filters and sorting',
+    'about.filters.1':        'Filter by <b>genre</b> (if the album appears in any chart) or by <b>decade</b>.',
+    'about.filters.2':        'Sort by rank, year or artist.',
+    'about.h3.sessions':      'Sessions',
+    'about.sessions.1':       'Scrobbles are stored in <b>IndexedDB</b>: no need to re-download next time.',
+    'about.sessions.2':       'JSON files are compatible with tumtumpa and mustlisten.',
+    'about.h3.services':      'Services',
   }
 };
 
@@ -165,6 +189,7 @@ function applyTranslations() {
   const lang = getLang();
   document.documentElement.lang = lang;
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
   document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
   document.querySelectorAll('input[name="ui-lang"]').forEach(r => { r.checked = r.value === lang; });
 }

@@ -78,6 +78,15 @@ const TRANSLATIONS = {
     'msg.found.albums.all':   '✓ {n} álbumes encontrados',
     'msg.user.loading':       'Página {p} / {t} — {c} álbumes',
     'msg.secondary.added':    '✓ {u}: {n} álbumes',
+    'empty.tagline':          'Alégrate el día o mejora el de alguién con una joya musical.',
+    'empty.step.1':           'Pulsa <b>👤</b> arriba a la derecha y busca tu usuario de <b>Last.fm</b> o <b>Listenbrainz</b>.',
+    'empty.step.2':           'Añade <b>usuarios secundarios</b>. Es recomendable descargar el json para futuras sesiones.',
+    'empty.step.3':           '<b>Escuchar:</b> ver que han escuchado los demás que tu aun no.',
+    'empty.step.4':           '<b>Comparte:</b> permite encontrar alguna de tus joyas para recomendar al resto.',
+    'empty.step.5':           '<b>Disfruta:</b> muestra placeres compartidos, permitiendo afinar recomendaciones.',
+    'empty.step.6':           'Pulsa <b>uno o varios usuarios</b> para mostrar los <b>artistas</b>, <b>álbumes</b> o <b>canciones</b> que comparten todos.',
+    'empty.step.7':           'Pulsa en cada elemento del grid para obtener información y poder escuchar algo del mismo.',
+    'empty.hint':             'Los datos se guardan en tu navegador (IndexedDB). Pero se llena rápidamente con varios usuarios, recuerda exportar / importar sesiones como JSON.',
   },
   en: {
     'um.search.title':        'Search user',
@@ -111,6 +120,15 @@ const TRANSLATIONS = {
     'msg.found.albums.all':   '✓ {n} albums found',
     'msg.user.loading':       'Page {p} / {t} — {c} albums',
     'msg.secondary.added':    '✓ {u}: {n} albums',
+    'empty.tagline':          'Brighten your day or someone else\'s with a musical gem.',
+    'empty.step.1':           'Tap <b>👤</b> top right and search your <b>Last.fm</b> or <b>ListenBrainz</b> username.',
+    'empty.step.2':           'Add <b>secondary users</b>. Downloading the JSON for future sessions is recommended.',
+    'empty.step.3':           '<b>Listen:</b> see what others have heard that you haven\'t yet.',
+    'empty.step.4':           '<b>Share:</b> find your hidden gems to recommend to others.',
+    'empty.step.5':           '<b>Enjoy:</b> shows shared favourites, helping refine recommendations.',
+    'empty.step.6':           'Select <b>one or more users</b> to show the <b>artists</b>, <b>albums</b> or <b>songs</b> they all share.',
+    'empty.step.7':           'Click any grid item to get info and listen to something related.',
+    'empty.hint':             'Data is stored in your browser (IndexedDB). It fills up fast with multiple users — remember to export / import JSON sessions.',
   }
 };
 
@@ -125,6 +143,7 @@ function applyTranslations() {
   const lang = getLang();
   document.documentElement.lang = lang;
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
   document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
   document.querySelectorAll('input[name="ui-lang"]').forEach(r => { r.checked = r.value === lang; });
 }

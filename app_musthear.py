@@ -989,28 +989,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div id="about-modal">
     <button class="about-close">✕</button>
     <h2>musthear</h2>
-    <p>Cruza tu historial de <b>Last.fm</b> con listas de álbumes imprescindibles agrupadas por fuente (Scaruffi, AOTY, Pitchfork, etc.).</p>
+    <p data-i18n-html="about.intro">Cruza tu historial de <b>Last.fm</b> con listas de álbumes imprescindibles agrupadas por fuente (Scaruffi, AOTY, Pitchfork, etc.).</p>
 
-    <h3>Primeros pasos</h3>
+    <h3 data-i18n="about.h3.start">Primeros pasos</h3>
     <ul>
-      <li>Introduce tu usuario de Last.fm y pulsa <b>Last.fm</b> para descargar tus scrobbles.</li>
-      <li>Puedes importar un JSON exportado desde <em>tumtumpa</em> o <em>mustlisten</em>.</li>
-      <li>Selecciona una <b>colección</b> en el panel izquierdo para ver qué álbumes has escuchado y cuáles te faltan.</li>
+      <li data-i18n-html="about.start.1">Introduce tu usuario de Last.fm y pulsa <b>Last.fm</b> para descargar tus scrobbles.</li>
+      <li data-i18n-html="about.start.2">Puedes importar un JSON exportado desde <em>tumtumpa</em> o <em>mustlisten</em>.</li>
+      <li data-i18n-html="about.start.3">Selecciona una <b>colección</b> en el panel izquierdo para ver qué álbumes has escuchado y cuáles te faltan.</li>
     </ul>
 
-    <h3>Filtros y ordenación</h3>
+    <h3 data-i18n="about.h3.filters">Filtros y ordenación</h3>
     <ul>
-      <li>Filtra por <b>género</b> (si el álbum aparece en algún chart) o por <b>década</b>.</li>
-      <li>Ordena por posición, año o artista.</li>
+      <li data-i18n-html="about.filters.1">Filtra por <b>género</b> (si el álbum aparece en algún chart) o por <b>década</b>.</li>
+      <li data-i18n-html="about.filters.2">Ordena por posición, año o artista.</li>
     </ul>
 
-    <h3>Sesiones</h3>
+    <h3 data-i18n="about.h3.sessions">Sesiones</h3>
     <ul>
-      <li>Los scrobbles se guardan en <b>IndexedDB</b>: la próxima vez no hace falta re-descargar.</li>
-      <li>Los JSON son compatibles con tumtumpa y mustlisten.</li>
+      <li data-i18n-html="about.sessions.1">Los scrobbles se guardan en <b>IndexedDB</b>: la próxima vez no hace falta re-descargar.</li>
+      <li data-i18n-html="about.sessions.2">Los JSON son compatibles con tumtumpa y mustlisten.</li>
     </ul>
 
-    <h3>Servicios</h3>
+    <h3 data-i18n="about.h3.services">Servicios</h3>
     <div class="about-services">
       <a class="about-svc lfm" href="https://www.last.fm" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
