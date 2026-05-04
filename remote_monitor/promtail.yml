@@ -18,6 +18,10 @@ scrape_configs:
           source: aws
           __path__: /var/log/remote/**/*.log
     pipeline_stages:
+      # Descarta el mv crowdsec.prom.tmp → crowdsec.prom del script de métricas
+      - drop:
+          expression: 'crowdsec_textfiles/crowdsec\.prom'
+
       # Extrae hostname del path: /var/log/remote/<hostname>/fecha.log
       - match:
           selector: '{job="rsyslog"}'

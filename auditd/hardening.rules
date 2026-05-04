@@ -55,7 +55,9 @@
 -a always,exit -F arch=b32 -S execve -F auid>=1000 -F auid!=-1 -k exec_user
 
 # ── Conexiones de red salientes (detección de shells reversas) ───────────────
--a always,exit -F arch=b64 -S connect -F auid>=1000 -k net_connect_user
+# Excluir daemons de seguridad conocidos (auid=-1 = sin sesión de login)
+-a never,exit -F arch=b64 -S connect -F exe=/usr/bin/crowdsec
+-a always,exit -F arch=b64 -S connect -F auid>=1000 -F auid!=-1 -k net_connect_user
 -a always,exit -F arch=b64 -S connect -F auid=0     -k net_connect_root
 
 # ── Docker — socket y daemon ─────────────────────────────────────────────────
