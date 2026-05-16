@@ -551,7 +551,7 @@ groups:
               conditions:
                 - evaluator:
                     params:
-                      - 85
+                      - 70
                     type: gt
                   operator:
                     type: and

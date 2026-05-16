@@ -1,0 +1,22 @@
+# /etc/logrotate.d/docker-apps
+/home/docker_webs/contenedores/nginx/logs/nginx/*.log {
+    daily
+    rotate 3
+    compress
+    delaycompress
+    missingok
+    notifempty
+    sharedscripts
+    postrotate
+        docker exec nginx nginx -s reopen 2>/dev/null || true
+    endscript
+}
+
+/home/docker_webs/contenedores/nginx/logs/*/*.log {
+    daily
+    rotate 3
+    compress
+    delaycompress
+    missingok
+    notifempty
+}
