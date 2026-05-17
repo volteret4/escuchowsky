@@ -16,7 +16,6 @@ import base64
 import sqlite3
 import argparse
 import subprocess
-import threading
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -38,49 +37,7 @@ DB_PATH     = os.environ.get("DB_PATH") or None
 LFM_API_KEY = os.environ.get("LASTFM_API_KEY") or None
 CAA         = "https://coverartarchive.org/release-group"
 
-_LFM_NO_IMG      = "2a96cbd8b46e442fc41c2b86b821562f"
-_UMAMI_URL       = "https://cloud.umami.is/api/send"
-_UMAMI_WEBSITE   = "262419b6-9389-4f91-898c-3943726c6dc8"
-_TRACK_SKIP_PFXS = ("/api/", "/static/", "/img/", "/favicon")
-
-# ── Umami server-side tracking ────────────────────────────────────────────────
-
-def _umami_send(url_path, hostname, ua, referrer, ip):
-    payload = json.dumps({
-        "type": "event",
-        "payload": {
-            "hostname": hostname,
-            "language": "",
-            "referrer": referrer or "",
-            "screen":   "",
-            "title":    "",
-            "url":      url_path,
-            "website":  _UMAMI_WEBSITE,
-        }
-    }).encode()
-    req = urllib.request.Request(
-        _UMAMI_URL, data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": ua, "X-Forwarded-For": ip},
-        method="POST",
-    )
-    try:
-        urllib.request.urlopen(req, timeout=3)
-    except Exception:
-        pass
-
-@app.after_request
-def _track(response):
-    if (response.status_code == 200
-            and request.method == "GET"
-            and not any(request.path.startswith(p) for p in _TRACK_SKIP_PFXS)):
-        xff = request.headers.get("X-Forwarded-For", request.remote_addr or "")
-        ip  = xff.split(",")[0].strip()
-        threading.Thread(
-            target=_umami_send,
-            args=(request.path, request.host, request.user_agent.string, request.referrer, ip),
-            daemon=True,
-        ).start()
-    return response
+_LFM_NO_IMG = "2a96cbd8b46e442fc41c2b86b821562f"
 
 
 # ── Genre index (para tags de álbumes) ────────
@@ -896,6 +853,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>musthear</title>
 <link rel="icon" type="image/png" href="/img/boar.png" />
+<script defer src="https://cloud.umami.is/script.js" data-website-id="262419b6-9389-4f91-898c-3943726c6dc8"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
