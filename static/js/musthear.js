@@ -869,6 +869,28 @@ function removeExtraUser(idx) {
 function getSource()      { return document.getElementById('um-src-lb')?.checked      ? 'lb' : 'lfm'; }
 function getExtraSource() { return document.getElementById('um-extra-src-lb')?.checked ? 'lb' : 'lfm'; }
 
+function _syncSourceGroup(inputId, labels) {
+  const radios = labels.map(l => document.getElementById(l.radioId));
+  const inp    = document.getElementById(inputId);
+  function update() {
+    radios.forEach((r, i) => {
+      if (!r) return;
+      r.closest('label')?.classList.toggle('checked', r.checked);
+      if (inp && r.checked) inp.placeholder = labels[i].placeholder;
+    });
+  }
+  radios.forEach(r => r?.addEventListener('change', update));
+  update();
+}
+_syncSourceGroup('inp-user', [
+  { radioId: 'um-src-lfm',       placeholder: 'Usuario Last.fm'       },
+  { radioId: 'um-src-lb',        placeholder: 'Usuario ListenBrainz'  },
+]);
+_syncSourceGroup('inp-extra-user', [
+  { radioId: 'um-extra-src-lfm', placeholder: 'usuario last.fm'       },
+  { radioId: 'um-extra-src-lb',  placeholder: 'usuario listenbrainz'  },
+]);
+
 // ── ListenBrainz client ───────────────────────────────────────────────────
 let _lbLastCall = 0;
 async function lbGet(path, _retries = 4) {

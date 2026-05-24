@@ -256,6 +256,26 @@ input::placeholder {
 .um-row input {
     flex: 1;
 }
+.source-radios {
+    display: flex;
+    gap: 0.7rem;
+    margin-bottom: 0.45rem;
+}
+.source-radios label {
+    display: flex;
+    align-items: center;
+    gap: 0.28rem;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: var(--ink3);
+    cursor: pointer;
+    user-select: none;
+}
+.source-radios label.checked { color: var(--ink); }
+.source-radios input[type="radio"] {
+    accent-color: var(--accent);
+    cursor: pointer;
+}
 .um-progress {
     font-family: var(--mono);
     font-size: 0.72rem;
