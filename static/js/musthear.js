@@ -261,7 +261,7 @@ document.addEventListener('keydown', e => {
 // ── Extra users ────────────────────────────────────────────────────────────
 function saveExtraUsersLS() {
   localStorage.setItem('cl_extra_users', JSON.stringify(
-    extraUsers.map(u => ({ user: u.user, pairs: u.pairs, color: u.color, count: u.count, fetched_at: u.fetched_at, image: u.image || '' }))
+    extraUsers.map(u => ({ user: u.user, pairs: u.pairs, color: u.color, count: u.count, fetched_at: u.fetched_at, image: u.image || '', source: u.source || 'lfm' }))
   ));
 }
 
@@ -664,29 +664,38 @@ async function addExtraUser() {
   const inp  = document.getElementById('inp-extra-user');
   const prog = document.getElementById('um-extra-progress');
   const user = inp.value.trim();
+  const src  = getExtraSource();
   if (!user) return;
   if (extraUsers.some(u => u.user.toLowerCase() === user.toLowerCase())) { inp.value = ''; return; }
   const btn = document.getElementById('btn-extra-lfm');
   btn.disabled = true; inp.disabled = true;
   prog.textContent = t('msg.connecting');
   try {
-    const [userInfo, lfmResult] = await Promise.all([
-      fetch(`${_B}/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
-      fetchScrobblesSSE(user, msg => {
-        prog.textContent = t('msg.page', {p: msg.page, t: msg.total_pages, c: msg.count.toLocaleString()});
-      }),
-    ]);
-    const heard      = lfmResult.heard;
+    let heard, realUser, image, lst, lsa, lsk;
+    if (src === 'lb') {
+      const [userInfo, lbResult] = await Promise.all([
+        checkLBUser(user),
+        _lbFetchAllClient(user, msg => {
+          prog.textContent = t('msg.page', {p: msg.page, t: msg.total_pages, c: msg.count.toLocaleString()});
+        }),
+      ]);
+      heard = lbResult.heard; realUser = userInfo.ok ? userInfo.username : user; image = '';
+      lst = lbResult.last_scrobble_ts || 0; lsa = lbResult.last_scrobble_artist || ''; lsk = lbResult.last_scrobble_track || '';
+    } else {
+      const [userInfo, lfmResult] = await Promise.all([
+        fetch(`${_B}/api/check_user?user=${encodeURIComponent(user)}`).then(r=>r.json()).catch(()=>null),
+        fetchScrobblesSSE(user, msg => {
+          prog.textContent = t('msg.page', {p: msg.page, t: msg.total_pages, c: msg.count.toLocaleString()});
+        }),
+      ]);
+      heard = lfmResult.heard; realUser = userInfo?.ok ? userInfo.username : user; image = userInfo?.ok ? (userInfo.image || '') : '';
+      lst = lfmResult.last_scrobble_ts || 0; lsa = lfmResult.last_scrobble_artist || ''; lsk = lfmResult.last_scrobble_track || '';
+    }
     const color      = USER_COLORS[extraUsers.length % USER_COLORS.length];
-    const image      = userInfo?.ok ? (userInfo.image || '') : '';
-    const realUser   = userInfo?.ok ? userInfo.username : user;
     const fetched_at = Math.floor(Date.now()/1000);
-    const lst = lfmResult.last_scrobble_ts || 0;
-    const lsa = lfmResult.last_scrobble_artist || '';
-    const lsk = lfmResult.last_scrobble_track  || '';
-    extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, last_scrobble_ts: lst, last_scrobble_artist: lsa, last_scrobble_track: lsk });
+    extraUsers.push({ user: realUser, pairs: heard, color, count: heard.length, fetched_at, image, source: src, last_scrobble_ts: lst, last_scrobble_artist: lsa, last_scrobble_track: lsk });
     saveExtraUsersLS();
-    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, last_scrobble_ts: lst, last_scrobble_artist: lsa, last_scrobble_track: lsk });
+    await idbSave({ user: realUser, count: heard.length, fetched_at, heard, source: src, last_scrobble_ts: lst, last_scrobble_artist: lsa, last_scrobble_track: lsk });
     await renderIdbExtraList();
     buildExtraUsersList();
     inp.value = '';
@@ -703,13 +712,19 @@ async function syncExtraUser(idx) {
   const u = extraUsers[idx];
   if (!u) return;
   const prog = document.getElementById('um-extra-progress');
+  const src  = u.source || 'lfm';
   prog.textContent = t('msg.syncing', {u: u.user});
   try {
-    const url = `${_B}/api/scrobbles/since?user=${encodeURIComponent(u.user)}&since=${u.fetched_at || 0}`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`Error ${r.status}`);
-    const data = await r.json();
-    if (data.error) throw new Error(data.error);
+    let data;
+    if (src === 'lb') {
+      data = await _lbSinceClient(u.user, u.fetched_at || 0);
+    } else {
+      const url = `${_B}/api/scrobbles/since?user=${encodeURIComponent(u.user)}&since=${u.fetched_at || 0}`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`Error ${r.status}`);
+      data = await r.json();
+      if (data.error) throw new Error(data.error);
+    }
     const existing = new Set(u.pairs.map(p => p[0] + '|' + p[1]));
     const added = (data.new_pairs || []).filter(p => !existing.has(p[0] + '|' + p[1]));
     extraUsers[idx].pairs      = [...u.pairs, ...added];
@@ -721,7 +736,7 @@ async function syncExtraUser(idx) {
       extraUsers[idx].last_scrobble_track  = data.last_scrobble_track  || '';
     }
     saveExtraUsersLS();
-    await idbSave({ user: extraUsers[idx].user, count: extraUsers[idx].count, fetched_at: extraUsers[idx].fetched_at, heard: extraUsers[idx].pairs, last_scrobble_ts: extraUsers[idx].last_scrobble_ts || 0, last_scrobble_artist: extraUsers[idx].last_scrobble_artist || '', last_scrobble_track: extraUsers[idx].last_scrobble_track || '' });
+    await idbSave({ user: extraUsers[idx].user, count: extraUsers[idx].count, fetched_at: extraUsers[idx].fetched_at, heard: extraUsers[idx].pairs, source: src, last_scrobble_ts: extraUsers[idx].last_scrobble_ts || 0, last_scrobble_artist: extraUsers[idx].last_scrobble_artist || '', last_scrobble_track: extraUsers[idx].last_scrobble_track || '' });
     await renderIdbExtraList();
     buildExtraUsersList();
     prog.textContent = t('msg.sync.result', {u: u.user, nw: added.length, tot: extraUsers[idx].count.toLocaleString()});
@@ -850,7 +865,112 @@ function removeExtraUser(idx) {
   if (allAlbums.length) applyCollection();
 }
 
-// ── SSE helper ─────────────────────────────────────────────────────────────
+// ── Source selector ───────────────────────────────────────────────────────
+function getSource()      { return document.getElementById('um-src-lb')?.checked      ? 'lb' : 'lfm'; }
+function getExtraSource() { return document.getElementById('um-extra-src-lb')?.checked ? 'lb' : 'lfm'; }
+
+// ── ListenBrainz client ───────────────────────────────────────────────────
+let _lbLastCall = 0;
+async function lbGet(path, _retries = 4) {
+  const now = Date.now();
+  const wait = 1000 - (now - _lbLastCall);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  _lbLastCall = Date.now();
+  const r = await fetch('https://api.listenbrainz.org' + path);
+  if (!r.ok) {
+    if (_retries > 0) {
+      await new Promise(r => setTimeout(r, (r.status === 429 ? 10000 : 4000) + Math.random() * 2000));
+      return lbGet(path, _retries - 1);
+    }
+    throw new Error(`LB HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+function _normLB(s) { return (s || '').toLowerCase().replace(/[^\w\d]/g, ''); }
+
+async function _lbFetchAllClient(user, onProgress) {
+  const heard_counts = {};
+  let last_scrobble_ts = 0, last_scrobble_artist = '', last_scrobble_track = '';
+  let maxTs = null, page = 0, totalPages = null;
+  try {
+    const cnt = await lbGet(`/1/user/${encodeURIComponent(user)}/listen-count`);
+    const total = cnt.payload?.count || 0;
+    totalPages = Math.max(1, Math.ceil(total / 100));
+  } catch(e) {}
+  while (true) {
+    let path = `/1/user/${encodeURIComponent(user)}/listens?count=100`;
+    if (maxTs !== null) path += `&max_ts=${maxTs}`;
+    let payload;
+    try { payload = (await lbGet(path)).payload || {}; }
+    catch(e) { if (page === 0) throw e; break; }
+    const listens = payload.listens || [];
+    if (!listens.length) break;
+    page++;
+    for (const l of listens) {
+      const tm = l.track_metadata || {};
+      const artist = tm.artist_name || '', album = tm.release_name || '';
+      const ts = l.listened_at || 0;
+      if (!last_scrobble_ts && ts) { last_scrobble_ts = ts; last_scrobble_artist = artist; last_scrobble_track = tm.track_name || ''; }
+      if (artist && album) {
+        const key = `${_normLB(artist)}|||${_normLB(album)}`;
+        if (!heard_counts[key]) heard_counts[key] = [artist, album];
+        }
+    }
+    const tsVals = listens.map(l => l.listened_at).filter(t => t > 0);
+    if (!tsVals.length) break;
+    maxTs = Math.min(...tsVals) - 1;
+    onProgress({ page, total_pages: totalPages || page, count: Object.keys(heard_counts).length });
+  }
+  return {
+    heard: Object.values(heard_counts),
+    last_scrobble_ts, last_scrobble_artist, last_scrobble_track,
+  };
+}
+
+async function _lbSinceClient(user, since) {
+  const new_counts = {};
+  let last_scrobble_ts = 0, last_scrobble_artist = '', last_scrobble_track = '';
+  let maxTs = null;
+  while (true) {
+    let path = `/1/user/${encodeURIComponent(user)}/listens?count=100`;
+    if (maxTs !== null) path += `&max_ts=${maxTs}`;
+    if (since) path += `&min_ts=${since}`;
+    let payload;
+    try { payload = (await lbGet(path)).payload || {}; }
+    catch(e) { break; }
+    const listens = payload.listens || [];
+    if (!listens.length) break;
+    for (const l of listens) {
+      const tm = l.track_metadata || {};
+      const artist = tm.artist_name || '', album = tm.release_name || '';
+      const ts = l.listened_at || 0;
+      if (!last_scrobble_ts && ts) { last_scrobble_ts = ts; last_scrobble_artist = artist; last_scrobble_track = tm.track_name || ''; }
+      if (artist && album) {
+        const k = `${_normLB(artist)}|||${_normLB(album)}`;
+        if (!new_counts[k]) new_counts[k] = [artist, album];
+      }
+    }
+    const tsVals = listens.map(l => l.listened_at).filter(t => t > since);
+    if (!tsVals.length) break;
+    maxTs = Math.min(...tsVals) - 1;
+    if (maxTs <= since) break;
+  }
+  return {
+    new_pairs: Object.values(new_counts),
+    fetched_at: Math.floor(Date.now() / 1000),
+    last_scrobble_ts, last_scrobble_artist, last_scrobble_track,
+  };
+}
+
+async function checkLBUser(user) {
+  try {
+    const data = await lbGet(`/1/user/${encodeURIComponent(user)}/listens?count=1`);
+    return { ok: true, username: data.payload?.user_id || user, image: '' };
+  } catch(e) { return { ok: false, error: e.message }; }
+}
+
+// ── SSE helper (LFM) ──────────────────────────────────────────────────────
 async function fetchScrobblesSSE(user, onProgress) {
   const response = await fetch(`${_B}/api/scrobbles?user=${encodeURIComponent(user)}`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1042,16 +1162,35 @@ document.getElementById('btn-sync-session').addEventListener('click', async () =
   btn.disabled = true; btn.textContent = '↻ ...';
   prog.textContent = t('msg.sync.lfm');
   try {
-    const url = `${_B}/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${heardCache.count || 0}`;
-    const data = await fetch(url).then(r => r.json());
-    if (data.error) { prog.textContent = 'Error: ' + data.error; return; }
-    if (data.new_count === 0) { prog.textContent = t('msg.up.to.date'); btn.textContent = '↻ Sync'; return; }
-    if (data.full_replace) {
-      const prev = heardCache.count;
-      heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
+    if ((heardCache.source || 'lfm') === 'lb') {
+      const data = await _lbSinceClient(heardCache.user, heardCache.fetched_at || 0);
+      const existing = new Set(heardCache.pairs.map(p => p[0] + '|' + p[1]));
+      const added = (data.new_pairs || []).filter(p => !existing.has(p[0] + '|' + p[1]));
+      if (!added.length) { prog.textContent = t('msg.up.to.date'); return; }
+      heardCache.pairs = [...heardCache.pairs, ...added];
+      heardCache.count = heardCache.pairs.length;
+      heardCache.fetched_at = data.fetched_at;
+      if (data.last_scrobble_ts && data.last_scrobble_ts > (heardCache.last_scrobble_ts || 0)) {
+        heardCache.last_scrobble_ts = data.last_scrobble_ts;
+        heardCache.last_scrobble_artist = data.last_scrobble_artist || '';
+        heardCache.last_scrobble_track  = data.last_scrobble_track  || '';
+      }
       showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+      idbSave({ user: heardCache.user, count: heardCache.count, source: 'lb', fetched_at: heardCache.fetched_at, heard: heardCache.pairs, last_scrobble_ts: heardCache.last_scrobble_ts, last_scrobble_artist: heardCache.last_scrobble_artist, last_scrobble_track: heardCache.last_scrobble_track }).catch(() => {});
       if (activeSlug && collCache[activeSlug]) applyCollection();
-      prog.textContent = heardCache.count - prev > 0 ? t('msg.new.albums', {n: heardCache.count - prev}) : t('msg.up.to.date');
+      prog.textContent = t('msg.new.albums', {n: added.length});
+    } else {
+      const url = `${_B}/api/scrobbles/update?user=${encodeURIComponent(heardCache.user)}&known_count=${heardCache.count || 0}`;
+      const data = await fetch(url).then(r => r.json());
+      if (data.error) { prog.textContent = 'Error: ' + data.error; return; }
+      if (data.new_count === 0) { prog.textContent = t('msg.up.to.date'); return; }
+      if (data.full_replace) {
+        const prev = heardCache.count;
+        heardCache.pairs = data.heard; heardCache.count = data.heard.length; heardCache.fetched_at = data.fetched_at;
+        showUserBadge(heardCache.user, '', heardCache.count, heardCache.last_scrobble_ts, heardCache.last_scrobble_artist, heardCache.last_scrobble_track);
+        if (activeSlug && collCache[activeSlug]) applyCollection();
+        prog.textContent = heardCache.count - prev > 0 ? t('msg.new.albums', {n: heardCache.count - prev}) : t('msg.up.to.date');
+      }
     }
   } catch(e) {
     prog.textContent = 'Error: ' + e.message;
@@ -1065,6 +1204,7 @@ function loadHeardCache(data) {
     user:                 data.user,
     pairs:                data.heard,
     count:                data.heard.length,
+    source:               data.source               || 'lfm',
     fetched_at:           data.fetched_at          || 0,
     last_scrobble_ts:     data.last_scrobble_ts    || 0,
     last_scrobble_artist: data.last_scrobble_artist || '',
@@ -1076,6 +1216,7 @@ function loadHeardCache(data) {
   idbSave({
     user:                 heardCache.user,
     count:                heardCache.count,
+    source:               heardCache.source,
     fetched_at:           heardCache.fetched_at,
     heard:                heardCache.pairs,
     last_scrobble_ts:     heardCache.last_scrobble_ts,
@@ -1105,6 +1246,7 @@ inpUser.addEventListener('keydown', e => { if (e.key === 'Enter') doLoadUser(); 
 
 async function doLoadUser() {
   const user = inpUser.value.trim();
+  const src  = getSource();
   if (!user) return;
   hideError();
   const prog = document.getElementById('um-progress');
@@ -1112,11 +1254,19 @@ async function doLoadUser() {
   try {
     prog.textContent = t('msg.connecting');
     hideResults();
-    const result = await fetchScrobblesSSE(user, msg => {
-      prog.textContent = t('msg.page.unique', {p: msg.page, t: msg.total_pages, c: msg.count.toLocaleString()});
-    });
+    let result;
+    if (src === 'lb') {
+      result = await _lbFetchAllClient(user, msg => {
+        prog.textContent = t('msg.page.unique', {p: msg.page, t: msg.total_pages, c: msg.count.toLocaleString()});
+      });
+    } else {
+      result = await fetchScrobblesSSE(user, msg => {
+        prog.textContent = t('msg.page.unique', {p: msg.page, t: msg.total_pages, c: msg.count.toLocaleString()});
+      });
+    }
     loadHeardCache({
       user, heard: result.heard,
+      source:               src,
       fetched_at:           Math.floor(Date.now()/1000),
       last_scrobble_ts:     result.last_scrobble_ts    || 0,
       last_scrobble_artist: result.last_scrobble_artist || '',

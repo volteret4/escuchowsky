@@ -105,8 +105,6 @@ services:
     command:
       - "--collector.textfile.directory=/textfiles"
       - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|run)($$|/)"
-    ports:
-      - "9100:9100"
     networks:
       - musica
 

@@ -894,7 +894,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
       <div class="um-row">
         <input id="inp-user" type="text" placeholder="Usuario Last.fm" data-i18n-ph="um.primary.placeholder" autocomplete="off" spellcheck="false">
-        <button class="btn" id="btn-go" style="padding:0.4rem 1rem;font-size:0.72rem;">Last.fm</button>
+        <button class="btn" id="btn-go" style="padding:0.4rem 1rem;font-size:0.72rem;" data-i18n="um.search.btn">Buscar</button>
+      </div>
+      <div class="source-radios">
+        <label><input type="radio" name="um-source" id="um-src-lfm" value="lfm" checked> Last.fm</label>
+        <label><input type="radio" name="um-source" id="um-src-lb"  value="lb"> ListenBrainz</label>
       </div>
       <div class="um-progress" id="um-progress"></div>
       <div class="um-actions">
@@ -915,8 +919,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div id="extra-users-list"></div>
         <div class="um-row" style="margin-top:0.5rem">
           <input id="inp-extra-user" type="text" placeholder="usuario last.fm" data-i18n-ph="um.secondary.placeholder" autocomplete="off" spellcheck="false">
-          <button class="btn-sm" id="btn-extra-lfm">Last.fm</button>
+          <button class="btn-sm" id="btn-extra-lfm" data-i18n="um.search.btn">Añadir</button>
           <button class="btn-sm" id="btn-extra-json">↑ JSON</button>
+        </div>
+        <div class="source-radios" style="margin-top:0.3rem">
+          <label><input type="radio" name="um-extra-source" id="um-extra-src-lfm" value="lfm" checked> Last.fm</label>
+          <label><input type="radio" name="um-extra-source" id="um-extra-src-lb"  value="lb"> ListenBrainz</label>
         </div>
         <div class="um-progress" id="um-extra-progress"></div>
         <div class="um-sep" style="display:flex;align-items:center;justify-content:space-between">

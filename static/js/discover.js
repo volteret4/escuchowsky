@@ -3282,6 +3282,7 @@ async function syncSecondaryIdb(username) {
       fetched_at: newFetched,
       heard: merged,
       songs: mergedSongs,
+      source: euSrc,
       last_scrobble_ts:
         data.last_scrobble_ts || existing?.last_scrobble_ts || 0,
       last_scrobble_artist:
@@ -3290,6 +3291,8 @@ async function syncSecondaryIdb(username) {
         data.last_scrobble_track || existing?.last_scrobble_track || "",
       complete: true,
       total_pages: existing?.total_pages || 0,
+      heard_artists: existing?.heard_artists || [],
+      tracks_loaded: existing?.tracks_loaded || false,
     });
     // update in-memory if in extraUsers
     const eu = extraUsers.find(
