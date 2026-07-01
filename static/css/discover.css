@@ -27,6 +27,47 @@
     --sans: "DM Sans", sans-serif;
 }
 
+/* ── Puente de tema unificado (tumtumpa) ──────────────────────────────
+ * 1) Definimos las 11 variables canónicas del contrato compartido con
+ *    los valores hardcodeados actuales de esta app (tema "og"). Se
+ *    hardcodean (no via var()) para no crear referencias circulares
+ *    con las variables originales de abajo, que comparten nombre con
+ *    --bg/--border/--accent.
+ * 2) theme-palettes.css (cargado después) sobreescribe estas mismas
+ *    variables canónicas para [data-theme="nord"|"catppuccin"|...].
+ * 3) Un tercer bloque redefine las variables ORIGINALES del archivo
+ *    (las que usa el resto del CSS con var(--bg2), var(--ink), etc.)
+ *    para que lean de las canónicas, propagando el cambio de tema sin
+ *    tocar el resto de las reglas.
+ */
+:root,
+[data-theme="og"] {
+    --bg: #0a0a12;
+    --surface: #10101c;
+    --surface-2: #18182a;
+    --border: #252535;
+    --text: #e4e0f0;
+    --text-muted: #8a86a0;
+    --accent: #7c6fff;
+    --accent-2: #5c4fdf;
+    --success: #4caf7d;
+    --warning: #d8a13a;
+    --danger: #c0392b;
+}
+
+/* --bg, --border y --accent ya comparten nombre literal con el
+ * contrato canónico (arriba), así que theme-palettes.css las
+ * sobreescribe directamente sin necesidad de puente. Solo hace falta
+ * redirigir aquí los nombres que SÍ difieren. */
+:root {
+    --bg2: var(--surface);
+    --bg3: var(--surface-2);
+    --ink: var(--text);
+    --ink2: var(--text-muted);
+    --accent2: var(--accent-2);
+    --red: var(--danger);
+}
+
 html {
     font-size: 15px;
 }

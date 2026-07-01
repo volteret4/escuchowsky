@@ -266,6 +266,7 @@ def render_html(
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <link rel="stylesheet" href="/static/css/genre_mermaid.css">
+<link rel="stylesheet" href="/static/css/theme-palettes.css">
 </head>
 <body>
 <header>
@@ -323,6 +324,7 @@ def render_html(
 
 <script type="application/json" id="app-data">{combined_json}</script>
 <script src="/static/js/genre_mermaid.js"></script>
+<script src="/static/js/theme-picker.js"></script>
 </body>
 </html>
 """

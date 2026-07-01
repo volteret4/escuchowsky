@@ -3,6 +3,22 @@
     --accent:#c9a227; --muted:#555; --text:#e0e0e0; --header-h:52px;
     --panel-w:340px;
   }
+  /* ── Puente de tema unificado (tumtumpa) ──────────────────────────────
+   * --bg/--surface/--border/--text/--accent ya coinciden de nombre con
+   * el contrato canónico, así que theme-palettes.css las sobreescribe
+   * directamente. Solo --muted difiere del nombre canónico --text-muted,
+   * y faltan --surface-2/--accent-2/--success/--warning/--danger (no
+   * usadas en el resto de este archivo, pero se definen para que el
+   * picker de tema sea consistente con las demás apps).
+   */
+  :root, [data-theme="og"] {
+    --bg:#0a0a0a; --surface:#111; --surface-2:#181818; --border:#1e1e1e;
+    --text:#e0e0e0; --text-muted:#555; --accent:#c9a227; --accent-2:#8a8a8a;
+    --success:#6a9a4a; --warning:#c9a227; --danger:#c0392b;
+  }
+  :root {
+    --muted: var(--text-muted);
+  }
   *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
   body { background:var(--bg); color:var(--text); font-family:'DM Sans',sans-serif;
           min-height:100vh; overflow:hidden; }

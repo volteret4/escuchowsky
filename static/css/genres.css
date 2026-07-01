@@ -27,6 +27,36 @@
     --sans: "DM Sans", sans-serif;
 }
 
+/* ── Puente de tema unificado (tumtumpa) ──────────────────────────────
+ * Mismo patrón que discover.css: --bg/--border/--accent ya coinciden
+ * de nombre con el contrato canónico, así que no necesitan alias
+ * (theme-palettes.css las sobreescribe directamente). El resto de
+ * nombres se redirige explícitamente.
+ */
+:root,
+[data-theme="og"] {
+    --bg: #0d0d0d;
+    --surface: #141414;
+    --surface-2: #1c1c1c;
+    --border: #2a2a2a;
+    --text: #e8e2d8;
+    --text-muted: #9a9080;
+    --accent: #e8c14a;
+    --accent-2: #c8993a;
+    --success: #8a9a4a;
+    --warning: #c8993a;
+    --danger: #c0392b;
+}
+
+:root {
+    --bg2: var(--surface);
+    --bg3: var(--surface-2);
+    --ink: var(--text);
+    --ink2: var(--text-muted);
+    --accent2: var(--accent-2);
+    --red: var(--danger);
+}
+
 html {
     font-size: 15px;
 }
