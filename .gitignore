@@ -4,6 +4,7 @@
 **/.db*
 *.json*
 **/.json*
+!db/genres.json
 *.csv*
 **/.csv*
 **/__pycache__/
