@@ -2319,6 +2319,56 @@ input::placeholder {
     #grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
     }
+    #discover-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    }
+
+    /* ── Tap targets (~44px) for touch ──────────────────────────────── */
+    .btn-sm,
+    .btn,
+    .disc-tab,
+    .filter-pill {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .dp-close,
+    .about-close {
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    #btn-open-users {
+        width: 44px !important;
+        height: 44px !important;
+    }
+}
+@media (max-width: 480px) {
+    .page {
+        padding: 0 1rem 3rem;
+    }
+    .search-panel {
+        grid-template-columns: 1fr;
+    }
+    .main-inner {
+        padding-left: 0.9rem;
+        padding-right: 0.9rem;
+    }
+    #grid,
+    #discover-grid {
+        grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
+    }
+    .dp-header {
+        padding: 1.1rem;
+        padding-right: 2.5rem;
+    }
+    .dp-cover {
+        width: 76px;
+        height: 76px;
+    }
 }
 @media (max-width: 600px) {
     #user-modal-bg {

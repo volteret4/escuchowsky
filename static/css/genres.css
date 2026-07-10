@@ -1629,6 +1629,35 @@ input::placeholder {
     #grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
     }
+
+    /* ── Tap targets (~44px) for touch ──────────────────────────────── */
+    .filter-btn,
+    .btn-sm,
+    .btn,
+    #btn-usuario,
+    .pill,
+    #sort-select {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .sb-panel-hdr,
+    .sb-grp-hdr,
+    .sb-coll-item,
+    .tree-genre-hdr,
+    .tree-sub-item,
+    .filter-btn-user {
+        min-height: 44px;
+    }
+    .dp-close,
+    .about-close {
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
 }
 @media (min-width: 801px) {
     #sidebar-fab {
@@ -1636,5 +1665,40 @@ input::placeholder {
     }
     #sidebar-overlay {
         display: none !important;
+    }
+}
+
+/* ── Phone tightening (~480px) ───────────────────────────────────────── */
+@media (max-width: 480px) {
+    .page {
+        padding: 0 1rem 3rem;
+    }
+    header {
+        gap: 1rem;
+        padding: 2rem 0 1.5rem;
+    }
+    .logo {
+        font-size: 2rem;
+    }
+    .search-panel {
+        grid-template-columns: 1fr;
+    }
+    .main-inner {
+        padding: 1rem 0.9rem 2.5rem;
+    }
+    #stats-bar {
+        gap: 1rem;
+        padding: 0.75rem 0.9rem;
+    }
+    #grid {
+        grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
+    }
+    .dp-header {
+        padding: 1.1rem;
+        padding-right: 2.5rem;
+    }
+    .dp-cover {
+        width: 76px;
+        height: 76px;
     }
 }
