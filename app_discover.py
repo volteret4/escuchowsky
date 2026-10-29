@@ -968,6 +968,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/discover.css">
 <link rel="stylesheet" href="/static/css/theme-palettes.css">
+<script src="/static/js/owned-loader.js"></script>
 </head>
 <body>
 

@@ -1539,6 +1539,7 @@ function discoverCardHTML(a, i) {
         <div class="card-title">${escH(a.orig_t)}</div>
         <div class="card-artist">${escH(a.orig_a)}</div>
         ${a.orig_album ? `<div class="card-album-hint">${escH(a.orig_album)}</div>` : ""}
+        <div class="card-owned" data-owned-artist="${escH(a.orig_a)}"${a.orig_album ? ` data-owned-album="${escH(a.orig_album)}"` : ""}></div>
         <div class="rc-users">${userBadges}<span class="rc-count">${a.total} plays</span></div>
       </div>
     </div>`;
@@ -1561,6 +1562,7 @@ function discoverCardHTML(a, i) {
       <div class="card-info">
         <div class="card-title">${escH(a.orig_a)}</div>
         <div class="card-artist" style="opacity:0.6">${a.album_count} álbum${a.album_count !== 1 ? "es" : ""}</div>
+        <div class="card-owned" data-owned-artist="${escH(a.orig_a)}"></div>
         <div class="rc-users">${userBadges}<span class="rc-count">${a.total} plays</span></div>
       </div>
     </div>`;
@@ -1583,6 +1585,7 @@ function discoverCardHTML(a, i) {
       <div class="card-title">${escH(a.mb_title || a.orig_t)}</div>
       <div class="card-artist">${escH(a.mb_artist || a.orig_a)}</div>
       ${a.date ? `<div class="card-year">${escH(a.date.slice(0, 4))}</div>` : ""}
+      <div class="card-owned" data-owned-artist="${escH(a.mb_artist || a.orig_a)}" data-owned-album="${escH(a.mb_title || a.orig_t)}"></div>
       <div class="rc-users">${userBadges}<span class="rc-count">${a.total} plays</span></div>
     </div>
   </div>`;

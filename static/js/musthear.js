@@ -1491,6 +1491,7 @@ function cardHTML(a) {
       <div class="card-title">${escH(a.title)}</div>
       <div class="card-artist">${escH(a.artist)}</div>
       ${a.year ? `<div class="card-year">${a.year}</div>` : ''}
+      <div class="card-owned" data-owned-artist="${escH(a.artist)}" data-owned-album="${escH(a.title)}"></div>
     </div>
   </div>`;
 }

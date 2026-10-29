@@ -2530,3 +2530,7 @@ input::placeholder {
     line-height: 1.5;
     margin: 0.5rem 0;
 }
+
+/* Iconos de ya-lo-tengo (owned-badges.js) */
+.card-owned{margin-top:3px;line-height:0}
+.card-owned .ob-icons{margin-left:0}
